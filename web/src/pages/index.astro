@@ -1,0 +1,439 @@
+---
+import Layout from '../components/Layout.astro';
+import PageHeader from '../components/PageHeader.astro';
+---
+
+<Layout title="Artists" current="artists">
+  <PageHeader
+    eyebrow="Library"
+    title="Artists"
+    description="The artists in your collection, with their MusicBrainz discographies and the release saved for each group."
+  >
+    <button class="btn btn--secondary" id="refresh" type="button">
+      Refresh
+    </button>
+    <button class="btn btn--primary" id="add-open" type="button">
+      Add artist
+    </button>
+  </PageHeader>
+
+  <div class="toolbar">
+    <label class="search">
+      <input
+        id="filter"
+        name="q"
+        type="search"
+        placeholder="Filter artists by name…"
+        autocomplete="off"
+        aria-label="Filter artists by name"
+      />
+    </label>
+    <span class="toolbar__count" id="status">
+      Loading artists…
+    </span>
+  </div>
+
+  <div class="artist-grid" id="grid" aria-live="polite"></div>
+  <div id="empty" hidden></div>
+
+  <dialog id="add-dialog" aria-labelledby="add-title">
+    <form class="dialog__panel" id="add-form">
+      <div class="dialog__head">
+        <div>
+          <p class="eyebrow">New artist</p>
+          <h2 id="add-title">Add an artist</h2>
+        </div>
+        <button
+          class="icon-btn"
+          id="add-close"
+          type="button"
+          aria-label="Close"
+        >
+          ×
+        </button>
+      </div>
+
+      <p class="dialog__copy">
+        Search MusicBrainz by name, or paste an artist MBID/URL below. Coda
+        fetches the artist and queues the discography import.
+      </p>
+
+      <div class="dialog__search">
+        <label class="field">
+          <span>Search MusicBrainz</span>
+          <input
+            id="add-artist-search"
+            name="add-artist-search"
+            type="search"
+            placeholder="Artist name…"
+            autocomplete="off"
+          />
+        </label>
+        <button
+          class="btn btn--secondary"
+          id="artist-search-submit"
+          type="button"
+        >
+          Search
+        </button>
+      </div>
+
+      <div
+        class="picker__list artist-results"
+        id="artist-results"
+        aria-live="polite"
+      ></div>
+
+      <p class="dialog__divider">
+        <span>or add by MBID</span>
+      </p>
+
+      <label class="field">
+        <span>MBID or MusicBrainz URL</span>
+        <input
+          id="mbid"
+          name="mbid"
+          placeholder="e.g. c3d7f812-47b2-4d78-9ac2-9512817d8add"
+          autocomplete="off"
+          spellcheck="false"
+          required
+        />
+      </label>
+
+      <p class="form-status" id="add-status" role="status"></p>
+
+      <div class="dialog__actions">
+        <button class="btn btn--ghost" id="add-cancel" type="button">
+          Cancel
+        </button>
+        <button class="btn btn--primary" id="add-submit" type="submit">
+          Add artist
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    import {
+      api,
+      extractMbid,
+      MBID_RE,
+      type Artist,
+      type MusicBrainzArtist,
+    } from '../lib/api';
+    import { artistCard } from '../lib/cards';
+    import { plural } from '../lib/format';
+    import {
+      byId,
+      clear,
+      el,
+      emptyState,
+      pathIs,
+      setBusy,
+      setFormStatus,
+      skeletonGrid,
+      artistAvatar,
+      toast,
+    } from '../lib/ui';
+
+    function initArtistsPage(): void {
+      if (!pathIs('/')) return;
+
+      const grid = byId<HTMLDivElement>('grid');
+      const empty = byId<HTMLDivElement>('empty');
+      const status = byId<HTMLSpanElement>('status');
+      const filter = byId<HTMLInputElement>('filter');
+      const refresh = byId<HTMLButtonElement>('refresh');
+      const dialog = byId<HTMLDialogElement>('add-dialog');
+      const form = byId<HTMLFormElement>('add-form');
+      const mbidInput = byId<HTMLInputElement>('mbid');
+      const artistSearchInput = byId<HTMLInputElement>('add-artist-search');
+      const artistSearchButton = byId<HTMLButtonElement>(
+        'artist-search-submit',
+      );
+      const artistResults = byId<HTMLDivElement>('artist-results');
+      const addStatus = byId<HTMLParagraphElement>('add-status');
+      const addSubmit = byId<HTMLButtonElement>('add-submit');
+
+      let artists: Artist[] = [];
+      let loadToken = 0;
+      let filterTimer: number | undefined;
+      let artistSearchController: AbortController | null = null;
+      let artistSearchToken = 0;
+      let addInFlight = false;
+
+      function render(): void {
+        const query = filter.value.trim();
+
+        clear(grid);
+        const fragment = document.createDocumentFragment();
+        for (const artist of artists) fragment.append(artistCard(artist));
+        grid.append(fragment);
+
+        if (artists.length === 0) {
+          empty.hidden = false;
+          const state = query
+            ? emptyState(
+                'No matches',
+                'Try a different name or clear the filter.',
+              )
+            : emptyState(
+                'No artists yet',
+                'Add an artist by MusicBrainz ID and Coda will import the discography in the background.',
+              );
+          if (!query) {
+            const button = el('button', 'btn btn--primary', 'Add artist');
+            button.type = 'button';
+            button.addEventListener('click', openAdd);
+            state.append(button);
+          }
+          empty.replaceChildren(state);
+        } else {
+          empty.hidden = true;
+          empty.replaceChildren();
+        }
+
+        status.textContent = query
+          ? `${artists.length} ${artists.length === 1 ? 'match' : 'matches'}`
+          : plural(artists.length, 'artist');
+      }
+
+      async function load(quiet = false): Promise<void> {
+        const token = ++loadToken;
+        const query = filter.value.trim();
+
+        if (!quiet) {
+          skeletonGrid(grid, 10, 'artist');
+          status.textContent = 'Loading artists…';
+        } else {
+          status.textContent = 'Searching…';
+        }
+
+        try {
+          const result = await api.listAllArtists({
+            query,
+            includeTrackStats: true,
+          });
+          if (token !== loadToken) return;
+          artists = result.items;
+          render();
+        } catch (error) {
+          if (token !== loadToken) return;
+          clear(grid);
+          empty.hidden = false;
+          const message =
+            error instanceof Error ? error.message : String(error);
+          empty.replaceChildren(emptyState('Could not load artists', message));
+          status.textContent = 'Failed to load';
+        }
+      }
+
+      function setResultButtonsDisabled(disabled: boolean): void {
+        for (const button of artistResults.querySelectorAll<HTMLButtonElement>(
+          'button',
+        )) {
+          button.disabled = disabled;
+        }
+      }
+
+      function renderArtistResults(items: MusicBrainzArtist[]): void {
+        clear(artistResults);
+        if (items.length === 0) return;
+
+        const fragment = document.createDocumentFragment();
+        for (const item of items) {
+          const row = el('div', 'pick artist-result');
+
+          const art = el('span', 'pick__art');
+          art.append(
+            artistAvatar(item.id, item.name, '', { variant: 'initials' }),
+          );
+
+          const main = el('span', 'pick__main');
+          main.append(el('span', 'pick__title', item.name));
+          const meta = [item.disambiguation, item.type, item.country]
+            .filter(Boolean)
+            .join(' · ');
+          if (meta) main.append(el('span', 'pick__meta', meta));
+
+          const add = el('button', 'btn btn--sm btn--primary', 'Add');
+          add.type = 'button';
+          add.addEventListener('click', () => {
+            void addArtistById(item.id, item.name, add);
+          });
+
+          row.append(art, main, add);
+          fragment.append(row);
+        }
+        artistResults.append(fragment);
+      }
+
+      async function runArtistSearch(query: string): Promise<void> {
+        const token = ++artistSearchToken;
+        artistSearchController?.abort();
+        const controller = new AbortController();
+        artistSearchController = controller;
+
+        clear(artistResults);
+        artistSearchButton.disabled = true;
+        artistSearchButton.textContent = 'Searching…';
+        setFormStatus(addStatus, 'Searching MusicBrainz…');
+
+        try {
+          const page = await api.searchMusicBrainzArtists(
+            query,
+            controller.signal,
+          );
+          if (token !== artistSearchToken) return;
+
+          const items = page?.items ?? [];
+          renderArtistResults(items);
+          setFormStatus(addStatus, items.length ? '' : 'No artists found.');
+        } catch (error) {
+          if (controller.signal.aborted || token !== artistSearchToken) return;
+          clear(artistResults);
+          const message =
+            error instanceof Error ? error.message : String(error);
+          setFormStatus(addStatus, `Search failed: ${message}`, 'error');
+        } finally {
+          if (token === artistSearchToken) {
+            artistSearchButton.disabled = false;
+            artistSearchButton.textContent = 'Search';
+          }
+        }
+      }
+
+      function triggerArtistSearch(): void {
+        if (artistSearchButton.disabled) return;
+
+        const query = artistSearchInput.value.trim();
+        if (query.length < 2) {
+          clear(artistResults);
+          setFormStatus(addStatus, 'Type at least 2 characters.', 'info');
+          return;
+        }
+
+        void runArtistSearch(query);
+      }
+
+      async function addArtistById(
+        id: string,
+        displayName: string | undefined,
+        button: HTMLButtonElement,
+      ): Promise<void> {
+        if (addInFlight) return;
+        addInFlight = true;
+        setResultButtonsDisabled(true);
+        setBusy(button, true, 'Adding…');
+        setFormStatus(addStatus, `Adding ${displayName ?? 'artist'}…`);
+
+        try {
+          const response = await api.addArtist(id);
+
+          if (response.status === 304) {
+            toast(
+              'Artist is already in the library. A refresh was queued.',
+              'info',
+            );
+            closeAdd();
+            await load(true);
+            return;
+          }
+
+          if (!response.ok) {
+            let message = response.statusText;
+            try {
+              const body = await response.json();
+              if (typeof body?.error === 'string' && body.error) {
+                message = body.error;
+              }
+            } catch {
+              /* keep status text */
+            }
+            setFormStatus(addStatus, message, 'error');
+            return;
+          }
+
+          let name = displayName ?? 'Artist';
+          try {
+            const body = await response.json();
+            if (typeof body?.name === 'string') name = body.name;
+          } catch {
+            /* the import still started */
+          }
+
+          toast(`${name} added. Discography import started.`, 'ok');
+          closeAdd();
+          await load(true);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          setFormStatus(addStatus, `Could not add artist: ${message}`, 'error');
+        } finally {
+          addInFlight = false;
+          setResultButtonsDisabled(false);
+          setBusy(button, false);
+        }
+      }
+
+      function openAdd(): void {
+        form.reset();
+        artistSearchInput.value = '';
+        artistSearchButton.disabled = false;
+        artistSearchButton.textContent = 'Search';
+        clear(artistResults);
+        artistSearchController?.abort();
+        artistSearchToken += 1;
+        setFormStatus(addStatus, '');
+        dialog.showModal();
+        requestAnimationFrame(() => artistSearchInput.focus());
+      }
+
+      function closeAdd(): void {
+        artistSearchController?.abort();
+        artistSearchToken += 1;
+        dialog.close();
+      }
+
+      byId('add-open').addEventListener('click', openAdd);
+      byId('add-close').addEventListener('click', closeAdd);
+      byId('add-cancel').addEventListener('click', closeAdd);
+      dialog.addEventListener('click', (event) => {
+        if (event.target === dialog) closeAdd();
+      });
+
+      filter.addEventListener('input', () => {
+        window.clearTimeout(filterTimer);
+        filterTimer = window.setTimeout(() => void load(true), 250);
+      });
+      artistSearchButton.addEventListener('click', triggerArtistSearch);
+      artistSearchInput.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        triggerArtistSearch();
+      });
+      refresh.addEventListener('click', () => load());
+
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const id = extractMbid(mbidInput.value);
+
+        if (!MBID_RE.test(id)) {
+          setFormStatus(
+            addStatus,
+            'That doesn’t look like a MusicBrainz artist MBID or URL.',
+            'error',
+          );
+          mbidInput.focus();
+          return;
+        }
+
+        void addArtistById(id, undefined, addSubmit);
+      });
+
+      load();
+    }
+
+    document.addEventListener('astro:page-load', initArtistsPage);
+  </script>
+</Layout>

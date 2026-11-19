@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an idea that fits Coda's scope (files-only library + tags).
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What library/metadata problem are you trying to solve?
+      placeholder: I can't tell which files are still unlinked…
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should Coda do? API/UI behavior, examples.
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      description: Coda is files-only. Downloads, download clients, and automation are non-goals.
+      options:
+        - label: This request does not need downloads, download clients, or automation.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other ways you tried (Lidarr, Picard, Navidrome, manual tagging)?

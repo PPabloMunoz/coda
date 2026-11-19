@@ -1,0 +1,410 @@
+---
+import Layout from '../components/Layout.astro';
+---
+
+<Layout title="File" current="files">
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a href="/files">All files</a>
+    <span>/</span>
+    <span id="crumb">File</span>
+  </nav>
+
+  <header class="page-head">
+    <div class="page-head__copy">
+      <p class="eyebrow">Local file</p>
+      <h1 id="file-name">File</h1>
+      <p class="page-head__desc mono" id="file-path"></p>
+    </div>
+    <div class="page-head__actions" id="actions"></div>
+  </header>
+
+  <div class="notice" id="status">
+    Loading file…
+  </div>
+
+  <div id="content" hidden>
+    <div class="stat-row">
+      <div class="stat-card">
+        <span class="stat-card__label">Format</span>
+        <span class="stat-card__value" id="stat-format">
+          —
+        </span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-card__label">Size</span>
+        <span class="stat-card__value" id="stat-size">
+          —
+        </span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-card__label">Scanned</span>
+        <span class="stat-card__value" id="stat-scanned">
+          —
+        </span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-card__label">Link</span>
+        <span class="stat-card__value" id="stat-link">
+          —
+        </span>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data-table detail-table">
+        <tbody>
+          <tr>
+            <th scope="row">Path</th>
+            <td class="mono" id="detail-path"></td>
+          </tr>
+          <tr>
+            <th scope="row">Format hint</th>
+            <td id="detail-format"></td>
+          </tr>
+          <tr>
+            <th scope="row">Size</th>
+            <td id="detail-size"></td>
+          </tr>
+          <tr>
+            <th scope="row">Modified</th>
+            <td id="detail-mtime"></td>
+          </tr>
+          <tr>
+            <th scope="row">Scanned</th>
+            <td id="detail-scanned"></td>
+          </tr>
+          <tr>
+            <th scope="row">Track MBID</th>
+            <td class="mono" id="detail-track"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div id="link-panel" class="link-panel-slot"></div>
+  </div>
+
+  <script>
+    import { api, mbUrl, type LocalFile } from '../lib/api';
+    import {
+      baseName,
+      formatBytes,
+      formatDate,
+      formatDateTime,
+      typeLabel,
+    } from '../lib/format';
+    import {
+      byId,
+      creditFragment,
+      el,
+      externalLink,
+      link,
+      pathIs,
+      setBusy,
+      toast,
+    } from '../lib/ui';
+
+    function setText(id: string, value: string): void {
+      byId(id).textContent = value;
+    }
+
+    function initFilePage(): void {
+      if (!pathIs('/file')) return;
+
+      const status = byId<HTMLDivElement>('status');
+      const content = byId<HTMLDivElement>('content');
+      const crumb = byId<HTMLSpanElement>('crumb');
+      const fileName = byId<HTMLHeadingElement>('file-name');
+      const filePath = byId<HTMLParagraphElement>('file-path');
+      const actions = byId<HTMLDivElement>('actions');
+      const linkPanel = byId<HTMLDivElement>('link-panel');
+
+      const fileID = new URLSearchParams(location.search).get('id') ?? '';
+      let current: LocalFile | null = null;
+
+      function showError(message: string): void {
+        status.hidden = false;
+        status.classList.add('is-error');
+        status.textContent = message;
+        content.hidden = true;
+      }
+
+      function renderLinkPanel(file: LocalFile): void {
+        const panel = el('div', 'link-panel');
+        const body = el('div', 'link-panel__body');
+
+        if (file.track) {
+          const track = file.track;
+          body.append(
+            el('p', 'eyebrow', 'MusicBrainz link'),
+            el('h3', '', track.title),
+          );
+
+          const creditLine = el('p', 'credit-line');
+          creditLine.append(creditFragment(track.credit));
+          body.append(creditLine);
+
+          const releaseMeta = el('div', 'link-panel__meta');
+          releaseMeta.append(
+            el('span', '', 'Release'),
+            el('span', '', track.release.title),
+          );
+          if (track.release.date) {
+            releaseMeta.append(el('span', 'mono', track.release.date));
+          }
+          body.append(releaseMeta);
+
+          const groupMeta = el('div', 'link-panel__meta');
+          groupMeta.append(
+            el('span', '', 'Release group'),
+            link(
+              `/release-group?id=${encodeURIComponent(track.group.id)}`,
+              track.group.title,
+            ),
+            el('span', 'chip chip--type', typeLabel(track.group.type)),
+          );
+          body.append(groupMeta);
+
+          const panelActions = el('div', 'link-panel__actions');
+          panelActions.append(
+            externalLink(
+              mbUrl.recording(track.recording_id),
+              'Recording ↗',
+              'btn btn--secondary',
+            ),
+            externalLink(
+              mbUrl.release(track.release.id),
+              'Release ↗',
+              'btn btn--secondary',
+            ),
+          );
+          const refresh = el('button', 'btn btn--secondary', 'Refresh tags');
+          refresh.type = 'button';
+          refresh.addEventListener('click', () => refreshFile(refresh));
+          panelActions.append(refresh);
+          const unlink = el(
+            'button',
+            'btn btn--danger',
+            'Unlink and clear tags',
+          );
+          unlink.type = 'button';
+          unlink.addEventListener('click', () => unlinkFile(unlink));
+          panelActions.append(unlink);
+          body.append(panelActions);
+        } else if (file.track_id) {
+          body.append(
+            el('p', 'eyebrow', 'MusicBrainz link'),
+            el('h3', '', 'Linked to a track'),
+            el('p', 'mono link-panel__id', file.track_id),
+          );
+          const panelActions = el('div', 'link-panel__actions');
+          panelActions.append(
+            externalLink(
+              mbUrl.track(file.track_id),
+              'Open track on MusicBrainz ↗',
+              'btn btn--secondary',
+            ),
+          );
+          const refresh = el('button', 'btn btn--secondary', 'Refresh tags');
+          refresh.type = 'button';
+          refresh.addEventListener('click', () => refreshFile(refresh));
+          panelActions.append(refresh);
+          const unlink = el(
+            'button',
+            'btn btn--danger',
+            'Unlink and clear tags',
+          );
+          unlink.type = 'button';
+          unlink.addEventListener('click', () => unlinkFile(unlink));
+          panelActions.append(unlink);
+          body.append(panelActions);
+        } else {
+          body.append(
+            el('p', 'eyebrow', 'MusicBrainz link'),
+            el('h3', '', 'This file isn’t linked yet'),
+            el(
+              'p',
+              'muted',
+              'Choose an artist, release group, release, and track to write MusicBrainz tags.',
+            ),
+          );
+          const panelActions = el('div', 'link-panel__actions');
+          panelActions.append(
+            link(`/link?file=${file.id}`, 'Link this file', 'btn btn--primary'),
+          );
+          body.append(panelActions);
+        }
+
+        panel.append(body);
+        linkPanel.replaceChildren(panel);
+      }
+
+      async function unlinkFile(button: HTMLButtonElement): Promise<void> {
+        if (!current) return;
+        const name = baseName(current.path);
+        const confirmed = window.confirm(
+          `Remove the MusicBrainz link and clear tags from “${name}”?`,
+        );
+        if (!confirmed) return;
+
+        setBusy(button, true, 'Unlinking…');
+        try {
+          const response = await api.unlink(current.id);
+          if (!response.ok) {
+            let message = response.statusText;
+            try {
+              message = (await response.json()).error ?? message;
+            } catch {
+              /* keep status text */
+            }
+            toast(`Could not unlink: ${message}`, 'error');
+            return;
+          }
+          toast(`${name} unlinked.`, 'ok');
+          await load();
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          toast(`Could not unlink: ${message}`, 'error');
+        } finally {
+          setBusy(button, false);
+        }
+      }
+
+      async function refreshFile(button: HTMLButtonElement): Promise<void> {
+        if (!current) return;
+        const name = baseName(current.path);
+
+        setBusy(button, true, 'Refreshing…');
+        try {
+          const response = await api.refreshFile(current.id);
+          if (!response.ok) {
+            let message = response.statusText;
+            try {
+              message = (await response.json()).error ?? message;
+            } catch {
+              /* keep status text */
+            }
+            toast(`Could not refresh tags: ${message}`, 'error');
+            return;
+          }
+          toast(`Tags refreshed for ${name}.`, 'ok');
+          await load();
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          toast(`Could not refresh tags: ${message}`, 'error');
+        } finally {
+          setBusy(button, false);
+        }
+      }
+
+      async function load(): Promise<void> {
+        if (!fileID) {
+          showError('Missing file id. Open one from all files.');
+          return;
+        }
+
+        status.hidden = false;
+        status.classList.remove('is-error');
+        status.textContent = 'Loading file…';
+        content.hidden = true;
+
+        try {
+          const file = await api.getFile(fileID, true);
+          if (!file) {
+            showError('File not found.');
+            return;
+          }
+
+          current = file;
+          const name = baseName(file.path);
+          document.title = `${name} · Coda`;
+          crumb.textContent = name;
+          fileName.textContent = name;
+          filePath.textContent = file.path;
+
+          setText('stat-format', (file.format_hint || 'audio').toUpperCase());
+          setText('stat-size', formatBytes(file.size_bytes));
+          setText('stat-scanned', formatDate(file.scanned_at));
+          setText('stat-link', file.track_id ? 'Linked' : 'Unlinked');
+
+          setText('detail-path', file.path);
+          setText('detail-format', file.format_hint || '—');
+          setText('detail-size', formatBytes(file.size_bytes));
+          setText(
+            'detail-mtime',
+            file.mtime_ns > 0
+              ? formatDateTime(
+                  new Date(file.mtime_ns / 1_000_000).toISOString(),
+                )
+              : '—',
+          );
+          setText('detail-scanned', formatDateTime(file.scanned_at));
+          setText('detail-track', file.track_id || '—');
+
+          actions.replaceChildren(
+            link('/files', 'All files', 'btn btn--ghost'),
+          );
+          if (file.track) {
+            actions.append(
+              externalLink(
+                mbUrl.recording(file.track.recording_id),
+                'Recording ↗',
+                'btn btn--secondary',
+              ),
+            );
+            const headerRefresh = el(
+              'button',
+              'btn btn--secondary',
+              'Refresh tags',
+            );
+            headerRefresh.type = 'button';
+            headerRefresh.addEventListener('click', () =>
+              refreshFile(headerRefresh),
+            );
+            actions.append(headerRefresh);
+          } else if (file.track_id) {
+            actions.append(
+              externalLink(
+                mbUrl.track(file.track_id),
+                'MusicBrainz ↗',
+                'btn btn--secondary',
+              ),
+            );
+            const headerRefresh = el(
+              'button',
+              'btn btn--secondary',
+              'Refresh tags',
+            );
+            headerRefresh.type = 'button';
+            headerRefresh.addEventListener('click', () =>
+              refreshFile(headerRefresh),
+            );
+            actions.append(headerRefresh);
+          } else {
+            actions.append(
+              link(
+                `/link?file=${file.id}`,
+                'Link this file',
+                'btn btn--primary',
+              ),
+            );
+          }
+
+          renderLinkPanel(file);
+          status.hidden = true;
+          content.hidden = false;
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          showError(`Could not load file: ${message}`);
+        }
+      }
+
+      load();
+    }
+
+    document.addEventListener('astro:page-load', initFilePage);
+  </script>
+</Layout>

@@ -1,0 +1,236 @@
+import {
+  api,
+  creditName,
+  type Artist,
+  type Release,
+  type ReleaseGroup,
+} from './api';
+import { plural, yearOf } from './format';
+import {
+  artistAvatar,
+  discArt,
+  el,
+  link,
+  setSharedArtName,
+  sharedArtName,
+} from './ui';
+
+export function artistCard(artist: Artist): HTMLAnchorElement {
+  const card = link(
+    `/artist?id=${encodeURIComponent(artist.id)}`,
+    '',
+    'artist-card',
+  );
+  card.setAttribute('aria-label', artist.name);
+
+  const cover = el('div', 'artist-card__cover');
+  const avatar = artistAvatar(artist.id, artist.name);
+  setSharedArtName(avatar, sharedArtName('artist', artist.id));
+  cover.append(avatar);
+
+  const body = el('div', 'artist-card__body');
+  body.append(
+    el('h2', 'artist-card__name', artist.name),
+    el(
+      'p',
+      'artist-card__meta',
+      artist.disambiguation || artist['sort-name'] || 'Artist',
+    ),
+  );
+
+  if (artist.stats) {
+    const total = artist.stats.track_count;
+    const linked = artist.stats.linked_track_count;
+    const percent = total > 0 ? Math.round((linked / total) * 100) : 0;
+
+    const stats = el('div', 'artist-card__stats');
+    stats.title = `${linked} linked of ${plural(total, 'song')}`;
+
+    const bar = el('span', 'artist-card__bar');
+    const fill = el('span', 'artist-card__bar-fill');
+    fill.style.width = `${percent}%`;
+    bar.append(fill);
+    bar.setAttribute('aria-hidden', 'true');
+
+    stats.append(
+      el(
+        'span',
+        'artist-card__stats-text',
+        `${linked} / ${plural(total, 'song')}`,
+      ),
+      bar,
+    );
+    body.append(stats);
+  }
+
+  card.append(cover, body);
+  return card;
+}
+
+export interface ReleaseGroupCard {
+  card: HTMLAnchorElement;
+  releaseLine: HTMLParagraphElement;
+}
+
+export function releaseGroupCard(
+  group: ReleaseGroup,
+  options: { showCredit?: boolean; showType?: boolean } = {},
+): ReleaseGroupCard {
+  const { showCredit = true, showType = true } = options;
+  const card = link(
+    `/release-group?id=${encodeURIComponent(group.id)}`,
+    '',
+    'rg-card',
+  );
+  card.setAttribute('aria-label', group.title);
+
+  const art = el('div', 'rg-card__art');
+  const disc = discArt(group.id);
+  setSharedArtName(disc, sharedArtName('group', group.id));
+  art.append(disc);
+
+  const body = el('div', 'rg-card__body');
+  if (showType) {
+    body.append(
+      el(
+        'span',
+        'chip chip--type',
+        group.type ? group.type.toUpperCase() : 'OTHER',
+      ),
+    );
+  }
+  const title = el('h3', 'rg-card__title', group.title);
+  const releaseLine = el(
+    'p',
+    'rg-card__release is-loading',
+    'Checking saved release…',
+  );
+
+  body.append(title, releaseLine);
+
+  if (showCredit) {
+    const credit = el('p', 'rg-card__credit');
+    credit.textContent = creditName(group.credit);
+    if (!credit.textContent) credit.hidden = true;
+    body.append(credit);
+  }
+
+  card.append(art, body);
+  return { card, releaseLine };
+}
+
+export type ReleaseCompleteness = 'complete' | 'partial' | 'missing';
+
+export function releaseCompleteness(
+  trackCount: number,
+  linkedCount: number,
+): ReleaseCompleteness {
+  if (trackCount > 0 && linkedCount >= trackCount) return 'complete';
+  if (linkedCount > 0) return 'partial';
+  return 'missing';
+}
+
+function setCompletenessLine(
+  line: HTMLParagraphElement,
+  opts: {
+    year: string;
+    title: string;
+    trackCount: number;
+    linkedCount: number;
+  },
+): void {
+  const status = releaseCompleteness(opts.trackCount, opts.linkedCount);
+  line.classList.remove(
+    'is-loading',
+    'is-saved',
+    'is-complete',
+    'is-partial',
+    'is-missing',
+  );
+  line.classList.add(`is-${status}`);
+  const card = line.closest('.rg-card');
+  if (card) {
+    card.classList.remove('is-complete', 'is-partial', 'is-missing');
+    card.classList.add(`is-${status}`);
+  }
+  const counts = `${opts.linkedCount}/${opts.trackCount} linked`;
+  line.textContent = [opts.year, counts].filter(Boolean).join(' · ');
+  line.title = `${opts.title} — ${opts.linkedCount} of ${opts.trackCount} tracks linked`;
+  line.setAttribute('aria-label', line.title);
+}
+
+function markCardMissing(line: HTMLParagraphElement): void {
+  const card = line.closest('.rg-card');
+  if (card) {
+    card.classList.remove('is-complete', 'is-partial');
+    card.classList.add('is-missing');
+  }
+}
+
+export async function hydrateReleaseLine(
+  line: HTMLParagraphElement,
+  group: ReleaseGroup,
+  cache?: Map<string, Release | null>,
+): Promise<boolean> {
+  try {
+    if (group.release) {
+      if (!line.isConnected) return true;
+      setCompletenessLine(line, {
+        year: yearOf(group.release.date),
+        title: group.release.title,
+        trackCount: group.release.track_count,
+        linkedCount: group.release.linked_file_count,
+      });
+      return true;
+    }
+
+    let release: Release | null | undefined = cache?.get(group.id);
+    if (release === undefined) {
+      release = await api.getReleaseByGroup(group.id, true);
+      cache?.set(group.id, release);
+    }
+
+    if (!line.isConnected) return Boolean(release);
+
+    line.classList.remove(
+      'is-loading',
+      'is-saved',
+      'is-complete',
+      'is-partial',
+    );
+
+    if (!release) {
+      line.classList.add('is-missing');
+      markCardMissing(line);
+      line.textContent = 'No release saved yet';
+      line.title = 'No release saved yet — no tracks linked';
+      line.setAttribute('aria-label', line.title);
+      return false;
+    }
+
+    const tracks = release.tracks ?? [];
+    const linked = tracks.filter(
+      (track) => (track.files?.length ?? 0) > 0,
+    ).length;
+    setCompletenessLine(line, {
+      year: yearOf(release.date),
+      title: release.title,
+      trackCount: tracks.length,
+      linkedCount: linked,
+    });
+    return true;
+  } catch {
+    if (!line.isConnected) return false;
+    line.classList.remove(
+      'is-loading',
+      'is-saved',
+      'is-complete',
+      'is-partial',
+    );
+    line.classList.add('is-missing');
+    markCardMissing(line);
+    line.textContent = 'Could not read saved release';
+    line.removeAttribute('aria-label');
+    return false;
+  }
+}

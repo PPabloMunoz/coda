@@ -1,0 +1,27 @@
+# binaries
+/bin/
+/coda
+/dist/
+
+# Go
+*.exe
+*.test
+*.out
+/vendor/
+
+# SQLite leftovers
+*.db
+*.db-journal
+*.sqlite*
+
+# Frontend (scaffolded later under web/)
+web/node_modules/
+web/dist/*
+!web/dist/index.html
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+/testdata/

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: MusicBrainz docs
+    url: https://musicbrainz.org/doc/How_to_Use_Search
+    about: Help with MBIDs, search, and release data.
+  - name: Navidrome docs
+    url: https://www.navidrome.org/docs/
+    about: Help with playing linked files and tag compatibility.

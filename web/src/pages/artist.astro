@@ -1,0 +1,812 @@
+---
+import Layout from '../components/Layout.astro';
+---
+
+<Layout title="Artist" current="artists">
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a href="/">Artists</a>
+    <span>/</span>
+    <span id="crumb">Artist</span>
+  </nav>
+
+  <div class="notice" id="status">
+    Loading artist…
+  </div>
+
+  <div id="content" hidden>
+    <header class="detail-hero">
+      <div class="detail-hero__art" id="hero-art"></div>
+      <div class="detail-hero__body">
+        <p class="eyebrow">Artist</p>
+        <h1 id="artist-name"></h1>
+        <p class="detail-hero__meta" id="artist-meta"></p>
+        <p class="detail-hero__id mono" id="artist-id"></p>
+        <div class="detail-hero__actions" id="artist-actions"></div>
+        <p class="import-status" id="import-status" role="status" hidden></p>
+        <dl class="stat-strip">
+          <div>
+            <dt>Release groups</dt>
+            <dd id="group-total">—</dd>
+          </div>
+          <div>
+            <dt>Saved releases</dt>
+            <dd id="release-total">—</dd>
+          </div>
+          <div>
+            <dt>Linked songs</dt>
+            <dd id="track-total">—</dd>
+          </div>
+        </dl>
+      </div>
+    </header>
+
+    <section>
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Discography</p>
+          <h2>Release groups</h2>
+        </div>
+        <span class="section-head__meta" id="group-status"></span>
+      </div>
+
+      <div class="toolbar">
+        <label class="search">
+          <input
+            id="filter"
+            name="q"
+            type="search"
+            placeholder="Filter release groups…"
+            autocomplete="off"
+            aria-label="Filter release groups"
+          />
+        </label>
+        <div
+          class="legend"
+          style="margin-left: auto"
+          aria-label="Link completeness"
+        >
+          <span class="legend__item">
+            <span
+              class="legend__dot legend__dot--complete"
+              aria-hidden="true"
+            ></span>
+            Complete{' '}
+            <span class="legend__count" id="legend-complete">
+              —
+            </span>
+          </span>
+          <span class="legend__item">
+            <span
+              class="legend__dot legend__dot--partial"
+              aria-hidden="true"
+            ></span>
+            Partial{' '}
+            <span class="legend__count" id="legend-partial">
+              —
+            </span>
+          </span>
+          <span class="legend__item">
+            <span
+              class="legend__dot legend__dot--missing"
+              aria-hidden="true"
+            ></span>
+            Missing{' '}
+            <span class="legend__count" id="legend-missing">
+              —
+            </span>
+          </span>
+        </div>
+      </div>
+
+      <div class="rg-sections" id="groups" aria-live="polite"></div>
+      <div id="groups-empty" hidden></div>
+    </section>
+
+    <section id="appears-section" hidden>
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Guest appearances</p>
+          <h2>Appears In</h2>
+        </div>
+        <span class="section-head__meta" id="appears-status"></span>
+      </div>
+
+      <div class="rg-sections" id="appears-groups" aria-live="polite"></div>
+      <div id="appears-empty" hidden></div>
+    </section>
+  </div>
+
+  <script>
+    import {
+      api,
+      creditName,
+      mbUrl,
+      type Artist,
+      type ArtistImportState,
+      type ArtistImportStatus,
+      type Release,
+      type ReleaseGroup,
+    } from '../lib/api';
+    import { hydrateReleaseLine, releaseGroupCard } from '../lib/cards';
+    import { formatDateTime, plural } from '../lib/format';
+    import {
+      byId,
+      clear,
+      el,
+      emptyState,
+      externalLink,
+      mapLimit,
+      normalize,
+      pathIs,
+      setBusy,
+      setSharedArtName,
+      sharedArtName,
+      artistAvatar,
+      toast,
+    } from '../lib/ui';
+
+    const GROUP_TYPE_ORDER = ['album', 'ep', 'single', 'other'] as const;
+    type GroupType = (typeof GROUP_TYPE_ORDER)[number];
+
+    function normalizeGroupType(value: string): GroupType {
+      return value === 'album' || value === 'ep' || value === 'single'
+        ? value
+        : 'other';
+    }
+
+    function matchesQuery(group: ReleaseGroup, query: string): boolean {
+      if (!query) return true;
+      return normalize(`${group.title} ${creditName(group.credit)}`).includes(
+        query,
+      );
+    }
+
+    function sortTypeGroups(typeGroups: ReleaseGroup[]): void {
+      typeGroups.sort((a, b) => {
+        const dateA = a.release?.date ?? '';
+        const dateB = b.release?.date ?? '';
+        if (dateA && dateB && dateA !== dateB) {
+          return dateB.localeCompare(dateA);
+        }
+        if (dateA && !dateB) return -1;
+        if (!dateA && dateB) return 1;
+        return a.title.localeCompare(b.title, undefined, {
+          sensitivity: 'base',
+        });
+      });
+    }
+
+    function initArtistPage(): void {
+      if (!pathIs('/artist')) return;
+
+      const status = byId<HTMLDivElement>('status');
+      const content = byId<HTMLDivElement>('content');
+      const crumb = byId<HTMLSpanElement>('crumb');
+      const heroArt = byId<HTMLDivElement>('hero-art');
+      const artistName = byId<HTMLHeadingElement>('artist-name');
+      const artistMeta = byId<HTMLParagraphElement>('artist-meta');
+      const artistId = byId<HTMLParagraphElement>('artist-id');
+      const artistActions = byId<HTMLDivElement>('artist-actions');
+      const importStatusNode = byId<HTMLParagraphElement>('import-status');
+      const groupTotal = byId<HTMLElement>('group-total');
+      const releaseTotal = byId<HTMLElement>('release-total');
+      const trackTotal = byId<HTMLElement>('track-total');
+      const groupStatus = byId<HTMLSpanElement>('group-status');
+      const legendComplete = byId<HTMLSpanElement>('legend-complete');
+      const legendPartial = byId<HTMLSpanElement>('legend-partial');
+      const legendMissing = byId<HTMLSpanElement>('legend-missing');
+      const filter = byId<HTMLInputElement>('filter');
+      const groupsNode = byId<HTMLDivElement>('groups');
+      const groupsEmpty = byId<HTMLDivElement>('groups-empty');
+      const appearsSection = byId<HTMLElement>('appears-section');
+      const appearsGroupsNode = byId<HTMLDivElement>('appears-groups');
+      const appearsEmpty = byId<HTMLDivElement>('appears-empty');
+      const appearsStatus = byId<HTMLSpanElement>('appears-status');
+
+      const artistID = new URLSearchParams(location.search).get('id') ?? '';
+      const releaseCache = new Map<string, Release | null>();
+      // Same-hue tile shown instantly (also feeds the shared-element morph
+      // when arriving via a card); replaced with the named artist on load.
+      {
+        const heroName = artistID ? sharedArtName('artist', artistID) : null;
+        if (heroName) {
+          const placeholder = artistAvatar(artistID, '');
+          for (const label of placeholder.querySelectorAll('span')) {
+            label.remove();
+          }
+          setSharedArtName(placeholder, heroName);
+          heroArt.replaceChildren(placeholder);
+        }
+      }
+      let groups: ReleaseGroup[] = [];
+      let appearsGroups: ReleaseGroup[] = [];
+      let artist: Artist | null = null;
+      let importPollTimer: number | undefined;
+      let importPollToken = 0;
+      let lastImportState: ArtistImportState = 'idle';
+
+      const stopImportPolling = (): void => {
+        window.clearTimeout(importPollTimer);
+        importPollToken += 1;
+      };
+      document.addEventListener('astro:before-swap', stopImportPolling, {
+        once: true,
+      });
+
+      function showError(message: string): void {
+        status.hidden = false;
+        status.classList.add('is-error');
+        status.textContent = message;
+        content.hidden = true;
+      }
+
+      function showNotInLibrary(collab: Artist): void {
+        document.title = `${collab.name} · Coda`;
+        crumb.textContent = collab.name;
+
+        heroArt.replaceChildren(artistAvatar(collab.id, collab.name));
+        setSharedArtName(
+          heroArt.firstElementChild as HTMLElement | null,
+          sharedArtName('artist', collab.id),
+        );
+        artistName.textContent = collab.name;
+
+        const meta = ['Not in your library yet'];
+        if (collab.disambiguation) meta.push(collab.disambiguation);
+        if (collab['sort-name'] && collab['sort-name'] !== collab.name) {
+          meta.push(`Sort name: ${collab['sort-name']}`);
+        }
+        artistMeta.textContent = meta.join(' · ');
+        artistId.textContent = collab.id;
+
+        artistActions.replaceChildren(
+          externalLink(
+            mbUrl.artist(collab.id),
+            'MusicBrainz ↗',
+            'btn btn--secondary',
+          ),
+        );
+        const addButton = el('button', 'btn btn--primary', 'Add to library');
+        addButton.type = 'button';
+        addButton.addEventListener('click', () => addToLibrary(addButton));
+        artistActions.append(addButton);
+
+        importStatusNode.hidden = true;
+        groupTotal.textContent = '—';
+        releaseTotal.textContent = '—';
+        trackTotal.textContent = '—';
+        groupStatus.textContent = '';
+        appearsSection.hidden = true;
+        groupsEmpty.hidden = true;
+        groupsEmpty.replaceChildren();
+        groupsNode.replaceChildren(
+          emptyState(
+            'Not in your library yet',
+            'Add this artist to import their discography.',
+          ),
+        );
+
+        status.hidden = true;
+        content.hidden = false;
+      }
+
+      function setImportStatus(importStatus: ArtistImportStatus | null): void {
+        if (!importStatus || importStatus.state === 'idle') {
+          importStatusNode.hidden = true;
+          importStatusNode.textContent = '';
+          importStatusNode.dataset.state = 'idle';
+          return;
+        }
+
+        let message = '';
+        switch (importStatus.state) {
+          case 'queued':
+            message = 'Discography import queued…';
+            break;
+          case 'running':
+            message = 'Importing discography…';
+            break;
+          case 'done':
+            message = 'Discography updated';
+            if (importStatus.finished_at) {
+              message += ` · ${formatDateTime(importStatus.finished_at)}`;
+            }
+            break;
+          case 'failed':
+            message = importStatus.error
+              ? `Import failed: ${importStatus.error}`
+              : 'Import failed';
+            break;
+        }
+
+        importStatusNode.hidden = false;
+        importStatusNode.textContent = message;
+        importStatusNode.dataset.state = importStatus.state;
+      }
+
+      async function pollImportStatus(
+        token: number,
+        announce: boolean,
+      ): Promise<void> {
+        if (!artist) return;
+
+        try {
+          const importStatus = await api.getArtistImportStatus(artist.id);
+          if (token !== importPollToken || !artist) return;
+
+          setImportStatus(importStatus);
+
+          const state = importStatus?.state ?? 'idle';
+          const wasPending =
+            lastImportState === 'queued' || lastImportState === 'running';
+          lastImportState = state;
+
+          if (state === 'queued' || state === 'running') {
+            importPollTimer = window.setTimeout(
+              () => void pollImportStatus(token, announce),
+              2000,
+            );
+            return;
+          }
+
+          if (wasPending && state === 'done') {
+            if (announce) toast('Discography updated.', 'ok');
+            await reloadGroups();
+          }
+        } catch {
+          if (token !== importPollToken || !artist) return;
+          setImportStatus({
+            artist_id: artist.id,
+            state: 'failed',
+            error: 'Could not check import status.',
+          });
+        }
+      }
+
+      function startImportPolling(announce: boolean): void {
+        if (!artist) return;
+        importPollToken += 1;
+        window.clearTimeout(importPollTimer);
+        void pollImportStatus(importPollToken, announce);
+      }
+
+      async function refreshDiscography(
+        button: HTMLButtonElement,
+      ): Promise<void> {
+        if (!artist) return;
+        setBusy(button, true, 'Queueing…');
+        try {
+          const importStatus = await api.refreshArtist(artist.id);
+          if (!importStatus) {
+            toast('Artist not found.', 'error');
+            return;
+          }
+          setImportStatus(importStatus);
+          lastImportState = importStatus.state;
+          toast('Discography refresh queued.', 'ok');
+          startImportPolling(true);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          toast(`Could not queue refresh: ${message}`, 'error');
+        } finally {
+          setBusy(button, false);
+        }
+      }
+
+      async function addToLibrary(button: HTMLButtonElement): Promise<void> {
+        setBusy(button, true, 'Adding…');
+        try {
+          const response = await api.addArtist(artistID);
+          if (
+            response.status === 200 ||
+            response.status === 201 ||
+            response.status === 304
+          ) {
+            toast('Artist added. Importing discography…', 'ok');
+            await load();
+            return;
+          }
+          let message = response.statusText;
+          try {
+            const body = await response.json();
+            if (typeof body?.error === 'string' && body.error) {
+              message = body.error;
+            }
+          } catch {
+            /* keep status text */
+          }
+          toast(`Could not add artist: ${message}`, 'error');
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          toast(`Could not add artist: ${message}`, 'error');
+        } finally {
+          setBusy(button, false);
+        }
+      }
+
+      async function deleteArtist(button: HTMLButtonElement): Promise<void> {
+        if (!artist) return;
+        const name = artist.name;
+        if (
+          !window.confirm(
+            `Remove ${name} from the library? The saved discography is deleted and linked files become unlinked. Audio files are kept.`,
+          )
+        ) {
+          return;
+        }
+        setBusy(button, true, 'Removing…');
+        try {
+          const response = await api.deleteArtist(artist.id);
+          if (response.status === 404) {
+            toast('Artist not found.', 'error');
+            return;
+          }
+          if (!response.ok) {
+            let message = response.statusText;
+            try {
+              const body = await response.json();
+              if (typeof body?.error === 'string' && body.error) {
+                message = body.error;
+              }
+            } catch {
+              /* keep status text */
+            }
+            toast(`Could not remove artist: ${message}`, 'error');
+            return;
+          }
+          stopImportPolling();
+          let message = `${name} removed.`;
+          try {
+            const body = await response.json();
+            const pruned = typeof body?.pruned === 'number' ? body.pruned : 0;
+            if (pruned > 0) {
+              message += ` ${pruned === 1 ? '1 collaborator' : `${pruned} collaborators`} cleaned up.`;
+            }
+          } catch {
+            /* count is optional */
+          }
+          toast(message, 'ok');
+          window.location.assign('/');
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          toast(`Could not remove artist: ${message}`, 'error');
+        } finally {
+          setBusy(button, false);
+        }
+      }
+
+      function savedReleaseCount(): number {
+        return groups.filter(
+          (group) => group.release || releaseCache.get(group.id),
+        ).length;
+      }
+
+      function setTrackStats(current: Artist): void {
+        if (!current.stats) {
+          trackTotal.textContent = '—';
+          return;
+        }
+        trackTotal.textContent = `${current.stats.linked_track_count} / ${current.stats.track_count}`;
+      }
+
+      async function hydrateCards(
+        entries: Array<{ group: ReleaseGroup; line: HTMLParagraphElement }>,
+        updateTotals = true,
+      ): Promise<void> {
+        await mapLimit(entries, 4, ({ group, line }) =>
+          hydrateReleaseLine(line, group, releaseCache),
+        );
+        if (!updateTotals) return;
+        releaseTotal.textContent = `${savedReleaseCount()} of ${plural(groups.length, 'release group')}`;
+
+        let complete = 0;
+        let partial = 0;
+        let missing = 0;
+        for (const { line } of entries) {
+          if (line.classList.contains('is-complete')) complete += 1;
+          else if (line.classList.contains('is-partial')) partial += 1;
+          else if (line.classList.contains('is-missing')) missing += 1;
+        }
+        legendComplete.textContent = String(complete);
+        legendPartial.textContent = String(partial);
+        legendMissing.textContent = String(missing);
+      }
+
+      const GROUP_TYPE_LABELS: Record<GroupType, string> = {
+        album: 'Albums',
+        ep: 'EPs',
+        single: 'Singles',
+        other: 'Other',
+      };
+
+      function renderInto(
+        node: HTMLDivElement,
+        visibleList: ReleaseGroup[],
+        showCredit: boolean,
+      ): Array<{ group: ReleaseGroup; line: HTMLParagraphElement }> {
+        clear(node);
+        const buckets: Record<GroupType, ReleaseGroup[]> = {
+          album: [],
+          ep: [],
+          single: [],
+          other: [],
+        };
+        for (const group of visibleList) {
+          buckets[normalizeGroupType(group.type)].push(group);
+        }
+
+        const fragment = document.createDocumentFragment();
+        const entries: Array<{
+          group: ReleaseGroup;
+          line: HTMLParagraphElement;
+        }> = [];
+
+        for (const type of GROUP_TYPE_ORDER) {
+          const typeGroups = buckets[type];
+          if (typeGroups.length === 0) continue;
+          sortTypeGroups(typeGroups);
+
+          const section = el('section', 'rg-section');
+          const heading = el(
+            'h3',
+            'rg-section__title',
+            GROUP_TYPE_LABELS[type],
+          );
+          heading.append(
+            el('span', 'rg-section__count', String(typeGroups.length)),
+          );
+
+          const head = el('div', 'rg-section__head');
+          head.append(heading);
+
+          const grid = el('div', 'rg-grid');
+          for (const group of typeGroups) {
+            const { card, releaseLine } = releaseGroupCard(group, {
+              showCredit,
+              showType: false,
+            });
+            grid.append(card);
+            entries.push({ group, line: releaseLine });
+          }
+
+          section.append(head, grid);
+          fragment.append(section);
+        }
+        node.append(fragment);
+        return entries;
+      }
+
+      function renderGroups(): void {
+        const query = normalize(filter.value);
+        const visible = groups.filter((group) => matchesQuery(group, query));
+        const visibleAppears = appearsGroups.filter((group) =>
+          matchesQuery(group, query),
+        );
+
+        const entries = renderInto(groupsNode, visible, false);
+        const appearsEntries = renderInto(
+          appearsGroupsNode,
+          visibleAppears,
+          true,
+        );
+
+        if (visible.length === 0) {
+          groupsEmpty.hidden = false;
+          const state = groups.length
+            ? emptyState(
+                'No matching release groups',
+                'Try a different filter.',
+              )
+            : emptyState(
+                'No release groups yet',
+                'The discography import may still be running. Refresh in a moment.',
+              );
+          if (!groups.length) {
+            const button = el(
+              'button',
+              'btn btn--primary',
+              'Refresh discography',
+            );
+            button.type = 'button';
+            button.addEventListener('click', () => refreshDiscography(button));
+            state.append(button);
+          }
+          groupsEmpty.replaceChildren(state);
+        } else {
+          groupsEmpty.hidden = true;
+          groupsEmpty.replaceChildren();
+        }
+
+        groupStatus.textContent = query
+          ? `${visible.length} of ${plural(groups.length, 'release group')}`
+          : plural(groups.length, 'release group');
+
+        if (appearsGroups.length === 0) {
+          appearsSection.hidden = true;
+          appearsEmpty.hidden = true;
+          appearsEmpty.replaceChildren();
+          appearsStatus.textContent = '';
+        } else {
+          appearsSection.hidden = false;
+          if (visibleAppears.length === 0) {
+            appearsEmpty.hidden = false;
+            appearsEmpty.replaceChildren(
+              emptyState(
+                'No matching guest appearances',
+                'Try a different filter.',
+              ),
+            );
+          } else {
+            appearsEmpty.hidden = true;
+            appearsEmpty.replaceChildren();
+          }
+          appearsStatus.textContent = query
+            ? `${visibleAppears.length} of ${plural(appearsGroups.length, 'release group')}`
+            : plural(appearsGroups.length, 'release group');
+        }
+
+        void hydrateCards(entries);
+        void hydrateCards(appearsEntries, false);
+      }
+
+      async function reloadGroups(): Promise<void> {
+        if (!artist) return;
+
+        groupStatus.textContent = 'Refreshing…';
+        appearsStatus.textContent = '';
+        try {
+          const [groupResult, appearsResult, artistResult] = await Promise.all([
+            api.listAllReleaseGroups({
+              artist: artist.id,
+              includeRelease: true,
+              primary: true,
+            }),
+            api.listAllReleaseGroups({
+              artist: artist.id,
+              includeRelease: true,
+              primary: false,
+            }),
+            api.getArtist(artist.id, true),
+          ]);
+          groups = groupResult.items;
+          appearsGroups = appearsResult.items;
+          if (artistResult) {
+            artist = artistResult;
+            setTrackStats(artist);
+          }
+          releaseCache.clear();
+          groupTotal.textContent = String(groups.length);
+          releaseTotal.textContent = '—';
+          renderGroups();
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          toast(`Could not reload discography: ${message}`, 'error');
+          renderGroups();
+        }
+      }
+
+      async function load(): Promise<void> {
+        if (!artistID) {
+          showError('Missing artist id. Open an artist from the library.');
+          return;
+        }
+
+        status.hidden = false;
+        status.classList.remove('is-error');
+        status.textContent = 'Loading artist…';
+        content.hidden = true;
+
+        try {
+          const [initialArtist, groupResult, appearsResult] = await Promise.all(
+            [
+              api.getArtist(artistID, true),
+              api.listAllReleaseGroups({
+                artist: artistID,
+                includeRelease: true,
+                primary: true,
+              }),
+              api.listAllReleaseGroups({
+                artist: artistID,
+                includeRelease: true,
+                primary: false,
+              }),
+            ],
+          );
+
+          let artistResult = initialArtist;
+          if (!artistResult) {
+            // Hidden by the library-only default: probe the full view to see
+            // if this is a collaboration-only artist we can add.
+            let collab: Artist | null = null;
+            try {
+              collab = await api.getArtist(artistID, false, true);
+            } catch {
+              collab = null;
+            }
+            if (!collab) {
+              showError('Artist not found.');
+              return;
+            }
+            if (collab.in_library !== 1) {
+              groups = [];
+              appearsGroups = [];
+              releaseCache.clear();
+              showNotInLibrary(collab);
+              return;
+            }
+            // Joined the library between the two reads.
+            artistResult = collab;
+          }
+
+          artist = artistResult;
+          groups = groupResult.items;
+          appearsGroups = appearsResult.items;
+          releaseCache.clear();
+
+          document.title = `${artist.name} · Coda`;
+          crumb.textContent = artist.name;
+
+          heroArt.replaceChildren(artistAvatar(artist.id, artist.name));
+          setSharedArtName(
+            heroArt.firstElementChild as HTMLElement | null,
+            sharedArtName('artist', artist.id),
+          );
+          artistName.textContent = artist.name;
+
+          const meta: string[] = [];
+          if (artist.disambiguation) meta.push(artist.disambiguation);
+          if (artist['sort-name'] && artist['sort-name'] !== artist.name) {
+            meta.push(`Sort name: ${artist['sort-name']}`);
+          }
+          artistMeta.textContent = meta.join(' · ') || 'MusicBrainz artist';
+          artistId.textContent = artist.id;
+
+          artistActions.replaceChildren(
+            externalLink(
+              mbUrl.artist(artist.id),
+              'MusicBrainz ↗',
+              'btn btn--secondary',
+            ),
+          );
+          const refreshButton = el(
+            'button',
+            'btn btn--ghost',
+            'Refresh discography',
+          );
+          refreshButton.type = 'button';
+          refreshButton.addEventListener('click', () =>
+            refreshDiscography(refreshButton),
+          );
+          const deleteButton = el('button', 'btn btn--danger', 'Remove artist');
+          deleteButton.type = 'button';
+          deleteButton.addEventListener('click', () =>
+            deleteArtist(deleteButton),
+          );
+          artistActions.append(refreshButton, deleteButton);
+
+          groupTotal.textContent = String(groups.length);
+          releaseTotal.textContent = '—';
+          setTrackStats(artist);
+
+          status.hidden = true;
+          content.hidden = false;
+          renderGroups();
+          startImportPolling(false);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          showError(`Could not load artist: ${message}`);
+        }
+      }
+
+      filter.addEventListener('input', renderGroups);
+      load();
+    }
+
+    document.addEventListener('astro:page-load', initArtistPage);
+  </script>
+</Layout>

@@ -1,0 +1,42 @@
+name: Bug report
+description: Report something that is broken or behaves unexpectedly.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: Scanned my library, expected 120 files, got 0…
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps, config, and file layout needed to reproduce.
+      placeholder: |
+        1. Set roots to …
+        2. Run `go run ./cmd/coda`
+        3. Open …
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Version, OS, and how you run Coda.
+      placeholder: |
+        - Coda commit:
+        - `go version`:
+        - Node/pnpm (if UI):
+        - OS:
+        - `CODA_CONFIG` / `CODA_DB_PATH` overrides (redact paths if needed):
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / API output
+      description: Paste relevant logs or curl output. Redact personal paths.
+      render: shell

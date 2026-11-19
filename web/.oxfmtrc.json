@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 80,
+  "singleQuote": true,
+  "astro": true,
+  "overrides": [
+    {
+      "files": ["*.css"],
+      "options": {
+        "useTabs": true
+      }
+    }
+  ],
+  "ignorePatterns": ["dist/**", ".astro/**"]
+}

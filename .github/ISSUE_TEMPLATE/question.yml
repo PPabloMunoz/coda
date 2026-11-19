@@ -1,0 +1,27 @@
+name: Question
+description: Setup, config, or usage question (scan, tags, MusicBrainz, Navidrome).
+labels: [question]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What are you trying to do?
+      placeholder: How do I point roots at my NAS? Do link/unlink tags show in Navidrome?
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: OS, config (redacted), relevant docs you already read.
+      placeholder: |
+        - OS:
+        - roots layout:
+        - Docs checked: README, web/README, MusicBrainz / Navidrome docs
+  - type: textarea
+    id: tried
+    attributes:
+      label: What did you try?
+      description: Commands, API calls, and output.
+      render: shell
