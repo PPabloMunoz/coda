@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"path/filepath"
 	"strings"
+
+	"github.com/ppablomunoz/coda/internal/utils"
 )
 
 // SupportedFormats available to scan.
@@ -80,4 +82,60 @@ func Scan(ctx context.Context, rootPaths []string, fn func(File) error) error {
 	}
 
 	return nil
+}
+
+type Target struct {
+	Root   string
+	Artist string
+	Album  string
+	Title  string
+	Disc   int
+	Track  int
+	Ext    string // without dot
+}
+
+func (t Target) Path() (string, error) {
+	root := filepath.Clean(strings.TrimSpace(t.Root))
+	if root == "" || root == "." {
+		return "", fmt.Errorf("library: destination root is empty")
+	}
+	if !filepath.IsAbs(root) {
+		return "", fmt.Errorf("library: destination root %q is not absolute", t.Root)
+	}
+
+	artist := utils.SanitizeSegment(t.Artist)
+	if artist == "" {
+		return "", fmt.Errorf("library: artist is empty")
+	}
+	album := utils.SanitizeSegment(t.Album)
+	if album == "" {
+		return "", fmt.Errorf("library: album is empty")
+	}
+	title := utils.SanitizeSegment(t.Title)
+	if title == "" {
+		return "", fmt.Errorf("library: title is empty")
+	}
+	if t.Disc < 1 {
+		return "", fmt.Errorf("library: disc %d out of range", t.Disc)
+	}
+	if t.Track < 1 {
+		return "", fmt.Errorf("library: track %d out of range", t.Track)
+	}
+
+	ext := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(t.Ext), "."))
+	if ext == "" {
+		return "", fmt.Errorf("library: extension is empty")
+	}
+	if _, ok := SupportedFormats[ext]; !ok {
+		return "", fmt.Errorf("library: unsupported extension %q", t.Ext)
+	}
+
+	dst := filepath.Join(root, artist, album,
+		fmt.Sprintf("%02d-%02d_%s.%s", t.Disc, t.Track, title, ext))
+
+	rel, err := filepath.Rel(root, dst)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("library: destination escapes root")
+	}
+	return dst, nil
 }

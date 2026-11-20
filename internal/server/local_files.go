@@ -2,10 +2,15 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/ppablomunoz/coda/internal/library"
 	"github.com/ppablomunoz/coda/internal/store"
 	"github.com/ppablomunoz/coda/internal/tags"
 	"github.com/ppablomunoz/coda/internal/tasks"
@@ -87,6 +92,7 @@ func (h *Handler) stats() http.HandlerFunc {
 
 type PostLinkBody struct {
 	TrackID string `json:"track_id"`
+	Move    bool   `json:"move"`
 }
 
 func (h *Handler) link() http.HandlerFunc {
@@ -128,17 +134,85 @@ func (h *Handler) link() http.HandlerFunc {
 			return
 		}
 
-		// Write tags
+		// Write tags to the source file first (in place). The rename below
+		// moves the already-tagged file, then the DB is updated to the
+		// final on-disk state.
 		linkInfo := tasks.LinkInfoFromStore(fullRelease, track)
 		t := tags.ToMap(tags.SnapshotFromLink(linkInfo))
 		if err := tags.WriteTags(localFile.Path, t); h.handleErrorCtx(w, err, "link file=%d track=%q write tags", localFileID, trackID) {
 			return
 		}
 
-		// Insert into DB
+		src := localFile.Path
+		dst := src
+		moved := false
 
-		if err := h.st.Link(ctx, localFileID, trackID); h.handleErrorCtx(w, err, "link file=%d track=%q save", localFileID, trackID) {
+		if body.Move {
+			root, err := h.st.GetRoot(ctx, localFile.RootID)
+			if h.handleErrorCtx(w, err, "link file=%d load root", localFileID) {
+				return
+			}
+
+			artist := linkInfo.AlbumArtistDisplay
+			if strings.TrimSpace(artist) == "" {
+				artist = linkInfo.ArtistDisplay
+			}
+			dst, err = library.Target{
+				Root:   root.Path,
+				Artist: artist,
+				Album:  linkInfo.Album,
+				Title:  linkInfo.Title,
+				Disc:   linkInfo.DiscNumber,
+				Track:  linkInfo.TrackNumber,
+				Ext:    localFile.FormatHint,
+			}.Path()
+			if h.handleErrorCtx(w, err, "link file=%d track=%q build path", localFileID, trackID) {
+				return
+			}
+
+			if dst != src {
+				if err := os.MkdirAll(filepath.Dir(dst), 0o755); h.handleErrorCtx(w, err, "link file=%d track=%q mkdir", localFileID, trackID) {
+					return
+				}
+				if _, err := os.Lstat(dst); err == nil {
+					writeError(w, http.StatusConflict, "destination exists")
+					return
+				} else if !os.IsNotExist(err) {
+					h.handleErrorCtx(w, err, "link file=%d track=%q stat destination", localFileID, trackID)
+					return
+				}
+				if err := os.Rename(src, dst); h.handleErrorCtx(w, err, "link file=%d track=%q move", localFileID, trackID) {
+					return
+				}
+				moved = true
+			}
+		}
+
+		fi, err := os.Stat(dst)
+		if h.handleErrorCtx(w, err, "link file=%d track=%q stat", localFileID, trackID) {
+			// Tags were written and the file may have moved; DB still
+			// points at src. Next scan heals this to unlinked, never
+			// to a wrong link.
 			return
+		}
+
+		if err := h.st.Link(ctx, localFileID, trackID,
+			dst, fi.Size(), fi.ModTime().UnixNano()); err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				if moved {
+					_ = os.Rename(dst, src)
+				}
+				writeError(w, http.StatusConflict, "destination exists")
+				return
+			}
+			if h.handleErrorCtx(w, err, "link file=%d track=%q save", localFileID, trackID) {
+				if moved {
+					if rbErr := os.Rename(dst, src); rbErr != nil {
+						h.log.Errorf("link file=%d track=%q rollback failed: %v", localFileID, trackID, rbErr)
+					}
+				}
+				return
+			}
 		}
 
 		h.log.Infof("link file=%d track=%q done in %s", localFileID, trackID, time.Since(start))
