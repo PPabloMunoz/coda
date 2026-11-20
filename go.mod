@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	github.com/bogem/id3v2/v2 v2.1.4
+	github.com/gin-gonic/gin v1.12.0
 	github.com/pressly/goose/v3 v3.29.0
 	go.senan.xyz/taglib v0.15.0
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
@@ -20,7 +21,6 @@ require (
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
-	github.com/gin-gonic/gin v1.12.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.1 // indirect
