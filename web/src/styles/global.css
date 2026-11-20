@@ -2579,6 +2579,25 @@ dialog[open] {
 	min-width: 7.5rem;
 }
 
+.wizard__move {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	color: var(--muted);
+	font-size: 0.78rem;
+	font-weight: 600;
+	cursor: pointer;
+	user-select: none;
+	white-space: nowrap;
+}
+
+.wizard__move input {
+	width: 1rem;
+	height: 1rem;
+	accent-color: var(--accent);
+	cursor: pointer;
+}
+
 .picker {
 	display: grid;
 	gap: 0.55rem;

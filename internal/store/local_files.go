@@ -11,6 +11,10 @@ import (
 	"github.com/ppablomunoz/coda/internal/utils"
 )
 
+// ErrConflict is returned when a link/move would violate local_files.path
+// uniqueness (destination already tracked).
+var ErrConflict = errors.New("[store]: conflict")
+
 func (st *Store) ListFiles(
 	ctx context.Context,
 	opts FileListOptions,
@@ -305,7 +309,9 @@ type SyncStats struct {
 	Pruned   int64
 }
 
-func (st *Store) SyncLocalFiles(ctx context.Context, files []ScannedFile, scanStart string) (SyncStats, error) {
+func (st *Store) SyncLocalFiles(ctx context.Context,
+	files []ScannedFile, scanStart string,
+) (SyncStats, error) {
 	if len(st.rootPaths) == 0 {
 		return SyncStats{}, nil
 	}
@@ -424,19 +430,41 @@ func (st *Store) SyncLocalFiles(ctx context.Context, files []ScannedFile, scanSt
 	return stats, nil
 }
 
-func (st *Store) Link(ctx context.Context, localFileID int64, trackID string) error {
-	// Local File exists?
-	var lID int64
+// GetRoot returns the library root row for id, or ErrNotFound.
+func (st *Store) GetRoot(ctx context.Context, id int64) (*Root, error) {
+	r := &Root{}
 	if err := st.db.QueryRowContext(ctx,
-		"SELECT id FROM local_files WHERE id = ?",
-		localFileID).Scan(&lID); err != nil {
+		"SELECT id, path, active, created_at FROM roots WHERE id = ?",
+		id).Scan(&r.ID, &r.Path, &r.Active, &r.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("[store] get root: %w", err)
+	}
+	return r, nil
+}
+
+// Link ties a local file to a track and records its current on-disk state.
+// newPath/sizeBytes/mtimeNs describe the file AFTER the caller finished tag
+// writes and (optionally) the rename, so the DB never points at a path that
+// doesn't exist yet. Filesystem work stays in the caller; store is DB-only.
+func (st *Store) Link(ctx context.Context,
+	fileID int64, trackID, newPath string, sizeBytes, mtimeNs int64,
+) error {
+	if strings.TrimSpace(newPath) == "" {
+		return fmt.Errorf("[store] link: empty path")
+	}
+
+	var oldPath string
+	if err := st.db.QueryRowContext(ctx,
+		"SELECT path FROM local_files WHERE id = ?",
+		fileID).Scan(&oldPath); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
-		return err
+		return fmt.Errorf("[store] get file: %w", err)
 	}
 
-	// Track exists?
 	var tID string
 	if err := st.db.QueryRowContext(ctx,
 		"SELECT id FROM tracks WHERE id = ?",
@@ -444,18 +472,34 @@ func (st *Store) Link(ctx context.Context, localFileID int64, trackID string) er
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
-		return err
+		return fmt.Errorf("[store] get track: %w", err)
 	}
 
-	// Update relation
-	_, err := st.db.ExecContext(ctx, `
+	if newPath != oldPath {
+		var clash int64
+		if err := st.db.QueryRowContext(ctx,
+			"SELECT id FROM local_files WHERE path = ? AND id != ?",
+			newPath, fileID).Scan(&clash); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("[store] check path conflict: %w", err)
+		} else if err == nil {
+			return ErrConflict
+		}
+	}
+
+	res, err := st.db.ExecContext(ctx, `
 		UPDATE local_files
-		SET track_id = ?
+		SET track_id = ?, path = ?, size_bytes = ?, mtime_ns = ?
 		WHERE id = ?`,
-		trackID, localFileID,
+		trackID, newPath, sizeBytes, mtimeNs, fileID,
 	)
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return ErrConflict
+		}
 		return fmt.Errorf("[store] update local_file: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return ErrNotFound
 	}
 
 	return nil

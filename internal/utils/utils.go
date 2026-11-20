@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -89,4 +90,44 @@ func NullIfEmpty(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func SanitizeSegment(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	// Never allow separators to create sub-dirs / escapes.
+	s = strings.ReplaceAll(s, "/", "_")
+	s = strings.ReplaceAll(s, "\\", "_")
+
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r < 32 || r == 127: // control / DEL
+			b.WriteRune('_')
+		case strings.ContainsRune(`:*?"<>|`, r):
+			b.WriteRune('_')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	s = strings.ReplaceAll(strings.TrimSpace(b.String()), " ", "_")
+	s = strings.Trim(s, "._")
+	// Collapse repeats + cap for ENAMETOOLONG.
+	for strings.Contains(s, "__") {
+		s = strings.ReplaceAll(s, "__", "_")
+	}
+	if len([]rune(s)) > 100 {
+		s = string([]rune(s)[:100])
+		s = strings.Trim(s, "._")
+	}
+	return s
+}
+
+// GetFileFormat extracts the file extension from a path without the leading dot,
+// normalized to lowercase. Returns an empty string if there is no extension.
+func GetFileFormat(path string) string {
+	ext := filepath.Ext(path)
+	return strings.ToLower(strings.TrimPrefix(ext, "."))
 }
