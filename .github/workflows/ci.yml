@@ -33,8 +33,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - uses: golangci/golangci-lint-action@v8
-
       - uses: extractions/setup-just@v3
 
       # web-build first so go:embed has web/dist
