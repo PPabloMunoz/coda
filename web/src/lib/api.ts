@@ -244,7 +244,7 @@ async function listArtistsPage(
   if (options.sort) params.set('sort', options.sort);
   if (options.order) params.set('order', options.order);
   if (options.includeTrackStats) params.set('include', 'track_stats');
-  return request<Page<Artist>>(`/api/artists?${params.toString()}`);
+  return request<Page<Artist>>(`/api/v1/artists?${params.toString()}`);
 }
 
 export interface FileListOptions {
@@ -271,7 +271,7 @@ async function listFilesPage(
   if (options.format) params.set('format', options.format);
   if (options.sort) params.set('sort', options.sort);
   if (options.order) params.set('order', options.order);
-  return request<Page<LocalFile>>(`/api/files?${params.toString()}`);
+  return request<Page<LocalFile>>(`/api/v1/files?${params.toString()}`);
 }
 
 export interface ReleaseGroupListOptions {
@@ -307,7 +307,7 @@ async function listReleaseGroupsPage(
   if (options.sort) params.set('sort', options.sort);
   if (options.order) params.set('order', options.order);
   return request<Page<ReleaseGroup>>(
-    `/api/release-groups?${params.toString()}`,
+    `/api/v1/release-groups?${params.toString()}`,
   );
 }
 
@@ -357,16 +357,16 @@ export function pageParams(defaultLimit = 10): {
 }
 
 export const api = {
-  health: () => fetch('/api/health').then((res) => res.text()),
+  health: () => fetch('/api/v1/health').then((res) => res.text()),
 
   listFiles: listFilesPage,
   getFile: (id: string | number, includeTrack = false) =>
     request<LocalFile>(
-      `/api/files/${encodeURIComponent(String(id))}` +
+      `/api/v1/files/${encodeURIComponent(String(id))}` +
         (includeTrack ? '?include=track' : ''),
     ),
-  getFileStats: () => request<LocalFilesStats>('/api/files/stats'),
-  getStats: () => request<LibraryStats>('/api/stats'),
+  getFileStats: () => request<LocalFilesStats>('/api/v1/files/stats'),
+  getStats: () => request<LibraryStats>('/api/v1/stats'),
   listUnlinkedFiles: (limit: number, offset: number) =>
     listFilesPage(limit, offset, { unlinked: true }),
   listAllUnlinkedFiles: async (): Promise<AllPages<LocalFile>> => {
@@ -398,31 +398,31 @@ export const api = {
     if (all) params.set('all', 'true');
     const query = params.toString();
     return request<Artist>(
-      `/api/artists/${encodeURIComponent(id)}${query ? `?${query}` : ''}`,
+      `/api/v1/artists/${encodeURIComponent(id)}${query ? `?${query}` : ''}`,
     );
   },
   getArtistImportStatus: (id: string) =>
     request<ArtistImportStatus>(
-      `/api/artists/${encodeURIComponent(id)}/import`,
+      `/api/v1/artists/${encodeURIComponent(id)}/import`,
     ),
   refreshArtist: (id: string) =>
     request<ArtistImportStatus>(
-      `/api/artists/${encodeURIComponent(id)}/refresh`,
+      `/api/v1/artists/${encodeURIComponent(id)}/refresh`,
       { method: 'POST' },
     ),
   searchMusicBrainzArtists: (query: string, signal?: AbortSignal) =>
     request<Page<MusicBrainzArtist>>(
-      `/api/musicbrainz/artists?q=${encodeURIComponent(query)}`,
+      `/api/v1/musicbrainz/artists?q=${encodeURIComponent(query)}`,
       { signal },
     ),
   addArtist: (id: string) =>
-    fetch('/api/artists', {
+    fetch('/api/v1/artists', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
     }),
   deleteArtist: (id: string) =>
-    fetch(`/api/artists/${encodeURIComponent(id)}`, {
+    fetch(`/api/v1/artists/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
 
@@ -432,13 +432,13 @@ export const api = {
       listReleaseGroupsPage(limit, offset, options),
     ),
   getReleaseGroup: (id: string) =>
-    request<ReleaseGroup>(`/api/release-groups/${encodeURIComponent(id)}`),
+    request<ReleaseGroup>(`/api/v1/release-groups/${encodeURIComponent(id)}`),
   deleteReleaseGroup: (id: string) =>
-    fetch(`/api/release-groups/${encodeURIComponent(id)}`, {
+    fetch(`/api/v1/release-groups/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
   updateReleaseGroup: (groupId: string, newReleaseId: string) =>
-    fetch(`/api/release-groups/${encodeURIComponent(groupId)}/update`, {
+    fetch(`/api/v1/release-groups/${encodeURIComponent(groupId)}/update`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ new_release_id: newReleaseId }),
@@ -446,24 +446,24 @@ export const api = {
 
   getRelease: (id: string, includeFiles = false) =>
     request<Release>(
-      `/api/releases/${encodeURIComponent(id)}` +
+      `/api/v1/releases/${encodeURIComponent(id)}` +
         (includeFiles ? '?include=files' : ''),
     ),
   getReleaseByGroup: (groupId: string, includeFiles = false) =>
     request<Release>(
-      `/api/releases?group=${encodeURIComponent(groupId)}` +
+      `/api/v1/releases?group=${encodeURIComponent(groupId)}` +
         (includeFiles ? '&include=files' : ''),
     ),
 
   link: (fileID: number, trackID: string, move = false) =>
-    fetch(`/api/files/${fileID}/link`, {
+    fetch(`/api/v1/files/${fileID}/link`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ track_id: trackID, move }),
     }),
-  scan: () => fetch('/api/scan', { method: 'POST' }),
+  scan: () => fetch('/api/v1/scan', { method: 'POST' }),
   unlink: (fileID: number) =>
-    fetch(`/api/files/${fileID}/link`, { method: 'DELETE' }),
+    fetch(`/api/v1/files/${fileID}/link`, { method: 'DELETE' }),
   refreshFile: (fileID: number) =>
-    fetch(`/api/files/${fileID}/refresh`, { method: 'POST' }),
+    fetch(`/api/v1/files/${fileID}/refresh`, { method: 'POST' }),
 };

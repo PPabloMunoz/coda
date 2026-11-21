@@ -185,7 +185,7 @@ const { title, current } = Astro.props as Props;
         const rescan = document.getElementById('rescan');
 
         if (health && healthLabel) {
-          fetch('/api/health')
+          fetch('/api/v1/health')
             .then((res) => {
               if (!res.ok) throw new Error('unhealthy');
               health.classList.add('is-ok');
@@ -309,7 +309,7 @@ const { title, current } = Astro.props as Props;
             return;
           }
           try {
-            // Local library only (GET /api/artists?q=) — never MusicBrainz.
+            // Local library only (GET /api/v1/artists?q=) — never MusicBrainz.
             const page = await api
               .listArtists(8, 0, { query })
               .catch(() => null);
