@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"embed"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,8 +18,6 @@ import (
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
-
-var ErrNotFound = errors.New("[store]: not found")
 
 type Store struct {
 	db        *sql.DB

@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/ppablomunoz/coda/internal/config"
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
 	"github.com/ppablomunoz/coda/internal/server"
@@ -79,6 +81,12 @@ func main() {
 
 	// Start server
 	addr := fmt.Sprintf(":%d", cfg.Port)
+	// Gin defaults to debug mode (route table dump + warnings on stdout).
+	// Release is the default for the shipped binary; developers can still
+	// opt back into debug output with GIN_MODE=debug.
+	if os.Getenv("GIN_MODE") == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	router := server.NewHandler(log, st, mb, queue)
 	srv := &http.Server{
 		Addr:              addr,
