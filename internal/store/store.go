@@ -55,7 +55,7 @@ func (st *Store) AddRootDirs(ctx context.Context) error {
 		if execErr != nil {
 			return apperrors.Wrap(
 				apperrors.ErrInternal,
-				fmt.Errorf("error inserting root %q into DB: %w", err),
+				fmt.Errorf("error inserting root %q into DB: %w", r, err),
 			)
 		}
 	}
@@ -141,10 +141,6 @@ func migration(db *sql.DB) error {
 		return err
 	}
 	return nil
-}
-
-func (st *Store) prepareQueryError(err error) error {
-	return fmt.Errorf("[store] prepare query: %w", err)
 }
 
 func placeholders(n int) string {
