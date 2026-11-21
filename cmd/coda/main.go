@@ -24,6 +24,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
+		syscall.SIGINT,
 		syscall.SIGTERM,
 	)
 	defer stop()
@@ -77,16 +78,17 @@ func main() {
 	scheduler := tasks.NewScheduler(queue, log)
 
 	// Start server
-	handler := server.NewHandler(log, st, mb, queue)
+	addr := fmt.Sprintf(":%d", cfg.Port)
+	router := server.NewHandler(log, st, mb, queue)
 	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           handler,
+		Addr:              addr,
+		Handler:           router.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Infof("server listening on :%d", cfg.Port)
+		log.Infof("server listening on %s", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}

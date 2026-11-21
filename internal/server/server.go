@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
 	"github.com/ppablomunoz/coda/internal/store"
 	"github.com/ppablomunoz/coda/internal/tasks"
@@ -27,7 +29,8 @@ type Handler struct {
 	queue *tasks.Queue
 }
 
-func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tasks.Queue) http.Handler {
+func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tasks.Queue,
+) *gin.Engine {
 	handler := Handler{
 		log:   l,
 		st:    st,
@@ -35,86 +38,90 @@ func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tas
 		queue: q,
 	}
 
-	mux := http.NewServeMux()
+	router := gin.Default()
+	v1 := router.Group("/api/v1")
 
-	mux.HandleFunc("GET /api/health", handler.health())
-	mux.HandleFunc("GET /api/stats", handler.libraryStats())
-	mux.HandleFunc("POST /api/scan", handler.postScan())
+	v1.GET("/health", handler.health)
+	v1.GET("/stats", handler.libraryStats)
+	v1.POST("/scan", handler.postScan)
 
 	// Local Files
-	mux.HandleFunc("GET /api/files", handler.getLocalFiles())
-	mux.HandleFunc("GET /api/files/stats", handler.stats())
-	mux.HandleFunc("GET /api/files/{id}", handler.getLocalFile())
-	mux.HandleFunc("POST /api/files/{id}/link", handler.link())
-	mux.HandleFunc("DELETE /api/files/{id}/link", handler.unlink())
-	mux.HandleFunc("POST /api/files/{id}/refresh", handler.refreshLocalFile())
-
+	// mux.HandleFunc("GET /api/files", handler.getLocalFiles())
+	// mux.HandleFunc("GET /api/files/stats", handler.stats())
+	// mux.HandleFunc("GET /api/files/{id}", handler.getLocalFile())
+	// mux.HandleFunc("POST /api/files/{id}/link", handler.link())
+	// mux.HandleFunc("DELETE /api/files/{id}/link", handler.unlink())
+	// mux.HandleFunc("POST /api/files/{id}/refresh", handler.refreshLocalFile())
+	//
 	// Artists
-	mux.HandleFunc("GET /api/artists", handler.getArtists())
-	mux.HandleFunc("GET /api/artists/{id}", handler.getArtist())
-	mux.HandleFunc("DELETE /api/artists/{id}", handler.deleteArtist())
-	mux.HandleFunc("GET /api/artists/{id}/import", handler.getArtistImportStatus())
-	mux.HandleFunc("POST /api/artists", handler.postArtist())
-	mux.HandleFunc("POST /api/artists/{id}/refresh", handler.refreshArtist())
-
+	v1.GET("/artists", handler.getArtists)
+	v1.GET("/artists/:id", handler.getArtist)
+	v1.DELETE("/artists/:id", handler.deleteArtist)
+	v1.GET("/artists/:id/import", handler.getArtistImportStatus)
+	v1.POST("/artists", handler.postArtist)
+	v1.POST("/artists/:id/refresh", handler.refreshArtist)
+	//
 	// MusicBrainz
-	mux.HandleFunc("GET /api/musicbrainz/artists", handler.searchMusicBrainzArtists())
-
+	// mux.HandleFunc("GET /api/musicbrainz/artists", handler.searchMusicBrainzArtists())
+	//
 	// Release Groups
-	mux.HandleFunc("GET /api/release-groups", handler.getReleaseGroups())
-	mux.HandleFunc("GET /api/release-groups/{id}", handler.getReleaseGroup())
-	mux.HandleFunc("DELETE /api/release-groups/{id}", handler.deleteReleaseGroup())
-	mux.HandleFunc("PUT /api/release-groups/{id}/update", handler.replaceRelease())
-
+	// mux.HandleFunc("GET /api/release-groups", handler.getReleaseGroups())
+	// mux.HandleFunc("GET /api/release-groups/{id}", handler.getReleaseGroup())
+	// mux.HandleFunc("DELETE /api/release-groups/{id}", handler.deleteReleaseGroup())
+	// mux.HandleFunc("PUT /api/release-groups/{id}/update", handler.replaceRelease())
+	//
 	// Releases
-	mux.HandleFunc("GET /api/releases", handler.getReleases())
-	mux.HandleFunc("GET /api/releases/{id}", handler.getRelease())
-
+	// mux.HandleFunc("GET /api/releases", handler.getReleases())
+	// mux.HandleFunc("GET /api/releases/{id}", handler.getRelease())
+	//
 	// Embedded Astro UI (web/dist). Catch-all, registered last.
-	mountWeb(mux)
+	// mountWeb(mux)
 
-	return handler.withLogging(mux)
+	return router
 }
 
-func (h *Handler) health() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("ok"))
-	}
+func (h *Handler) health(c *gin.Context) {
+	c.String(http.StatusOK, "ok")
 }
 
-func parseLimitAndOffset(r *http.Request) (limit int, offset int, err error) {
-	// Default values
-	limit = 20
-	offset = 0
+func parseLimitAndOffset(c *gin.Context) (limit int, offset int, err error) {
+	limitStr := c.DefaultQuery("limit", "20")
+	offsetStr := c.DefaultQuery("offset", "0")
 
-	query := r.URL.Query()
-
-	if val := query.Get("limit"); val != "" {
-		limit, err = strconv.Atoi(val)
-		if err != nil {
-			return 0, 0, fmt.Errorf("invalid 'limit' parameter: must be an integer")
-		}
-		if limit < 1 || limit > 100 { // Optional: enforce upper and lower bounds
-			return 0, 0, fmt.Errorf("'limit' must be between 1 and 100")
-		}
+	limit, err = strconv.Atoi(limitStr)
+	if err != nil {
+		return 0, 0, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("invalid 'limit' parameter: must be an integer"),
+		)
+	}
+	if limit < 1 || limit > 100 {
+		return 0, 0, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("'limit' must be between 1 and 100"),
+		)
 	}
 
-	if val := query.Get("offset"); val != "" {
-		offset, err = strconv.Atoi(val)
-		if err != nil {
-			return 0, 0, fmt.Errorf("invalid 'offset' parameter: must be an integer")
-		}
-		if offset < 0 {
-			return 0, 0, fmt.Errorf("'offset' must be non-negative")
-		}
+	offset, err = strconv.Atoi(offsetStr)
+	if err != nil {
+		return 0, 0, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("invalid 'offset' parameter: must be an integer"),
+		)
+	}
+	if offset < 0 {
+		return 0, 0, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("'offset' must be non-negative"),
+		)
 	}
 
 	return limit, offset, nil
 }
 
 // hasInclude reports whether an ?include=... comma-separated flag contains name.
-func hasInclude(r *http.Request, name string) bool {
-	for value := range strings.SplitSeq(r.URL.Query().Get("include"), ",") {
+func hasInclude(c *gin.Context, name string) bool {
+	for value := range strings.SplitSeq(c.Query("include"), ",") {
 		if strings.TrimSpace(value) == name {
 			return true
 		}
@@ -128,24 +135,23 @@ func parseOptionalBool(raw string) (*bool, error) {
 	}
 	value, err := strconv.ParseBool(raw)
 	if err != nil {
-		return nil, fmt.Errorf("invalid boolean %q", raw)
+		return nil, apperrors.ErrInvalidInput
 	}
 	return &value, nil
 }
 
-func requireMBID(w http.ResponseWriter, raw string) (string, bool) {
+func requireMBID(raw string) (string, error) {
 	if err := utils.ValidateMBID(raw); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return "", false
+		return "", apperrors.ErrInvalidID
 	}
-	return raw, true
+	return raw, nil
 }
 
-func requireOptionalMBID(w http.ResponseWriter, raw string) (string, bool) {
+func requireOptionalMBID(w http.ResponseWriter, raw string) (string, error) {
 	if raw == "" {
-		return "", true
+		return "", nil
 	}
-	return requireMBID(w, raw)
+	return requireMBID(raw)
 }
 
 func (h *Handler) handleError(w http.ResponseWriter, err error) bool {
