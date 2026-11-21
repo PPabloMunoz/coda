@@ -147,7 +147,7 @@ func requireMBID(raw string) (string, error) {
 	return raw, nil
 }
 
-func requireOptionalMBID(w http.ResponseWriter, raw string) (string, error) {
+func requireOptionalMBID(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
