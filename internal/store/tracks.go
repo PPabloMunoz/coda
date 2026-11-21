@@ -5,37 +5,30 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
 func (st *Store) GetTrack(ctx context.Context, trackID string) (*TrackParams, error) {
-	stmt, err := st.db.PrepareContext(ctx, `
-		SELECT t.id, t.release_id, t.disc_number, t.position, t.number,
-		t.title, t.artist_credit_id, t.duration_ms, t.recording_id
-		FROM tracks t
-		WHERE id = ?`)
-	if err != nil {
-		return nil, st.prepareQueryError(err)
-	}
-	defer func() { _ = stmt.Close() }()
-
 	var t TrackParams
 	var acID sql.NullInt64
 
-	if err := stmt.QueryRowContext(ctx, trackID).Scan(
-		&t.ID,
-		&t.ReleaseID,
-		&t.Disc,
-		&t.Position,
-		&t.Number,
-		&t.Title,
-		&acID,
-		&t.DurMS,
-		&t.RecordingID,
+	if err := st.db.QueryRowContext(ctx, `
+		SELECT t.id, t.release_id, t.disc_number, t.position, t.number,
+		t.title, t.artist_credit_id, t.duration_ms, t.recording_id
+		FROM tracks t
+		WHERE id = ?`,
+		trackID).Scan(
+		&t.ID, &t.ReleaseID, &t.Disc, &t.Position, &t.Number,
+		&t.Title, &acID, &t.DurMS, &t.RecordingID,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, apperrors.ErrNotFound
 		}
-		return nil, fmt.Errorf("[store] query scan: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query scan: %w", err),
+		)
 	}
 
 	if acID.Valid {
@@ -74,7 +67,10 @@ func (st *Store) trackExists(ctx context.Context, tx *sql.Tx, id string) (bool, 
 		`SELECT EXISTS(SELECT 1 FROM tracks WHERE id = ?)`, id,
 	).Scan(&exists)
 	if err != nil {
-		return false, err
+		return false, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query exist track: %w", err),
+		)
 	}
 	return exists, nil
 }

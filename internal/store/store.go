@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"embed"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,13 +12,12 @@ import (
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/utils"
 )
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
-
-var ErrNotFound = errors.New("[store]: not found")
 
 type Store struct {
 	db        *sql.DB
@@ -37,7 +35,10 @@ func NewStore(dsn string, rootPaths []string, log *utils.Logger) (*Store, error)
 func (st *Store) AddRootDirs(ctx context.Context) error {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("store: add root dirs: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("start tx: %w", err),
+		)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -49,14 +50,20 @@ func (st *Store) AddRootDirs(ctx context.Context) error {
 			r,
 		)
 		if execErr != nil {
-			return fmt.Errorf("store: error inserting root %q into DB: %w", r, execErr)
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("error inserting root %q into DB: %w", r, err),
+			)
 		}
 	}
 
 	if len(st.rootPaths) == 0 {
 		_, err := tx.ExecContext(ctx, `UPDATE roots SET active=0 WHERE active=1`)
 		if err != nil {
-			return fmt.Errorf("store: deactivate roots: %w", err)
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("deactivate roots: %w", err),
+			)
 		}
 	} else {
 		ph := placeholders(len(st.rootPaths))
@@ -69,12 +76,18 @@ func (st *Store) AddRootDirs(ctx context.Context) error {
 			args...,
 		)
 		if err != nil {
-			return fmt.Errorf("store: deactivate roots: %w", err)
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("deactivate roots: %w", err),
+			)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: add root dirs: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("add root dirs: %w", err),
+		)
 	}
 
 	return nil
@@ -125,10 +138,6 @@ func migration(db *sql.DB) error {
 		return err
 	}
 	return nil
-}
-
-func (st *Store) prepareQueryError(err error) error {
-	return fmt.Errorf("[store] prepare query: %w", err)
 }
 
 func placeholders(n int) string {

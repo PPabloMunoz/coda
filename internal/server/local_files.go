@@ -1,8 +1,7 @@
 package server
 
 import (
-	"encoding/json"
-	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,84 +9,87 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
+
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/library"
 	"github.com/ppablomunoz/coda/internal/store"
 	"github.com/ppablomunoz/coda/internal/tags"
 	"github.com/ppablomunoz/coda/internal/tasks"
 )
 
-func (h *Handler) getLocalFiles() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		queryParams := r.URL.Query()
+func (h *Handler) getLocalFiles(c *gin.Context) {
+	ctx := c.Request.Context()
 
-		linked, err := parseOptionalBool(queryParams.Get("linked"))
-		if err != nil {
-			h.log.Debugf("bad request %s %s: %v", r.Method, r.URL.Path, err)
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if linked == nil && queryParams.Get("unlink") != "" {
-			value := false
-			linked = &value
-		}
-
-		limit, offset, err := parseLimitAndOffset(r)
-		if err != nil {
-			h.log.Debugf("bad request %s %s: %v", r.Method, r.URL.Path, err)
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-
-		files, total, err := h.st.ListFiles(
-			r.Context(), store.FileListOptions{
-				SearchOptions: store.SearchOptions{Query: queryParams.Get("q")},
-				SortOptions:   store.SortOptions{Sort: queryParams.Get("sort"), Order: queryParams.Get("order")},
-				PageOptions:   store.PageOptions{Limit: limit, Offset: offset},
-				Linked:        linked,
-				IncludeTrack:  hasInclude(r, "track"),
-				Format:        queryParams.Get("format"),
-			})
-		if h.handleError(w, err) {
-			return
-		}
-
-		response := Response[[]store.LocalFile]{
-			Total: total,
-			Items: files,
-		}
-
-		writeJSON(w, http.StatusOK, response)
+	linked, err := parseOptionalBool(c.Query("linked"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
 	}
+	if linked == nil && c.Query("unlink") != "" {
+		value := false
+		linked = &value
+	}
+
+	limit, offset, err := parseLimitAndOffset(c)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	files, total, err := h.st.ListFiles(
+		ctx, store.FileListOptions{
+			SearchOptions: store.SearchOptions{Query: c.Query("q")},
+			SortOptions:   store.SortOptions{Sort: c.Query("sort"), Order: c.Query("order")},
+			PageOptions:   store.PageOptions{Limit: limit, Offset: offset},
+			Linked:        linked,
+			IncludeTrack:  hasInclude(c, "track"),
+			Format:        c.Query("format"),
+		})
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	response := Response[[]store.LocalFile]{
+		Total: total,
+		Items: files,
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
-func (h *Handler) getLocalFile() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		localFileID, ok := requireFileID(w, r.PathValue("id"))
-		if !ok {
-			return
-		}
+func (h *Handler) getLocalFile(c *gin.Context) {
+	ctx := c.Request.Context()
 
-		file, err := h.st.GetFile(
-			r.Context(),
-			localFileID,
-			hasInclude(r, "track"),
-		)
-		if h.handleError(w, err) {
-			return
-		}
-
-		writeJSON(w, http.StatusOK, file)
+	localFileID, err := requireLocalFileID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
 	}
+
+	file, err := h.st.GetFile(
+		ctx,
+		localFileID,
+		hasInclude(c, "track"),
+	)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, file)
 }
 
-func (h *Handler) stats() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		stats, err := h.st.GetLocalFilesStats(r.Context())
-		if h.handleError(w, err) {
-			return
-		}
-		writeJSON(w, http.StatusOK, stats)
+func (h *Handler) stats(c *gin.Context) {
+	ctx := c.Request.Context()
+	stats, err := h.st.GetLocalFilesStats(ctx)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
 	}
+	c.JSON(http.StatusOK, stats)
 }
 
 type PostLinkBody struct {
@@ -95,210 +97,270 @@ type PostLinkBody struct {
 	Move    bool   `json:"move"`
 }
 
-func (h *Handler) link() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+func (h *Handler) link(c *gin.Context) {
+	ctx := c.Request.Context()
 
-		localFileID, ok := requireFileID(w, r.PathValue("id"))
-		if !ok {
-			return
-		}
-
-		var body PostLinkBody
-
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			h.log.Debugf("bad request %s %s: %v", r.Method, r.URL.Path, err)
-			writeError(w, http.StatusBadRequest, "body invalid")
-			return
-		}
-
-		trackID, ok := requireMBID(w, body.TrackID)
-		if !ok {
-			return
-		}
-
-		start := time.Now()
-
-		// Write tags to file
-		// Get file
-		localFile, err := h.st.GetFile(ctx, localFileID, false)
-		if h.handleErrorCtx(w, err, "link file=%d load", localFileID) {
-			return
-		}
-
-		// Get tacks release data
-		fullRelease, track, err := h.st.GetTrackFullRelease(
-			ctx,
-			trackID)
-		if h.handleErrorCtx(w, err, "link file=%d track=%q load release", localFileID, trackID) {
-			return
-		}
-
-		// Write tags to the source file first (in place). The rename below
-		// moves the already-tagged file, then the DB is updated to the
-		// final on-disk state.
-		linkInfo := tasks.LinkInfoFromStore(fullRelease, track)
-		t := tags.ToMap(tags.SnapshotFromLink(linkInfo))
-		if err := tags.WriteTags(localFile.Path, t); h.handleErrorCtx(w, err, "link file=%d track=%q write tags", localFileID, trackID) {
-			return
-		}
-
-		src := localFile.Path
-		dst := src
-		moved := false
-
-		if body.Move {
-			root, err := h.st.GetRoot(ctx, localFile.RootID)
-			if h.handleErrorCtx(w, err, "link file=%d load root", localFileID) {
-				return
-			}
-
-			artist := linkInfo.AlbumArtistDisplay
-			if strings.TrimSpace(artist) == "" {
-				artist = linkInfo.ArtistDisplay
-			}
-			dst, err = library.Target{
-				Root:   root.Path,
-				Artist: artist,
-				Album:  linkInfo.Album,
-				Title:  linkInfo.Title,
-				Disc:   linkInfo.DiscNumber,
-				Track:  linkInfo.TrackNumber,
-				Ext:    localFile.FormatHint,
-			}.Path()
-			if h.handleErrorCtx(w, err, "link file=%d track=%q build path", localFileID, trackID) {
-				return
-			}
-
-			if dst != src {
-				if err := os.MkdirAll(filepath.Dir(dst), 0o755); h.handleErrorCtx(w, err, "link file=%d track=%q mkdir", localFileID, trackID) {
-					return
-				}
-				if _, err := os.Lstat(dst); err == nil {
-					writeError(w, http.StatusConflict, "destination exists")
-					return
-				} else if !os.IsNotExist(err) {
-					h.handleErrorCtx(w, err, "link file=%d track=%q stat destination", localFileID, trackID)
-					return
-				}
-				if err := os.Rename(src, dst); h.handleErrorCtx(w, err, "link file=%d track=%q move", localFileID, trackID) {
-					return
-				}
-				moved = true
-			}
-		}
-
-		fi, err := os.Stat(dst)
-		if h.handleErrorCtx(w, err, "link file=%d track=%q stat", localFileID, trackID) {
-			// Tags were written and the file may have moved; DB still
-			// points at src. Next scan heals this to unlinked, never
-			// to a wrong link.
-			return
-		}
-
-		if err := h.st.Link(ctx, localFileID, trackID,
-			dst, fi.Size(), fi.ModTime().UnixNano()); err != nil {
-			if errors.Is(err, store.ErrConflict) {
-				if moved {
-					_ = os.Rename(dst, src)
-				}
-				writeError(w, http.StatusConflict, "destination exists")
-				return
-			}
-			if h.handleErrorCtx(w, err, "link file=%d track=%q save", localFileID, trackID) {
-				if moved {
-					if rbErr := os.Rename(dst, src); rbErr != nil {
-						h.log.Errorf("link file=%d track=%q rollback failed: %v", localFileID, trackID, rbErr)
-					}
-				}
-				return
-			}
-		}
-
-		h.log.Infof("link file=%d track=%q done in %s", localFileID, trackID, time.Since(start))
-		writeJSON(w, http.StatusNoContent, nil)
+	localFileID, err := requireLocalFileID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
 	}
+
+	var body PostLinkBody
+
+	if err := c.ShouldBindBodyWith(&body, binding.JSON); err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("body invalid: %w", err)),
+		)
+		return
+	}
+
+	trackID, err := requireMBID(body.TrackID)
+	if err != nil {
+		return
+	}
+
+	start := time.Now()
+
+	// Write tags to file
+	// Get file
+	localFile, err := h.st.GetFile(ctx, localFileID, false)
+	if err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("link file %d load -> %w", localFileID, err)),
+		)
+		return
+	}
+
+	// Get tacks release data
+	fullRelease, track, err := h.st.GetTrackFullRelease(
+		ctx,
+		trackID)
+	if err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("link file=%d track=%q load release -> %w", localFileID, trackID, err)),
+		)
+		return
+	}
+
+	// Write tags to the source file first (in place). The rename below
+	// moves the already-tagged file, then the DB is updated to the
+	// final on-disk state.
+	linkInfo := tasks.LinkInfoFromStore(fullRelease, track)
+	t := tags.ToMap(tags.SnapshotFromLink(linkInfo))
+	if err := tags.WriteTags(localFile.Path, t); err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("link file=%d track=%q write tags -> %w", localFileID, trackID, err)),
+		)
+		return
+	}
+
+	src := localFile.Path
+	dst := src
+	moved := false
+
+	if body.Move {
+		root, err := h.st.GetRoot(ctx, localFile.RootID)
+		if err != nil {
+			h.writeAppError(c, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("link file=%d load root -> %w", localFileID, err)),
+			)
+			return
+		}
+
+		artist := linkInfo.AlbumArtistDisplay
+		if strings.TrimSpace(artist) == "" {
+			artist = linkInfo.ArtistDisplay
+		}
+		dst, err = library.Target{
+			Root:   root.Path,
+			Artist: artist,
+			Album:  linkInfo.Album,
+			Title:  linkInfo.Title,
+			Disc:   linkInfo.DiscNumber,
+			Track:  linkInfo.TrackNumber,
+			Ext:    localFile.FormatHint,
+		}.Path()
+		if err != nil {
+			h.writeAppError(c, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("link file=%d track=%q build path -> %w", localFileID, trackID, err)),
+			)
+			return
+		}
+
+		if dst != src {
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				h.writeAppError(c, apperrors.Wrap(
+					apperrors.ErrInternal,
+					fmt.Errorf("link file=%d track=%q mkdir -> %w", localFileID, trackID, err)),
+				)
+				return
+			}
+			if _, err := os.Lstat(dst); err == nil {
+				h.writeAppError(c, apperrors.ErrAlreadyExists)
+				return
+			} else if !os.IsNotExist(err) {
+				h.writeAppError(c, apperrors.Wrap(
+					apperrors.ErrInternal,
+					fmt.Errorf("link file=%d track=%q stat destination -> %w", localFileID, trackID, err)),
+				)
+				return
+			}
+			if err := os.Rename(src, dst); err != nil {
+				h.writeAppError(c, apperrors.Wrap(
+					apperrors.ErrInternal,
+					fmt.Errorf("link file=%d track=%q move -> %w", localFileID, trackID, err)),
+				)
+				return
+			}
+			moved = true
+		}
+	}
+
+	fi, err := os.Stat(dst)
+	if err != nil {
+		// Tags were written and the file may have moved; DB still
+		// points at src. Next scan heals this to unlinked, never
+		// to a wrong link.
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("link file=%d track=%q stat -> %w", localFileID, trackID, err)),
+		)
+		return
+	}
+
+	if err := h.st.Link(ctx, localFileID,
+		trackID, dst, fi.Size(), fi.ModTime().UnixNano(),
+	); err != nil {
+		if moved {
+			if rbErr := os.Rename(dst, src); rbErr != nil {
+				h.log.Errorf("link file=%d track=%q rollback failed: %v", localFileID, trackID, rbErr)
+			}
+		}
+		if apperrors.Is(err, apperrors.ErrAlreadyExists) {
+			h.writeAppError(c, err)
+			return
+		}
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("link file=%d track=%q save -> %w", localFileID, trackID, err)),
+		)
+		return
+	}
+
+	h.log.Infof("link file=%d track=%q done in %s", localFileID, trackID, time.Since(start))
+	c.JSON(http.StatusNoContent, nil)
 }
 
-func (h *Handler) unlink() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+func (h *Handler) unlink(c *gin.Context) {
+	ctx := c.Request.Context()
 
-		localFileID, ok := requireFileID(w, r.PathValue("id"))
-		if !ok {
-			return
-		}
-
-		start := time.Now()
-
-		localFile, err := h.st.GetFile(ctx, localFileID, false)
-		if h.handleErrorCtx(w, err, "unlink file=%d load", localFileID) {
-			return
-		}
-
-		if err := tags.ClearTags(localFile.Path); h.handleErrorCtx(w, err, "unlink file=%d clear tags", localFileID) {
-			return
-		}
-
-		err = h.st.Unlink(r.Context(), localFileID)
-		if h.handleErrorCtx(w, err, "unlink file=%d save", localFileID) {
-			return
-		}
-
-		h.log.Infof("unlink file=%d done in %s", localFileID, time.Since(start))
-		writeJSON(w, http.StatusNoContent, nil)
+	localFileID, err := requireLocalFileID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
 	}
+
+	start := time.Now()
+
+	localFile, err := h.st.GetFile(ctx, localFileID, false)
+	if err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("unlink file=%d load -> %w", localFileID, err)),
+		)
+		return
+	}
+
+	if err := tags.ClearTags(localFile.Path); err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("unlink file=%d clear tags -> %w", localFileID, err)),
+		)
+		return
+	}
+
+	err = h.st.Unlink(ctx, localFileID)
+	if err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("unlink file=%d save -> %w", localFileID, err)),
+		)
+		return
+	}
+
+	h.log.Infof("unlink file=%d done in %s", localFileID, time.Since(start))
+	c.JSON(http.StatusNoContent, nil)
 }
 
-func (h *Handler) refreshLocalFile() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+func (h *Handler) refreshLocalFile(c *gin.Context) {
+	ctx := c.Request.Context()
 
-		localFileID, ok := requireFileID(w, r.PathValue("id"))
-		if !ok {
-			return
-		}
-
-		// Write tags to file
-		// Get file
-		localFile, err := h.st.GetFile(ctx, localFileID, false)
-		if h.handleErrorCtx(w, err, "refresh file=%d load", localFileID) {
-			return
-		}
-
-		if localFile.TrackID == nil {
-			writeError(w, http.StatusBadRequest, "file is not linked")
-			return
-		}
-
-		start := time.Now()
-		trackID := *localFile.TrackID
-
-		// Get tacks release data
-		fullRelease, track, err := h.st.GetTrackFullRelease(
-			ctx,
-			trackID)
-		if h.handleErrorCtx(w, err, "refresh file=%d track=%q load release", localFileID, trackID) {
-			return
-		}
-
-		// Write tags
-		linkInfo := tasks.LinkInfoFromStore(fullRelease, track)
-		t := tags.ToMap(tags.SnapshotFromLink(linkInfo))
-		if err := tags.WriteTags(localFile.Path, t); h.handleErrorCtx(w, err, "refresh file=%d track=%q write tags", localFileID, trackID) {
-			return
-		}
-
-		h.log.Infof("refresh file=%d track=%q done in %s", localFileID, trackID, time.Since(start))
-		writeJSON(w, http.StatusNoContent, nil)
+	localFileID, err := requireLocalFileID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
 	}
+
+	// Write tags to file
+	// Get file
+	localFile, err := h.st.GetFile(ctx, localFileID, false)
+	if err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("refresh file=%d load -> %w", localFileID, err)),
+		)
+		return
+	}
+
+	if localFile.TrackID == nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("file is not linked")),
+		)
+		return
+	}
+
+	start := time.Now()
+	trackID := *localFile.TrackID
+
+	// Get tacks release data
+	fullRelease, track, err := h.st.GetTrackFullRelease(
+		ctx,
+		trackID)
+	if err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("refresh file=%d track=%q load release -> %w", localFileID, trackID, err)),
+		)
+		return
+	}
+
+	// Write tags
+	linkInfo := tasks.LinkInfoFromStore(fullRelease, track)
+	t := tags.ToMap(tags.SnapshotFromLink(linkInfo))
+	if err := tags.WriteTags(localFile.Path, t); err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("refresh file=%d track=%q write tags -> %w", localFileID, trackID, err)),
+		)
+		return
+	}
+
+	h.log.Infof("refresh file=%d track=%q done in %s", localFileID, trackID, time.Since(start))
+	c.JSON(http.StatusNoContent, nil)
 }
 
-func requireFileID(w http.ResponseWriter, raw string) (int64, bool) {
+func requireLocalFileID(raw string) (int64, error) {
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id < 1 {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return 0, false
+		return 0, apperrors.ErrInvalidID
 	}
-	return id, true
+	return id, nil
 }

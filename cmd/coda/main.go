@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/ppablomunoz/coda/internal/config"
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
 	"github.com/ppablomunoz/coda/internal/server"
@@ -24,6 +26,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
+		syscall.SIGINT,
 		syscall.SIGTERM,
 	)
 	defer stop()
@@ -77,16 +80,23 @@ func main() {
 	scheduler := tasks.NewScheduler(queue, log)
 
 	// Start server
-	handler := server.NewHandler(log, st, mb, queue)
+	addr := fmt.Sprintf(":%d", cfg.Port)
+	// Gin defaults to debug mode (route table dump + warnings on stdout).
+	// Release is the default for the shipped binary; developers can still
+	// opt back into debug output with GIN_MODE=debug.
+	if os.Getenv("GIN_MODE") == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	router := server.NewHandler(log, st, mb, queue)
 	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           handler,
+		Addr:              addr,
+		Handler:           router.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Infof("server listening on :%d", cfg.Port)
+		log.Infof("server listening on %s", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}

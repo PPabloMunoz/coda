@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
 func (st *Store) ListReleaseGroups(
@@ -68,7 +70,10 @@ func (st *Store) ListReleaseGroups(
 		"SELECT COUNT(*) FROM release_groups rg"+where,
 		args...,
 	).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("[store] count release groups: %w", err)
+		return nil, 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("count release groups: %w", err),
+		)
 	}
 
 	dir := orderDirection(opts.Order)
@@ -98,7 +103,10 @@ func (st *Store) ListReleaseGroups(
 		queryArgs...,
 	)
 	if err != nil {
-		return nil, 0, fmt.Errorf("[store] query release groups: %w", err)
+		return nil, 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query release groups: %w", err),
+		)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -109,7 +117,10 @@ func (st *Store) ListReleaseGroups(
 		var g ReleaseGroupParams
 		var creditID sql.NullInt64
 		if err := rows.Scan(&g.ID, &g.Title, &g.Type, &creditID); err != nil {
-			return nil, 0, fmt.Errorf("[store] scan release_group: %w", err)
+			return nil, 0, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan release_group: %w", err),
+			)
 		}
 		if creditID.Valid {
 			creditIDs = append(creditIDs, creditID.Int64)
@@ -120,7 +131,10 @@ func (st *Store) ListReleaseGroups(
 		groups = append(groups, g)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("[store] reading rows: %w", err)
+		return nil, 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading rows: %w", err),
+		)
 	}
 
 	if len(seen) > 0 {
@@ -173,7 +187,10 @@ func (st *Store) attachReleaseSummaries(
 		args...,
 	)
 	if err != nil {
-		return fmt.Errorf("[store] query release summaries: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query release summaries: %w", err),
+		)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -192,7 +209,10 @@ func (st *Store) attachReleaseSummaries(
 			&summary.TrackCount,
 			&summary.LinkedFileCount,
 		); err != nil {
-			return fmt.Errorf("[store] scan release summary: %w", err)
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan release summary: %w", err),
+			)
 		}
 
 		summary.Date = nullString(date)
@@ -201,7 +221,10 @@ func (st *Store) attachReleaseSummaries(
 		byGroup[groupID] = &summary
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("[store] reading release summaries: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading release summaries: %w", err),
+		)
 	}
 
 	for i := range groups {
@@ -214,29 +237,22 @@ func (st *Store) attachReleaseSummaries(
 }
 
 func (st *Store) GetReleaseGroup(ctx context.Context, id string) (*ReleaseGroupParams, error) {
-	stmt, err := st.db.PrepareContext(ctx, `
+	var g ReleaseGroupParams
+	var creditID sql.NullInt64
+	if err := st.db.QueryRowContext(ctx, `
 		SELECT DISTINCT rg.id, rg.title, rg.type, rg.artist_credit_id
 		FROM release_groups rg
 		LEFT JOIN artist_credit_items aci ON aci.artist_credit_id = rg.artist_credit_id
-		WHERE rg.id = ?`,
-	)
-	if err != nil {
-		return nil, st.prepareQueryError(err)
-	}
-	defer func() { _ = stmt.Close() }()
-
-	var g ReleaseGroupParams
-	var creditID sql.NullInt64
-	if err := stmt.QueryRowContext(ctx, id).Scan(
-		&g.ID,
-		&g.Title,
-		&g.Type,
-		&creditID,
+		WHERE rg.id = ?`, id).Scan(
+		&g.ID, &g.Title, &g.Type, &creditID,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, apperrors.ErrNotFound
 		}
-		return nil, fmt.Errorf("[store] query release groups: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query release groups: %w", err),
+		)
 	}
 
 	if creditID.Valid {
@@ -253,7 +269,10 @@ func (st *Store) GetReleaseGroup(ctx context.Context, id string) (*ReleaseGroupP
 func (st *Store) DeleteReleaseGroup(ctx context.Context, id string) error {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("[store]: start tx: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("start tx: %w", err),
+		)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -261,16 +280,22 @@ func (st *Store) DeleteReleaseGroup(ctx context.Context, id string) error {
 	if err := tx.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM release_groups WHERE id = ?)`, id,
 	).Scan(&exists); err != nil {
-		return fmt.Errorf("[store]: check release group: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("check release group: %w", err),
+		)
 	}
 	if !exists {
-		return ErrNotFound
+		return apperrors.ErrNotFound
 	}
 
 	if _, err := tx.ExecContext(ctx,
 		"DELETE FROM release_groups WHERE id = ?", id,
 	); err != nil {
-		return fmt.Errorf("[store]: delete release groups: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete release groups: %w", err),
+		)
 	}
 
 	_, err = tx.ExecContext(ctx, `
@@ -289,11 +314,17 @@ func (st *Store) DeleteReleaseGroup(ctx context.Context, id string) error {
 		)`,
 	)
 	if err != nil {
-		return fmt.Errorf("[store] cleanup orphan credits: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("cleanup orphan credits: %w", err),
+		)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("[store]: commit delete release group: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("commit delete release group: %w", err),
+		)
 	}
 
 	return nil

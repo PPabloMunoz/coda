@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
+
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
 type LibraryStats struct {
@@ -28,7 +30,10 @@ func (st *Store) GetLibraryStats(ctx context.Context) (*LibraryStats, error) {
 		&stats.Releases,
 		&stats.Tracks,
 	); err != nil {
-		return nil, fmt.Errorf("[store] count library: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("count stats: %w", err),
+		)
 	}
 
 	files, err := st.GetLocalFilesStats(ctx)

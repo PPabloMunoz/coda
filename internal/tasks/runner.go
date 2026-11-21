@@ -2,9 +2,9 @@ package tasks
 
 import (
 	"context"
-	"errors"
 	"time"
 
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/library"
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
 	"github.com/ppablomunoz/coda/internal/store"
@@ -97,7 +97,7 @@ func (r *Runner) importArtist(ctx context.Context, t Task) {
 	r.queue.markArtistImportRunning(t.ID)
 	art, err := r.st.GetArtistByID(ctx, t.ID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if apperrors.Is(err, apperrors.ErrNotFound) {
 			r.log.Infof("skipping discography import for inactive artist %q", t.ID)
 			r.queue.markArtistImportDone(t.ID)
 			return

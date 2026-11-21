@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
 func (st *Store) SaveDiscography(ctx context.Context,
@@ -11,7 +13,10 @@ func (st *Store) SaveDiscography(ctx context.Context,
 ) error {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("[store] start tx: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("save discography start tx: %w", err),
+		)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -46,7 +51,10 @@ func (st *Store) SaveDiscography(ctx context.Context,
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("[store] commit release: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("commit discography: %w", err),
+		)
 	}
 
 	return nil

@@ -1,13 +1,16 @@
 package server
 
-import "net/http"
+import (
+	"net/http"
 
-func (h *Handler) libraryStats() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		stats, err := h.st.GetLibraryStats(r.Context())
-		if h.handleError(w, err) {
-			return
-		}
-		writeJSON(w, http.StatusOK, stats)
+	"github.com/gin-gonic/gin"
+)
+
+func (h *Handler) libraryStats(c *gin.Context) {
+	stats, err := h.st.GetLibraryStats(c.Request.Context())
+	if err != nil {
+		h.writeAppError(c, err)
+		return
 	}
+	c.JSON(http.StatusOK, stats)
 }
