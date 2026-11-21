@@ -1,0 +1,225 @@
+package store
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
+)
+
+func insertFile(t *testing.T, st *Store, rootID int64, path string, trackID *string) int64 {
+	t.Helper()
+	format := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
+	res, err := st.db.Exec(
+		`INSERT INTO local_files (root_id, path, size_bytes, mtime_ns, format_hint, scanned_at, track_id)
+		 VALUES (?, ?, 100, 123, ?, '2024-01-01 00:00:00', ?)`,
+		rootID, path, format, trackID,
+	)
+	if err != nil {
+		t.Fatalf("insert file = %v", err)
+	}
+	id, _ := res.LastInsertId()
+	return id
+}
+
+func testRootID(t *testing.T, st *Store) int64 {
+	t.Helper()
+	var id int64
+	if err := st.db.QueryRow(`SELECT id FROM roots LIMIT 1`).Scan(&id); err != nil {
+		t.Fatalf("no root: %v", err)
+	}
+	return id
+}
+
+func TestSyncLocalFilesValidation(t *testing.T) {
+	st := newTestStore(t) // no roots
+	stats, err := st.SyncLocalFiles(ctx(), nil, "2024-01-01 00:00:00")
+	if err != nil || stats.Found != 0 {
+		t.Errorf("no-roots sync = %+v, %v; want empty", stats, err)
+	}
+
+	root := t.TempDir()
+	st2 := newTestStore(t, root)
+	if _, err := st2.SyncLocalFiles(ctx(), nil, "  "); err == nil {
+		t.Error("blank scanStart = nil, want error")
+	}
+
+	if _, err := st2.SyncLocalFiles(ctx(), []ScannedFile{{
+		LibraryRoot: "/unknown", Path: "/unknown/a.mp3",
+		SizeBytes: 1, MtimeNs: 1, FormatHint: "mp3",
+	}}, "2024-01-01 00:00:00"); !apperrors.Is(err, apperrors.ErrNotFound) {
+		t.Errorf("unknown root err = %v, want NOT_FOUND", err)
+	}
+}
+
+func TestSyncLocalFilesPrunesStale(t *testing.T) {
+	root := t.TempDir()
+	st := newTestStore(t, root)
+	rootID := testRootID(t, st)
+	insertFile(t, st, rootID, root+"/old.mp3", nil)
+
+	stats, err := st.SyncLocalFiles(ctx(), nil, "2024-06-01 00:00:00")
+	if err != nil {
+		t.Fatalf("SyncLocalFiles = %v", err)
+	}
+	if stats.Pruned != 1 {
+		t.Errorf("pruned = %d, want 1", stats.Pruned)
+	}
+	files, total, err := st.ListFiles(ctx(), FileListOptions{PageOptions: PageOptions{Limit: 20}})
+	if err != nil {
+		t.Fatalf("ListFiles = %v", err)
+	}
+	if total != 0 || len(files) != 0 {
+		t.Errorf("after prune total = %d, want 0", total)
+	}
+}
+
+func TestLinkUnlink(t *testing.T) {
+	root := t.TempDir()
+	st := newTestStore(t, root)
+	_ = st.CreateArtist(ctx(), Artist{ID: testArtistID, Name: "Test Artist"})
+	if err := st.SaveDiscography(ctx(), []FullReleaseParams{testRelease(testTrackID, testRelID, testGroupID)}); err != nil {
+		t.Fatalf("SaveDiscography = %v", err)
+	}
+	rootID := testRootID(t, st)
+	fileID := insertFile(t, st, rootID, root+"/song.mp3", nil)
+
+	if err := st.Link(ctx(), fileID, testTrackID, root+"/song.mp3", 200, 456); err != nil {
+		t.Fatalf("Link = %v", err)
+	}
+	got, err := st.GetFile(ctx(), fileID, false)
+	if err != nil {
+		t.Fatalf("GetFile = %v", err)
+	}
+	if got.TrackID == nil || *got.TrackID != testTrackID {
+		t.Errorf("track = %v, want %q", got.TrackID, testTrackID)
+	}
+
+	if err := st.Unlink(ctx(), fileID); err != nil {
+		t.Fatalf("Unlink = %v", err)
+	}
+	got, _ = st.GetFile(ctx(), fileID, false)
+	if got.TrackID != nil {
+		t.Errorf("after unlink track = %v, want nil", *got.TrackID)
+	}
+
+	// Errors.
+	if err := st.Link(ctx(), 999999, testTrackID, root+"/x.mp3", 1, 1); !apperrors.Is(err, apperrors.ErrNotFound) {
+		t.Errorf("missing file err = %v, want NOT_FOUND", err)
+	}
+	if err := st.Link(ctx(), fileID, "00000000-0000-4000-8000-000000000000", root+"/song.mp3", 1, 1); !apperrors.Is(err, apperrors.ErrNotFound) {
+		t.Errorf("missing track err = %v, want NOT_FOUND", err)
+	}
+	if err := st.Link(ctx(), fileID, testTrackID, "  ", 1, 1); err == nil {
+		t.Error("empty path = nil, want error")
+	}
+
+	// Conflict: second file already at destination.
+	other := insertFile(t, st, rootID, root+"/other.mp3", nil)
+	if err := st.Link(ctx(), other, testTrackID, root+"/song.mp3", 1, 1); !apperrors.Is(err, apperrors.ErrAlreadyExists) {
+		t.Errorf("conflict err = %v, want ALREADY_EXISTS", err)
+	}
+
+	if _, err := st.GetFile(ctx(), 999999, false); !apperrors.Is(err, apperrors.ErrNotFound) {
+		t.Errorf("missing file err = %v, want NOT_FOUND", err)
+	}
+}
+
+func TestListFilesFiltering(t *testing.T) {
+	root := t.TempDir()
+	st := newTestStore(t, root)
+	_ = st.CreateArtist(ctx(), Artist{ID: testArtistID, Name: "Test Artist"})
+	if err := st.SaveDiscography(ctx(), []FullReleaseParams{testRelease(testTrackID, testRelID, testGroupID)}); err != nil {
+		t.Fatalf("SaveDiscography = %v", err)
+	}
+	rootID := testRootID(t, st)
+	track := testTrackID
+	insertFile(t, st, rootID, root+"/alpha.mp3", &track)
+	insertFile(t, st, rootID, root+"/beta.flac", nil)
+
+	linked := true
+	files, total, err := st.ListFiles(ctx(), FileListOptions{
+		PageOptions: PageOptions{Limit: 20}, Linked: &linked, IncludeTrack: true,
+	})
+	if err != nil {
+		t.Fatalf("ListFiles linked = %v", err)
+	}
+	if total != 1 || files[0].Track == nil {
+		t.Errorf("linked total=%d track=%+v, want 1 with track", total, files)
+	}
+
+	unlinked := false
+	_, total, _ = st.ListFiles(ctx(), FileListOptions{
+		PageOptions: PageOptions{Limit: 20}, Linked: &unlinked,
+	})
+	if total != 1 {
+		t.Errorf("unlinked total = %d, want 1", total)
+	}
+
+	_, total, _ = st.ListFiles(ctx(), FileListOptions{
+		SearchOptions: SearchOptions{Query: "alpha"},
+		PageOptions:   PageOptions{Limit: 20},
+	})
+	if total != 1 {
+		t.Errorf("query total = %d, want 1", total)
+	}
+
+	_, total, _ = st.ListFiles(ctx(), FileListOptions{
+		PageOptions: PageOptions{Limit: 20}, Format: "FLAC",
+	})
+	if total != 1 {
+		t.Errorf("format total = %d, want 1 (case-insensitive)", total)
+	}
+}
+
+func TestFileStats(t *testing.T) {
+	root := t.TempDir()
+	st := newTestStore(t, root)
+	rootID := testRootID(t, st)
+	track := testTrackID
+	insertFile(t, st, rootID, root+"/a.mp3", &track)
+	insertFile(t, st, rootID, root+"/b.flac", nil)
+
+	stats, err := st.GetLocalFilesStats(ctx())
+	if err != nil {
+		t.Fatalf("GetLocalFilesStats = %v", err)
+	}
+	if stats.Total != 2 || stats.Linked != 1 || stats.Unlinked != 1 {
+		t.Errorf("stats = %+v", stats)
+	}
+	if stats.Formats["mp3"] != 1 || stats.Formats["flac"] != 1 {
+		t.Errorf("formats = %v", stats.Formats)
+	}
+
+	lib, err := st.GetLibraryStats(ctx())
+	if err != nil {
+		t.Fatalf("GetLibraryStats = %v", err)
+	}
+	if lib.Files.Total != 2 {
+		t.Errorf("lib files = %d, want 2", lib.Files.Total)
+	}
+
+	if _, err := st.GetRoot(ctx(), rootID); err != nil {
+		t.Errorf("GetRoot = %v", err)
+	}
+	if _, err := st.GetRoot(ctx(), 999999); !apperrors.Is(err, apperrors.ErrNotFound) {
+		t.Errorf("missing root err = %v, want NOT_FOUND", err)
+	}
+}
+
+func TestCleanupOrphanCredits(t *testing.T) {
+	st := newTestStore(t)
+	_ = st.CreateArtist(ctx(), Artist{ID: testArtistID, Name: "Test Artist"})
+	if err := st.SaveDiscography(ctx(), []FullReleaseParams{testRelease(testTrackID, testRelID, testGroupID)}); err != nil {
+		t.Fatalf("SaveDiscography = %v", err)
+	}
+	if err := st.DeleteReleaseGroup(ctx(), testGroupID); err != nil {
+		t.Fatalf("DeleteReleaseGroup = %v", err)
+	}
+	n, err := st.CleanupOrphanCredits(ctx())
+	if err != nil {
+		t.Fatalf("CleanupOrphanCredits = %v", err)
+	}
+	_ = n
+}

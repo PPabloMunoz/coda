@@ -32,7 +32,7 @@ web-fmt-check:
     pnpm --dir web fmt:check
 
 test:
-    go test ./...
+    go test ./... -cover
 
 vet:
     go vet ./...
