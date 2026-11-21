@@ -33,6 +33,12 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
+      # installer only: just check runs the real lint once
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.15.0
+          args: --version
+
       - uses: extractions/setup-just@v3
 
       # web-build first so go:embed has web/dist
