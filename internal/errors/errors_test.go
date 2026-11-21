@@ -17,7 +17,9 @@ func TestSentinels(t *testing.T) {
 		{ErrUnauthorized, "UNAUTHORIZED", "Authentication required"},
 		{ErrForbidden, "FORBIDDEN", "Access denied"},
 		{ErrAlreadyExists, "ALREADY_EXISTS", "Resource already exists"},
+		{ErrInvalidID, "INVALID_ID", "The id must be a valid uuid"},
 		{ErrInvalidInput, "INVALID_INPUT", "Invalid input"},
+		{ErrMusicBrainzFailed, "MUSICBRAINZ_FAILED", "MusicBrainz failed"},
 		{ErrInternal, "INTERNAL_ERROR", "An unexpected error occurred"},
 	}
 	for _, tc := range cases {

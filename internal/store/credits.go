@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
 func (st *Store) getCreditEntries(
@@ -27,7 +29,10 @@ func (st *Store) getCreditEntries(
 		ORDER BY aci.artist_credit_id, aci.position`,
 		args...)
 	if err != nil {
-		return nil, fmt.Errorf("[store] query credits: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query credits: %w", err),
+		)
 	}
 	defer func() { _ = creditRows.Close() }()
 
@@ -37,14 +42,20 @@ func (st *Store) getCreditEntries(
 		var e CreditEntry
 		var sortName, disamb sql.NullString
 		if err := creditRows.Scan(&cid, &e.ArtistID, &e.Name, &sortName, &disamb, &e.CreditedName, &e.JoinPhrase); err != nil {
-			return nil, fmt.Errorf("[store] scan credit: %w", err)
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan credit: %w", err),
+			)
 		}
 		e.SortName = nullString(sortName)
 		e.Disambiguation = nullString(disamb)
 		byCredit[cid] = append(byCredit[cid], e)
 	}
 	if err := creditRows.Err(); err != nil {
-		return nil, fmt.Errorf("[store] reading credits: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading credits: %w", err),
+		)
 	}
 
 	return byCredit, nil
@@ -61,7 +72,10 @@ func (st *Store) getCreditEntry(ctx context.Context, id int64) ([]CreditEntry, e
 		id,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("[store] query credits: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query credits: %w", err),
+		)
 	}
 	defer func() { _ = creditRows.Close() }()
 
@@ -73,12 +87,18 @@ func (st *Store) getCreditEntry(ctx context.Context, id int64) ([]CreditEntry, e
 			&e.ArtistID, &e.Name, &e.SortName,
 			&e.Disambiguation, &e.CreditedName, &e.JoinPhrase,
 		); err != nil {
-			return nil, fmt.Errorf("[store] scan credit: %w", err)
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan credit: %w", err),
+			)
 		}
 		credits = append(credits, e)
 	}
 	if err := creditRows.Err(); err != nil {
-		return nil, fmt.Errorf("[store] reading credits: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading credits: %w", err),
+		)
 	}
 
 	return credits, nil
@@ -93,10 +113,16 @@ func createCreditTx(ctx context.Context, tx *sql.Tx, entries []CreditEntry) (*in
 	}
 	for _, e := range entries {
 		if strings.TrimSpace(e.ArtistID) == "" {
-			return nil, fmt.Errorf("[store] credit missing artist id")
+			return nil, apperrors.Wrap(
+				apperrors.ErrInvalidInput,
+				fmt.Errorf("credit missing artist id"),
+			)
 		}
 		if strings.TrimSpace(e.Name) == "" {
-			return nil, fmt.Errorf("[store] credit missing artist name")
+			return nil, apperrors.Wrap(
+				apperrors.ErrInvalidInput,
+				fmt.Errorf("credit missing artist name"),
+			)
 		}
 		// Reactivate pruned collaborators (active = 0) when live credits
 		// reference them again. in_library is deliberately untouched: a
@@ -112,7 +138,10 @@ func createCreditTx(ctx context.Context, tx *sql.Tx, entries []CreditEntry) (*in
 				active=1`,
 			e.ArtistID, e.Name, e.SortName, e.Disambiguation,
 		); err != nil {
-			return nil, fmt.Errorf("[store] ensure credit artist: %w", err)
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("ensure credit artist: %w", err),
+			)
 		}
 	}
 
@@ -120,11 +149,17 @@ func createCreditTx(ctx context.Context, tx *sql.Tx, entries []CreditEntry) (*in
 		"INSERT INTO artist_credits DEFAULT VALUES",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("[store] create artist credit: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("create artist credit: %w", err),
+		)
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return nil, fmt.Errorf("[store] credit id: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("credit id: %w", err),
+		)
 	}
 
 	for i, e := range entries {
@@ -138,7 +173,10 @@ func createCreditTx(ctx context.Context, tx *sql.Tx, entries []CreditEntry) (*in
 			VALUES (?, ?, ?, ?, ?)`,
 			id, i, e.ArtistID, credited, e.JoinPhrase,
 		); err != nil {
-			return nil, fmt.Errorf("[store] insert credit item: %w", err)
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("insert credit item: %w", err),
+			)
 		}
 	}
 
@@ -167,11 +205,17 @@ func (st *Store) CleanupOrphanCredits(ctx context.Context) (int64, error) {
 		)`,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("[store] cleanup orphan credits: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("cleanup orphan credits: %w", err),
+		)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("[store] cleanup orphan credits: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("cleanup orphan credits: %w", err),
+		)
 	}
 	return n, nil
 }

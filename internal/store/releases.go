@@ -6,50 +6,53 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
-// GetReleaseByGroup returns the single release kept for a release-group.
+// GetReleaseOfGroup returns the single release kept for a release-group.
 // One release per group is enforced by the UNIQUE on releases.release_group_id.
-func (st *Store) GetReleaseByGroup(ctx context.Context, groupID string, includeFiles bool) (*FullReleaseParams, error) {
+func (st *Store) GetReleaseOfGroup(ctx context.Context,
+	groupID string, includeFiles bool,
+) (*FullReleaseParams, error) {
 	var releaseID string
 	if err := st.db.QueryRowContext(ctx,
 		`SELECT id FROM releases WHERE release_group_id = ?`,
 		groupID,
 	).Scan(&releaseID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, apperrors.ErrNotFound
 		}
-		return nil, fmt.Errorf("[store] query release by group: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query release by group: %w", err),
+		)
 	}
 
 	return st.GetRelease(ctx, releaseID, includeFiles)
 }
 
-func (st *Store) GetRelease(ctx context.Context, releaseID string, includeFiles bool) (*FullReleaseParams, error) {
-	stmt, err := st.db.PrepareContext(ctx, `
-		SELECT r.id, r.title, r.date, r.status, 
-			r.release_group_id, r.artist_credit_id
-		FROM releases r
-		WHERE id = ?`)
-	if err != nil {
-		return nil, st.prepareQueryError(err)
-	}
-	defer func() { _ = stmt.Close() }()
-
+func (st *Store) GetRelease(ctx context.Context,
+	releaseID string, includeFiles bool,
+) (*FullReleaseParams, error) {
 	var r FullReleaseParams
 	var rgID string
 	var acID sql.NullInt64
 
-	if err := stmt.QueryRowContext(ctx, releaseID).Scan(
-		&r.ID,
-		&r.Title,
-		&r.Date,
-		&r.Status,
-		&rgID, &acID); err != nil {
+	if err := st.db.QueryRowContext(ctx, `
+		SELECT r.id, r.title, r.date, r.status, 
+			r.release_group_id, r.artist_credit_id
+		FROM releases r
+		WHERE id = ?`, releaseID).Scan(
+		&r.ID, &r.Title, &r.Date, &r.Status, &rgID, &acID,
+	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, apperrors.ErrNotFound
 		}
-		return nil, fmt.Errorf("[store] query release: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query release: %w", err),
+		)
 	}
 
 	if acID.Valid {
@@ -75,7 +78,10 @@ func (st *Store) GetRelease(ctx context.Context, releaseID string, includeFiles 
 		releaseID,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("[store] query tracks: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query tracks: %w", err),
+		)
 	}
 	defer func() { _ = trackRows.Close() }()
 
@@ -90,7 +96,10 @@ func (st *Store) GetRelease(ctx context.Context, releaseID string, includeFiles 
 			&t.ID, &t.ReleaseID, &t.Disc, &t.Position, &t.Number,
 			&t.Title, &creditID, &durMS, &t.RecordingID,
 		); err != nil {
-			return nil, fmt.Errorf("[store] scan track: %w", err)
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan track: %w", err),
+			)
 		}
 		if durMS.Valid {
 			v := int(durMS.Int64)
@@ -105,7 +114,10 @@ func (st *Store) GetRelease(ctx context.Context, releaseID string, includeFiles 
 		tracks = append(tracks, t)
 	}
 	if err := trackRows.Err(); err != nil {
-		return nil, fmt.Errorf("[store] reading tracks: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading tracks: %w", err),
+		)
 	}
 
 	if len(seen) > 0 {
@@ -148,7 +160,10 @@ func (st *Store) attachTrackFiles(
 		releaseID,
 	)
 	if err != nil {
-		return fmt.Errorf("[store] query track files: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query track files: %w", err),
+		)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -161,13 +176,12 @@ func (st *Store) attachTrackFiles(
 		var file LinkedFile
 		var trackID string
 		if err := rows.Scan(
-			&file.ID,
-			&file.Path,
-			&file.FormatHint,
-			&file.SizeBytes,
-			&trackID,
+			&file.ID, &file.Path, &file.FormatHint, &file.SizeBytes, &trackID,
 		); err != nil {
-			return fmt.Errorf("[store] scan track file: %w", err)
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan track file: %w", err),
+			)
 		}
 
 		if index, ok := byTrack[trackID]; ok {
@@ -175,7 +189,10 @@ func (st *Store) attachTrackFiles(
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("[store] reading track files: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading track files: %w", err),
+		)
 	}
 
 	return nil
@@ -210,7 +227,10 @@ func (st *Store) SaveFullRelease(ctx context.Context, tx *sql.Tx, p FullReleaseP
 			artist_credit_id=excluded.artist_credit_id`,
 		p.Group.ID, p.Group.Title, normalizeRGType(p.Group.Type), rgCreditID,
 	); err != nil {
-		return fmt.Errorf("[store] upsert release-group: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("upsert release-group: %w", err),
+		)
 	}
 
 	relCreditID, err := createCreditTx(ctx, tx, p.Credit)
@@ -231,7 +251,10 @@ func (st *Store) SaveFullRelease(ctx context.Context, tx *sql.Tx, p FullReleaseP
 		p.ID, p.Group.ID, p.Title, relCreditID,
 		p.Date, p.Status,
 	); err != nil {
-		return fmt.Errorf("[store] upsert release: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("upsert release: %w", err),
+		)
 	}
 
 	if len(p.Tracks) == 0 {
@@ -254,7 +277,10 @@ func (st *Store) SaveFullRelease(ctx context.Context, tx *sql.Tx, p FullReleaseP
 			recording_id=excluded.recording_id`,
 	)
 	if err != nil {
-		return st.prepareQueryError(err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("prepare query: %w", err),
+		)
 	}
 	defer func() { _ = stmt.Close() }()
 
@@ -273,7 +299,10 @@ func (st *Store) SaveFullRelease(ctx context.Context, tx *sql.Tx, p FullReleaseP
 			t.ID, p.ID, disc, t.Position, t.Number,
 			t.Title, trackCreditID, t.DurMS, t.RecordingID,
 		); err != nil {
-			return fmt.Errorf("[store] upsert track: %w", err)
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("upsert track: %w", err),
+			)
 		}
 	}
 
@@ -286,11 +315,20 @@ func (st *Store) SaveFullRelease(ctx context.Context, tx *sql.Tx, p FullReleaseP
 // upserted in the same tx.
 func (st *Store) ReplaceRelease(ctx context.Context, groupID string, p FullReleaseParams) error {
 	if p.Group.ID != groupID {
-		return fmt.Errorf("[store] release-group mismatch: release belongs to %q, not %q", p.Group.ID, groupID)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("release-group mismatch: release belongs to %q, not %q",
+				p.Group.ID,
+				groupID,
+			),
+		)
 	}
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("[store] start tx: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("start tx: %w", err),
+		)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -299,14 +337,20 @@ func (st *Store) ReplaceRelease(ctx context.Context, groupID string, p FullRelea
 		groupID,
 	)
 	if err != nil {
-		return fmt.Errorf("[store] delete release: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete release: %w", err),
+		)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("[store] delete release: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete release: %w", err),
+		)
 	}
 	if n == 0 {
-		return ErrNotFound
+		return apperrors.ErrNotFound
 	}
 
 	if err := st.SaveFullRelease(ctx, tx, p); err != nil {
@@ -314,7 +358,11 @@ func (st *Store) ReplaceRelease(ctx context.Context, groupID string, p FullRelea
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("[store] commit replace release: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("commit replace release: %w", err),
+		)
 	}
+
 	return nil
 }

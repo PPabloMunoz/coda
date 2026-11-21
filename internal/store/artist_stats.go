@@ -3,15 +3,14 @@ package store
 import (
 	"context"
 	"fmt"
+
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
 // attachArtistTrackStats counts tracks in releases of release groups where the
 // artist holds the primary (position 0) credit. Linked tracks are counted
 // once even when multiple local files point at the same track.
-func (st *Store) attachArtistTrackStats(
-	ctx context.Context,
-	artists []Artist,
-) error {
+func (st *Store) attachArtistTrackStats(ctx context.Context, artists []Artist) error {
 	if len(artists) == 0 {
 		return nil
 	}
@@ -37,7 +36,10 @@ func (st *Store) attachArtistTrackStats(
 		args...,
 	)
 	if err != nil {
-		return fmt.Errorf("[store] query artist track stats: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query artist track stats: %w", err),
+		)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -50,12 +52,18 @@ func (st *Store) attachArtistTrackStats(
 			&stats.TrackCount,
 			&stats.LinkedTrackCount,
 		); err != nil {
-			return fmt.Errorf("[store] scan artist track stats: %w", err)
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan artist track stats: %w", err),
+			)
 		}
 		byArtist[artistID] = stats
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("[store] reading artist track stats: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading artist track stats: %w", err),
+		)
 	}
 
 	for i := range artists {

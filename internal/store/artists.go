@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
 func (st *Store) ListArtists(ctx context.Context, opts ArtistListOptions) ([]Artist, int, error) {
@@ -27,7 +29,10 @@ func (st *Store) ListArtists(ctx context.Context, opts ArtistListOptions) ([]Art
 		"SELECT COUNT(*) FROM artists "+where,
 		args...,
 	).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("store: count artists: %w", err)
+		return nil, 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("count artists: %w", err),
+		)
 	}
 
 	order := sortExpression(opts.Sort, map[string]string{
@@ -44,7 +49,10 @@ func (st *Store) ListArtists(ctx context.Context, opts ArtistListOptions) ([]Art
 		queryArgs...,
 	)
 	if err != nil {
-		return nil, 0, fmt.Errorf("store: query artists: %w", err)
+		return nil, 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query artists: %w", err),
+		)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -61,14 +69,20 @@ func (st *Store) ListArtists(ctx context.Context, opts ArtistListOptions) ([]Art
 			&a.Active,
 			&a.InLibrary,
 		); err != nil {
-			return nil, 0, fmt.Errorf("store: scan artist: %w", err)
+			return nil, 0, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan artist: %w", err),
+			)
 		}
 
 		artists = append(artists, a)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("store: reading rows: %w", err)
+		return nil, 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading rows: %w", err),
+		)
 	}
 
 	if opts.IncludeTrackStats {
@@ -86,7 +100,10 @@ func (st *Store) GetArtistByID(ctx context.Context, id string) (*Artist, error) 
 		FROM artists
 		WHERE id = ? AND active = 1`)
 	if err != nil {
-		return nil, st.prepareQueryError(err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("prepare query: %w", err),
+		)
 	}
 	defer func() { _ = stmt.Close() }()
 
@@ -100,9 +117,12 @@ func (st *Store) GetArtistByID(ctx context.Context, id string) (*Artist, error) 
 		&art.InLibrary,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, apperrors.ErrNotFound
 		}
-		return nil, fmt.Errorf("store: query artist: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query artist: %w", err),
+		)
 	}
 
 	return &art, nil
@@ -119,13 +139,19 @@ func (st *Store) CreateArtist(ctx context.Context, art Artist) error {
 			active=1,
 			in_library=1`)
 	if err != nil {
-		return st.prepareQueryError(err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("prepare query: %w", err),
+		)
 	}
 	defer func() { _ = stmt.Close() }()
 
 	_, err = stmt.ExecContext(ctx, art.ID, art.Name, art.SortName, art.Disambiguation)
 	if err != nil {
-		return fmt.Errorf("store: insert artist: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("insert artist: %w", err),
+		)
 	}
 
 	return nil
@@ -134,7 +160,10 @@ func (st *Store) CreateArtist(ctx context.Context, art Artist) error {
 func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("store: start tx: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("start tx: %w", err),
+		)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -142,10 +171,13 @@ func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
 	if err := tx.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM artists WHERE id = ? AND active = 1)`, id,
 	).Scan(&exists); err != nil {
-		return 0, fmt.Errorf("store: check artist: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("check artist: %w", err),
+		)
 	}
 	if !exists {
-		return 0, ErrNotFound
+		return 0, apperrors.ErrNotFound
 	}
 
 	// Release groups where the artist is the primary credit (position 0).
@@ -161,7 +193,10 @@ func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
 			WHERE aci.artist_id = ? AND aci.position = 0
 		)`, id,
 	); err != nil {
-		return 0, fmt.Errorf("store: delete release groups: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete release groups: %w", err),
+		)
 	}
 
 	// Guest groups left with no active library artist behind (the deleted
@@ -185,7 +220,10 @@ func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
 			)
 		)`, id, id,
 	); err != nil {
-		return 0, fmt.Errorf("store: delete orphan release groups: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete orphan release groups: %w", err),
+		)
 	}
 
 	// Soft-delete: keep the artist row so surviving collaboration credits
@@ -195,14 +233,20 @@ func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
 	res, err := tx.ExecContext(ctx,
 		`UPDATE artists SET active = 0, in_library = 0 WHERE id = ? AND active = 1`, id)
 	if err != nil {
-		return 0, fmt.Errorf("store: delete artist: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete artist: %w", err),
+		)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("store: delete artist: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete artist: %w", err),
+		)
 	}
 	if n == 0 {
-		return 0, ErrNotFound
+		return 0, apperrors.ErrNotFound
 	}
 
 	// Collect credits orphaned by the deletes above (also reclaims rows
@@ -217,7 +261,10 @@ func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
 			SELECT 1 FROM tracks t WHERE t.artist_credit_id = artist_credits.id
 		)`,
 	); err != nil {
-		return 0, fmt.Errorf("store: delete orphan credits: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete orphan credits: %w", err),
+		)
 	}
 
 	// Drop collaborators left trackless by the deletes above (they only
@@ -229,7 +276,10 @@ func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("store: commit delete artist: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("commit delete artist: %w", err),
+		)
 	}
 
 	return pruned, nil
@@ -244,7 +294,10 @@ func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
 func (st *Store) PruneOrphanCollaborators(ctx context.Context) (int64, error) {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("store: start tx: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("start tx: %w", err),
+		)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -254,7 +307,10 @@ func (st *Store) PruneOrphanCollaborators(ctx context.Context) (int64, error) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("store: commit prune collaborators: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("commit prune collaborators: %w", err),
+		)
 	}
 
 	return n, nil
@@ -271,11 +327,17 @@ func pruneOrphanCollaboratorsTx(ctx context.Context, tx *sql.Tx) (int64, error) 
 		)`,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("store: prune collaborators: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("prune collaborators: %w", err),
+		)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("store: prune collaborators: %w", err)
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("prune collaborators: %w", err),
+		)
 	}
 	return n, nil
 }

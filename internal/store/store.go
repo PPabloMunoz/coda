@@ -13,6 +13,7 @@ import (
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/utils"
 )
 
@@ -37,7 +38,10 @@ func NewStore(dsn string, rootPaths []string, log *utils.Logger) (*Store, error)
 func (st *Store) AddRootDirs(ctx context.Context) error {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("store: add root dirs: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("start tx: %w", err),
+		)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -49,14 +53,20 @@ func (st *Store) AddRootDirs(ctx context.Context) error {
 			r,
 		)
 		if execErr != nil {
-			return fmt.Errorf("store: error inserting root %q into DB: %w", r, execErr)
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("error inserting root %q into DB: %w", err),
+			)
 		}
 	}
 
 	if len(st.rootPaths) == 0 {
 		_, err := tx.ExecContext(ctx, `UPDATE roots SET active=0 WHERE active=1`)
 		if err != nil {
-			return fmt.Errorf("store: deactivate roots: %w", err)
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("deactivate roots: %w", err),
+			)
 		}
 	} else {
 		ph := placeholders(len(st.rootPaths))
@@ -69,12 +79,18 @@ func (st *Store) AddRootDirs(ctx context.Context) error {
 			args...,
 		)
 		if err != nil {
-			return fmt.Errorf("store: deactivate roots: %w", err)
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("deactivate roots: %w", err),
+			)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: add root dirs: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("add root dirs: %w", err),
+		)
 	}
 
 	return nil

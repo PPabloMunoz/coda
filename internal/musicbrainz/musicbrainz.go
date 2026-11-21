@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/utils"
 )
 
@@ -97,7 +98,7 @@ func (c *Client) getJSON(ctx context.Context, path string, query url.Values, out
 				return nil
 			case resp.StatusCode == http.StatusNotFound:
 				_ = resp.Body.Close()
-				return ErrNotFound
+				return apperrors.ErrNotFound
 			case resp.StatusCode == http.StatusTooManyRequests ||
 				resp.StatusCode == http.StatusServiceUnavailable ||
 				resp.StatusCode >= 500:

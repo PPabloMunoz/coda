@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/tags"
 	"github.com/ppablomunoz/coda/internal/utils"
 )
@@ -48,7 +49,10 @@ func (st *Store) ListFiles(
 		"SELECT COUNT(*) FROM local_files"+where,
 		args...,
 	).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("[store] count files: %w", err)
+		return nil, 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("count files: %w", err),
+		)
 	}
 
 	order := sortExpression(opts.Sort, map[string]string{
@@ -67,7 +71,10 @@ func (st *Store) ListFiles(
 		queryArgs...,
 	)
 	if err != nil {
-		return nil, 0, fmt.Errorf("[store] query files: %w", err)
+		return nil, 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query files: %w", err),
+		)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -86,14 +93,20 @@ func (st *Store) ListFiles(
 			&f.ScannedAt,
 			&f.TrackID,
 		); err != nil {
-			return nil, 0, fmt.Errorf("[store] scan file: %w", err)
+			return nil, 0, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan file: %w", err),
+			)
 		}
 
 		files = append(files, f)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("[store] reading rows: %w", err)
+		return nil, 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading rows: %w", err),
+		)
 	}
 
 	if opts.IncludeTrack {
@@ -124,9 +137,12 @@ func (st *Store) GetFile(ctx context.Context, id int64, includeTrack bool) (*Loc
 		&f.TrackID,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, apperrors.ErrNotFound
 		}
-		return nil, fmt.Errorf("[store] get file: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("get file: %w", err),
+		)
 	}
 
 	if includeTrack {
@@ -171,7 +187,10 @@ func (st *Store) attachFileTracks(ctx context.Context, files []LocalFile) error 
 		args...,
 	)
 	if err != nil {
-		return fmt.Errorf("[store] query file tracks: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query file tracks: %w", err),
+		)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -200,7 +219,10 @@ func (st *Store) attachFileTracks(ctx context.Context, files []LocalFile) error 
 			&track.Group.Title,
 			&track.Group.Type,
 		); err != nil {
-			return fmt.Errorf("[store] scan file track: %w", err)
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan file track: %w", err),
+			)
 		}
 
 		track.Release.Date = nullString(date)
@@ -214,7 +236,10 @@ func (st *Store) attachFileTracks(ctx context.Context, files []LocalFile) error 
 		byTrack[track.ID] = &track
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("[store] reading file tracks: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading file tracks: %w", err),
+		)
 	}
 
 	if len(creditIDs) > 0 {
@@ -254,19 +279,28 @@ func (st *Store) GetLocalFilesStats(ctx context.Context) (*LocalFilesStats, erro
 	if err := st.db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM local_files",
 	).Scan(&res.Total); err != nil {
-		return nil, fmt.Errorf("[store] count files: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("count total files: %w", err),
+		)
 	}
 
 	if err := st.db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM local_files WHERE track_id IS NOT NULL",
 	).Scan(&res.Linked); err != nil {
-		return nil, fmt.Errorf("[store] count files: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("count linked files: %w", err),
+		)
 	}
 
 	if err := st.db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM local_files WHERE track_id IS NULL",
 	).Scan(&res.Unlinked); err != nil {
-		return nil, fmt.Errorf("[store] count files: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("count unlinked files: %w", err),
+		)
 	}
 
 	rows, err := st.db.QueryContext(ctx, `
@@ -275,7 +309,10 @@ func (st *Store) GetLocalFilesStats(ctx context.Context) (*LocalFilesStats, erro
 		GROUP BY format_hint`,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("[store] count formats: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("count formats: %w", err),
+		)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -284,12 +321,18 @@ func (st *Store) GetLocalFilesStats(ctx context.Context) (*LocalFilesStats, erro
 		var format string
 		var count int64
 		if err := rows.Scan(&format, &count); err != nil {
-			return nil, fmt.Errorf("[store] scan format count: %w", err)
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan format count: %w", err),
+			)
 		}
 		res.Formats[format] = count
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("[store] reading format counts: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading format counts: %w", err),
+		)
 	}
 
 	return res, nil
@@ -316,7 +359,10 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 		return SyncStats{}, nil
 	}
 	if strings.TrimSpace(scanStart) == "" {
-		return SyncStats{}, fmt.Errorf("[store] sync local files: missing scanStart")
+		return SyncStats{}, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("sync local files: missing scanStart"),
+		)
 	}
 
 	rootIDs := map[string]int64{}
@@ -332,7 +378,10 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 		args...,
 	)
 	if err != nil {
-		return SyncStats{}, fmt.Errorf("[store] get roots: %w", err)
+		return SyncStats{}, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("get roots: %w", err),
+		)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -340,18 +389,27 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 		var id int64
 		var path string
 		if err := rows.Scan(&id, &path); err != nil {
-			return SyncStats{}, fmt.Errorf("[store] scan roots: %w", err)
+			return SyncStats{}, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan roots: %w", err),
+			)
 		}
 		rootIDs[path] = id
 	}
 
 	if err := rows.Err(); err != nil {
-		return SyncStats{}, fmt.Errorf("[store] reading rows: %w", err)
+		return SyncStats{}, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading rows: %w", err),
+		)
 	}
 
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
-		return SyncStats{}, fmt.Errorf("[store] begin tx local files: %w", err)
+		return SyncStats{}, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("begin tx local files: %w", err),
+		)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -368,7 +426,10 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 			track_id=COALESCE(excluded.track_id, local_files.track_id)`,
 	)
 	if err != nil {
-		return SyncStats{}, st.prepareQueryError(err)
+		return SyncStats{}, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("prepare query: %w", err),
+		)
 	}
 	defer func() { _ = stmt.Close() }()
 
@@ -376,17 +437,23 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 	for _, f := range files {
 		id, ok := rootIDs[f.LibraryRoot]
 		if !ok {
-			return SyncStats{}, fmt.Errorf("[store] unknown root %q", f.LibraryRoot)
+			return SyncStats{}, apperrors.Wrap(
+				apperrors.ErrNotFound,
+				fmt.Errorf("unknown root %q", f.LibraryRoot),
+			)
 		}
 
 		snap, err := tags.Read(f.Path)
 		if err != nil {
-			return SyncStats{}, fmt.Errorf("[store] read file tags => %q: %w", f.Path, err)
+			return SyncStats{}, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("read file tags %q: %w", f.Path, err),
+			)
 		}
 
 		exists, err := st.trackExists(ctx, tx, snap.MBReleaseTrackID)
 		if err != nil {
-			return SyncStats{}, fmt.Errorf("[store] check track exists: %w", err)
+			return SyncStats{}, err
 		}
 
 		trackID := ""
@@ -404,7 +471,10 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 			scanStart,
 			utils.NullIfEmpty(trackID),
 		); err != nil {
-			return SyncStats{}, fmt.Errorf("[store] upsert %q: %w", f.Path, err)
+			return SyncStats{}, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("upsert %q: %w", f.Path, err),
+			)
 		}
 		stats.Upserted++
 	}
@@ -416,7 +486,10 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 			scanStart,
 		)
 		if err != nil {
-			return SyncStats{}, fmt.Errorf("[store] prune root %d: %w", id, err)
+			return SyncStats{}, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("[store] prune root %d: %w", id, err),
+			)
 		}
 		if n, err := res.RowsAffected(); err == nil {
 			stats.Pruned += n
@@ -424,7 +497,10 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 	}
 
 	if err := tx.Commit(); err != nil {
-		return SyncStats{}, fmt.Errorf("[store] commit sync local files: %w", err)
+		return SyncStats{}, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("commit sync local files: %w", err),
+		)
 	}
 
 	return stats, nil
@@ -437,9 +513,12 @@ func (st *Store) GetRoot(ctx context.Context, id int64) (*Root, error) {
 		"SELECT id, path, active, created_at FROM roots WHERE id = ?",
 		id).Scan(&r.ID, &r.Path, &r.Active, &r.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, apperrors.ErrNotFound
 		}
-		return nil, fmt.Errorf("[store] get root: %w", err)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("get root: %w", err),
+		)
 	}
 	return r, nil
 }
@@ -452,7 +531,10 @@ func (st *Store) Link(ctx context.Context,
 	fileID int64, trackID, newPath string, sizeBytes, mtimeNs int64,
 ) error {
 	if strings.TrimSpace(newPath) == "" {
-		return fmt.Errorf("[store] link: empty path")
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("link: empty path"),
+		)
 	}
 
 	var oldPath string
@@ -460,9 +542,12 @@ func (st *Store) Link(ctx context.Context,
 		"SELECT path FROM local_files WHERE id = ?",
 		fileID).Scan(&oldPath); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+			return apperrors.ErrNotFound
 		}
-		return fmt.Errorf("[store] get file: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("get file: %w", err),
+		)
 	}
 
 	var tID string
@@ -470,9 +555,12 @@ func (st *Store) Link(ctx context.Context,
 		"SELECT id FROM tracks WHERE id = ?",
 		trackID).Scan(&tID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+			return apperrors.ErrNotFound
 		}
-		return fmt.Errorf("[store] get track: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("get track: %w", err),
+		)
 	}
 
 	if newPath != oldPath {
@@ -480,9 +568,12 @@ func (st *Store) Link(ctx context.Context,
 		if err := st.db.QueryRowContext(ctx,
 			"SELECT id FROM local_files WHERE path = ? AND id != ?",
 			newPath, fileID).Scan(&clash); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("[store] check path conflict: %w", err)
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("check path conflict: %w", err),
+			)
 		} else if err == nil {
-			return ErrConflict
+			return apperrors.ErrAlreadyExists
 		}
 	}
 
@@ -494,12 +585,15 @@ func (st *Store) Link(ctx context.Context,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return ErrConflict
+			return apperrors.ErrAlreadyExists
 		}
-		return fmt.Errorf("[store] update local_file: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("update local_file: %w", err),
+		)
 	}
 	if n, err := res.RowsAffected(); err == nil && n == 0 {
-		return ErrNotFound
+		return apperrors.ErrNotFound
 	}
 
 	return nil
@@ -514,7 +608,10 @@ func (st *Store) Unlink(ctx context.Context, localFileID int64) error {
 		localFileID,
 	)
 	if err != nil {
-		return fmt.Errorf("[store] update local_file: %w", err)
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("update local_file: %w", err),
+		)
 	}
 
 	return nil

@@ -22,7 +22,7 @@ func (r *Runner) importDiscography(ctx context.Context, id string) error {
 	}
 
 	if err := r.st.SaveDiscography(ctx, releases); err != nil {
-		return fmt.Errorf("saving discography: %w", err)
+		return err
 	}
 
 	return nil

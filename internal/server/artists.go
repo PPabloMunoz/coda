@@ -137,7 +137,7 @@ func (h *Handler) postArtist(c *gin.Context) {
 
 	// Check DB
 	art, err := h.st.GetArtistByID(ctx, artistID)
-	if err != nil && apperrors.Is(err, apperrors.ErrNotFound) {
+	if err != nil && !apperrors.Is(err, apperrors.ErrNotFound) {
 		h.writeAppError(c, err)
 		return
 	}

@@ -19,7 +19,7 @@ func (h *Handler) getReleases(c *gin.Context) {
 		return
 	}
 
-	release, err := h.st.GetReleaseByGroup(
+	release, err := h.st.GetReleaseOfGroup(
 		ctx,
 		releaseGroupID,
 		hasInclude(c, "files"),
