@@ -1,56 +1,57 @@
 package server
 
 import (
-	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
 )
 
-func (h *Handler) searchMusicBrainzArtists() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		query := strings.TrimSpace(r.URL.Query().Get("q"))
-		if len(query) < 2 {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				"'q' must be at least 2 characters",
-			)
-			return
-		}
+func (h *Handler) searchMusicBrainzArtists(c *gin.Context) {
+	ctx := c.Request.Context()
 
-		limit := 10
-		if raw := r.URL.Query().Get("limit"); raw != "" {
-			value, err := strconv.Atoi(raw)
-			if err != nil || value < 1 || value > 25 {
-				writeError(
-					w,
-					http.StatusBadRequest,
-					"'limit' must be between 1 and 25",
-				)
-				return
-			}
-			limit = value
-		}
-
-		artists, err := h.mb.SearchArtists(r.Context(), query, limit)
-		if err != nil {
-			if errors.Is(err, musicbrainz.ErrNotFound) {
-				h.log.Debugf("musicbrainz not found: %v", err)
-				writeJSON(w, http.StatusNotFound, nil)
-				return
-			}
-			h.log.Errorf("musicbrainz search: %v", err)
-			writeError(w, http.StatusBadGateway, "MusicBrainz search failed")
-			return
-		}
-
-		response := Response[[]musicbrainz.ArtistSearchResult]{
-			Total: len(artists),
-			Items: artists,
-		}
-		writeJSON(w, http.StatusOK, response)
+	query := strings.TrimSpace(c.Query("q"))
+	if len(query) < 2 {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("'q' must be at least 2 characters"),
+		))
+		return
 	}
+
+	limit := 10
+	if raw := c.Query("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 25 {
+			h.writeAppError(c, apperrors.Wrap(
+				apperrors.ErrInvalidInput,
+				fmt.Errorf("'limit' must be between 1 and 25"),
+			))
+			return
+		}
+		limit = value
+	}
+
+	artists, err := h.mb.SearchArtists(ctx, query, limit)
+	if err != nil {
+		if apperrors.Is(err, apperrors.ErrNotFound) {
+			h.writeAppError(c, err)
+			return
+		}
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrMusicBrainzFailed,
+			fmt.Errorf("MusicBrainz search failed"),
+		))
+		return
+	}
+
+	response := Response[[]musicbrainz.ArtistSearchResult]{
+		Total: len(artists),
+		Items: artists,
+	}
+	c.JSON(http.StatusOK, response)
 }

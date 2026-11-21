@@ -20,6 +20,8 @@ func httpStatusFor(code string) int {
 		return http.StatusConflict
 	case "INVALID_INPUT", "INVALID_ID":
 		return http.StatusBadRequest
+	case "MUSICBRAINZ_FAILED":
+		return http.StatusBadGateway
 	default:
 		return http.StatusInternalServerError
 	}

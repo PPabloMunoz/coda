@@ -13,13 +13,14 @@ type AppError struct {
 
 // Predefined application errors for common situations.
 var (
-	ErrNotFound      = &AppError{Code: "NOT_FOUND", Message: "Resource not found"}
-	ErrUnauthorized  = &AppError{Code: "UNAUTHORIZED", Message: "Authentication required"}
-	ErrForbidden     = &AppError{Code: "FORBIDDEN", Message: "Access denied"}
-	ErrAlreadyExists = &AppError{Code: "ALREADY_EXISTS", Message: "Resource already exists"}
-	ErrInvalidID     = &AppError{Code: "INVALID_ID", Message: "The id must be a valid uuid"}
-	ErrInvalidInput  = &AppError{Code: "INVALID_INPUT", Message: "Invalid input"}
-	ErrInternal      = &AppError{Code: "INTERNAL_ERROR", Message: "An unexpected error occurred"}
+	ErrNotFound          = &AppError{Code: "NOT_FOUND", Message: "Resource not found"}
+	ErrUnauthorized      = &AppError{Code: "UNAUTHORIZED", Message: "Authentication required"}
+	ErrForbidden         = &AppError{Code: "FORBIDDEN", Message: "Access denied"}
+	ErrAlreadyExists     = &AppError{Code: "ALREADY_EXISTS", Message: "Resource already exists"}
+	ErrInvalidID         = &AppError{Code: "INVALID_ID", Message: "The id must be a valid uuid"}
+	ErrInvalidInput      = &AppError{Code: "INVALID_INPUT", Message: "Invalid input"}
+	ErrMusicBrainzFailed = &AppError{Code: "MUSICBRAINZ_FAILED", Message: "MusicBrainz failed"}
+	ErrInternal          = &AppError{Code: "INTERNAL_ERROR", Message: "An unexpected error occurred"}
 )
 
 // Error returns the safe, human-readable message. It never includes Cause.
