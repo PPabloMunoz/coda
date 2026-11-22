@@ -341,3 +341,27 @@ func pruneOrphanCollaboratorsTx(ctx context.Context, tx *sql.Tx) (int64, error) 
 	}
 	return n, nil
 }
+
+func (st *Store) DeleteInactiveArtists(ctx context.Context) (int64, error) {
+	res, err := st.db.ExecContext(ctx, `
+		DELETE FROM artists 
+		WHERE active = 0 AND in_library = 0
+			AND NOT EXISTS (
+			SELECT 1 FROM artist_credit_items WHERE artist_id = artists.id
+		)`,
+	)
+	if err != nil {
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete inactive artists: %w", err),
+		)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete inactive artists: %w", err),
+		)
+	}
+	return n, nil
+}

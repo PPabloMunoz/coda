@@ -43,6 +43,8 @@ func (r *Runner) exec(ctx context.Context, t Task) {
 		r.importArtist(sctx, t)
 	case TaskPruneArtists:
 		r.pruneArtists(ctx)
+	case TaskDeleteInactiveArtists:
+		r.deleteInactiveArtists(ctx)
 	default:
 		r.log.Warnf("task unknown key %q, skipping", t.Key)
 	}
@@ -141,5 +143,16 @@ func (r *Runner) cleanupCredits(ctx context.Context) {
 	}
 	if n > 0 {
 		r.log.Infof("cleaned %d orphan artist credits", n)
+	}
+}
+
+func (r *Runner) deleteInactiveArtists(ctx context.Context) {
+	n, err := r.st.DeleteInactiveArtists(ctx)
+	if err != nil {
+		r.log.Errorf("deleting inactive artists: %v", err)
+		return
+	}
+	if n > 0 {
+		r.log.Infof("deleted %d artists", n)
 	}
 }

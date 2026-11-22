@@ -3,9 +3,10 @@ package tasks
 type TaskKey string
 
 const (
-	TaskScanRoots         TaskKey = "scan-roots"
-	TaskImportDiscography TaskKey = "import-discography"
-	TaskPruneArtists      TaskKey = "prune-artists"
+	TaskScanRoots             TaskKey = "scan-roots"
+	TaskImportDiscography     TaskKey = "import-discography"
+	TaskPruneArtists          TaskKey = "prune-artists"
+	TaskDeleteInactiveArtists TaskKey = "delete-inactive-artists"
 )
 
 type Task struct {

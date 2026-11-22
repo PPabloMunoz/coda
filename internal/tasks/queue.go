@@ -82,7 +82,7 @@ func (q *Queue) EnqueuePrune() {
 	for _, t := range q.items {
 		if t.Key == TaskPruneArtists {
 			q.mu.Unlock()
-			q.debug("task prune-artists already queued")
+			q.debugf("task %s already queued", TaskPruneArtists)
 			return
 		}
 	}
@@ -119,6 +119,22 @@ func (q *Queue) EnqueueRefreshArtist(id string) ArtistImportStatus {
 	q.signal()
 
 	return *status
+}
+
+func (q *Queue) EnqueueDeleteInactiveArtists() {
+	q.mu.Lock()
+	for _, t := range q.items {
+		if t.Key == TaskDeleteInactiveArtists {
+			q.mu.Unlock()
+			q.debugf("task %s already queued", TaskDeleteInactiveArtists)
+			return
+		}
+	}
+	q.items = append(q.items, Task{Key: TaskDeleteInactiveArtists})
+	depth := len(q.items)
+	q.mu.Unlock()
+	q.debugf("task %s queued (depth=%d)", TaskDeleteInactiveArtists, depth)
+	q.signal()
 }
 
 func (q *Queue) ArtistImportStatus(id string) ArtistImportStatus {

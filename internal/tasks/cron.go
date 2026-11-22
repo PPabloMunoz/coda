@@ -7,8 +7,11 @@ import (
 	"github.com/ppablomunoz/coda/internal/utils"
 )
 
-var scanRootsInterval = 6 * time.Hour
-var pruneArtistsInterval = 24 * time.Hour
+var (
+	scanRootsInterval             = 6 * time.Hour
+	pruneArtistsInterval          = 24 * time.Hour
+	deleteInactiveArtistsInterval = 24 * 7 * time.Hour // Once every week
+)
 
 type Scheduler struct {
 	queue *Queue
@@ -21,12 +24,17 @@ func NewScheduler(q *Queue, log *utils.Logger) *Scheduler {
 
 func (s *Scheduler) Start(ctx context.Context) {
 	if s.log != nil {
-		s.log.Debugf("scheduler started (scan interval=%s prune interval=%s)", scanRootsInterval, pruneArtistsInterval)
+		s.log.Debugf(
+			"scheduler started (scan interval=%s prune interval=%s delete-inactive-artists interval=%s)",
+			scanRootsInterval, pruneArtistsInterval, deleteInactiveArtistsInterval,
+		)
 	}
 	scanTicker := time.NewTicker(scanRootsInterval)
 	defer scanTicker.Stop()
 	pruneTicker := time.NewTicker(pruneArtistsInterval)
 	defer pruneTicker.Stop()
+	deleteInactiveArtistsTicker := time.NewTicker(deleteInactiveArtistsInterval)
+	defer deleteInactiveArtistsTicker.Stop()
 
 	for {
 		select {
@@ -42,6 +50,11 @@ func (s *Scheduler) Start(ctx context.Context) {
 				s.log.Debug("scheduler tick: enqueuing prune")
 			}
 			s.queue.EnqueuePrune()
+		case <-deleteInactiveArtistsTicker.C:
+			if s.log != nil {
+				s.log.Debug("scheduler tick: enqueuing deleting inactive artists")
+			}
+			s.queue.EnqueueDeleteInactiveArtists()
 		}
 	}
 }
