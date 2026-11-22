@@ -482,11 +482,11 @@ export const api = {
       { method: 'POST' },
     ),
 
-  link: (fileID: number, trackID: string, move = false) =>
+  link: (fileID: number, trackID: string) =>
     fetch(`/api/v1/files/${fileID}/link`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ track_id: trackID, move }),
+      body: JSON.stringify({ track_id: trackID }),
     }),
   scan: () => fetch('/api/v1/scan', { method: 'POST' }),
   unlink: (fileID: number) =>
