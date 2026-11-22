@@ -45,10 +45,9 @@ func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tas
 	router := gin.New()
 	router.Use(gin.Recovery())
 
+	// No access logging: the API stays silent like the UI serving; the app
+	// logs what matters (imports, links, cover fetches) via h.log.
 	v1 := router.Group("/api/v1")
-	v1.Use(gin.LoggerWithConfig(gin.LoggerConfig{
-		SkipPaths: []string{"/api/v1/health"},
-	}))
 
 	v1.GET("/health", handler.health)
 	v1.GET("/stats", handler.libraryStats)
