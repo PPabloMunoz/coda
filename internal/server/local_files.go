@@ -481,3 +481,86 @@ func requireLocalFileID(raw string) (int64, error) {
 	}
 	return id, nil
 }
+
+// getFileSuggestions returns ranked link suggestions for an unlinked file
+// (200). Tag reads are best-effort: a missing/unreadable file yields empty
+// suggestions, never a 500 — the next scan heals or prunes the row.
+// Already-linked files are 409; nothing here writes tags or moves files.
+func (h *Handler) getFileSuggestions(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	localFileID, err := requireLocalFileID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	limit := 5
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		limit, err = strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > 10 {
+			h.writeAppError(c, apperrors.Wrap(
+				apperrors.ErrInvalidInput,
+				fmt.Errorf("invalid 'limit' parameter: must be an integer between 1 and 10")),
+			)
+			return
+		}
+	}
+
+	// Optional artist scope for second-chance suggestions after the wizard's
+	// artist step. Malformed is 400; unknown is 404 from the store lookup.
+	artistID := strings.TrimSpace(c.Query("artist"))
+	if artistID != "" {
+		artistID, err = requireMBID(artistID)
+		if err != nil {
+			h.writeAppError(c, err)
+			return
+		}
+	}
+
+	file, err := h.st.GetFile(ctx, localFileID, false)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	if file.TrackID != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrAlreadyExists,
+			fmt.Errorf("file %d is already linked", localFileID)),
+		)
+		return
+	}
+
+	snap, err := tags.Read(file.Path)
+	if err != nil {
+		h.log.Errorf("suggest file=%d read tags -> %v", localFileID, err)
+		c.JSON(http.StatusOK, store.SuggestionResult{
+			Suggestions: []store.SuggestedTrack{},
+		})
+		return
+	}
+
+	root, err := h.st.GetRoot(ctx, file.RootID)
+	if err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("suggest file=%d load root -> %w", localFileID, err)),
+		)
+		return
+	}
+
+	res, err := h.st.SuggestTracks(ctx, store.SuggestOptions{
+		RootPath: root.Path,
+		FilePath: file.Path,
+		Snapshot: snap,
+		Limit:    limit,
+		ArtistID: artistID,
+	})
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
+}

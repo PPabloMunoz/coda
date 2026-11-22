@@ -58,6 +58,7 @@ func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tas
 	v1.GET("/files", handler.getLocalFiles)
 	v1.GET("/files/stats", handler.stats)
 	v1.GET("/files/:id", handler.getLocalFile)
+	v1.GET("/files/:id/suggestions", handler.getFileSuggestions)
 	v1.POST("/files/:id/link", handler.link)
 	v1.DELETE("/files/:id/link", handler.unlink)
 	v1.POST("/files/:id/refresh", handler.refreshLocalFile)
