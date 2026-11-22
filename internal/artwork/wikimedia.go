@@ -37,6 +37,8 @@ type commonsImage struct {
 	Size     int64  `json:"size"`
 }
 
+// fetchWikimedia searches Commons File pages for name and downloads the first
+// image whose title contains the artist, preferring the 1000px thumbnail.
 func (f *Fetcher) fetchWikimedia(ctx context.Context, name string) (*Result, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {

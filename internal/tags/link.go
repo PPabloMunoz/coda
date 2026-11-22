@@ -29,6 +29,7 @@ func LinkKeys() []string {
 	}
 }
 
+// SnapshotFromLink builds a write-ready Snapshot from link info for tags.ToMap.
 func SnapshotFromLink(info *LinkInfo) *Snapshot {
 	s := &Snapshot{
 		Title:            info.Title,
@@ -52,6 +53,7 @@ func SnapshotFromLink(info *LinkInfo) *Snapshot {
 	return s
 }
 
+// ToMap converts s to a taglib map with only LinkKeys, skipping blanks and zero numbers.
 func ToMap(s *Snapshot) map[string][]string {
 	out := map[string][]string{}
 	put := func(k, v string) {
@@ -91,6 +93,7 @@ func ToMap(s *Snapshot) map[string][]string {
 	return out
 }
 
+// WriteTags writes tags to path and normalizes MP3 TXXX descriptions to Picard casing.
 func WriteTags(path string, tags map[string][]string) error {
 	if err := taglib.WriteTags(path, tags, 0); err != nil {
 		return fmt.Errorf("tags: write %q: %w", path, err)
@@ -101,6 +104,7 @@ func WriteTags(path string, tags map[string][]string) error {
 	return nil
 }
 
+// ClearTags removes only LinkKeys from path, preserving all other frames, then normalizes MP3 TXXX.
 func ClearTags(path string) error {
 	keys := LinkKeys()
 

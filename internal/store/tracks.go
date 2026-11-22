@@ -9,6 +9,7 @@ import (
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
+// GetTrack returns a track by MBID with its artist credits, or ErrNotFound.
 func (st *Store) GetTrack(ctx context.Context, trackID string) (*TrackParams, error) {
 	var t TrackParams
 	var acID sql.NullInt64
@@ -42,6 +43,7 @@ func (st *Store) GetTrack(ctx context.Context, trackID string) (*TrackParams, er
 	return &t, nil
 }
 
+// GetTrackFullRelease returns a track plus its release (without files) for link/refresh.
 func (st *Store) GetTrackFullRelease(ctx context.Context, trackID string) (
 	*FullReleaseParams, *TrackParams, error,
 ) {
@@ -58,6 +60,7 @@ func (st *Store) GetTrackFullRelease(ctx context.Context, trackID string) (
 	return release, track, nil
 }
 
+// trackExists reports whether a track id exists in tx; empty id is false, no error.
 func (st *Store) trackExists(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
 	if id == "" {
 		return false, nil

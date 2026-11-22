@@ -31,6 +31,8 @@ type itunesAlbum struct {
 	ArtworkURL600  string `json:"artworkUrl600"`
 }
 
+// fetchiTunes searches iTunes albums by artist/album and downloads the first
+// exact match, upgrading artwork to 600px. No match is ErrNotFound.
 func (f *Fetcher) fetchiTunes(ctx context.Context, artist, album string) (*Result, error) {
 	artist = strings.TrimSpace(artist)
 	album = strings.TrimSpace(album)

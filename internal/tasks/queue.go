@@ -16,6 +16,7 @@ type Queue struct {
 	log           *utils.Logger
 }
 
+// NewQueue returns an empty serial FIFO queue with artist-import tracking.
 func NewQueue(log *utils.Logger) *Queue {
 	return &Queue{
 		items:         make([]Task, 0),
@@ -46,6 +47,7 @@ func (q *Queue) pop() (Task, bool) {
 	return item, true
 }
 
+// run drains queued tasks serially via exec until ctx is canceled.
 func (q *Queue) run(ctx context.Context, exec func(context.Context, Task)) {
 	for {
 		t, ok := q.pop()
@@ -61,6 +63,7 @@ func (q *Queue) run(ctx context.Context, exec func(context.Context, Task)) {
 	}
 }
 
+// EnqueueScan queues a library scan unless one is already pending.
 func (q *Queue) EnqueueScan() {
 	q.mu.Lock()
 	for _, t := range q.items {
@@ -77,6 +80,7 @@ func (q *Queue) EnqueueScan() {
 	q.signal()
 }
 
+// EnqueuePrune queues an orphan-collaborator prune unless one is already pending.
 func (q *Queue) EnqueuePrune() {
 	q.mu.Lock()
 	for _, t := range q.items {
@@ -93,6 +97,7 @@ func (q *Queue) EnqueuePrune() {
 	q.signal()
 }
 
+// EnqueueRefreshArtist queues a discography import, deduping while queued/running.
 func (q *Queue) EnqueueRefreshArtist(id string) ArtistImportStatus {
 	q.mu.Lock()
 
@@ -121,6 +126,7 @@ func (q *Queue) EnqueueRefreshArtist(id string) ArtistImportStatus {
 	return *status
 }
 
+// EnqueueDeleteInactiveArtists queues a hard-delete sweep unless one is already pending.
 func (q *Queue) EnqueueDeleteInactiveArtists() {
 	q.mu.Lock()
 	for _, t := range q.items {
@@ -137,6 +143,7 @@ func (q *Queue) EnqueueDeleteInactiveArtists() {
 	q.signal()
 }
 
+// ArtistImportStatus returns the current import state for id, or idle when unknown.
 func (q *Queue) ArtistImportStatus(id string) ArtistImportStatus {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -147,6 +154,7 @@ func (q *Queue) ArtistImportStatus(id string) ArtistImportStatus {
 	return ArtistImportStatus{ArtistID: id, State: ArtistImportIdle}
 }
 
+// markArtistImportRunning marks an import as running with a start timestamp.
 func (q *Queue) markArtistImportRunning(id string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -162,6 +170,7 @@ func (q *Queue) markArtistImportRunning(id string) {
 	status.Error = ""
 }
 
+// markArtistImportDone marks an import as done with a finish timestamp.
 func (q *Queue) markArtistImportDone(id string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -176,6 +185,7 @@ func (q *Queue) markArtistImportDone(id string) {
 	status.Error = ""
 }
 
+// markArtistImportFailed marks an import as failed with the error message and finish timestamp.
 func (q *Queue) markArtistImportFailed(id string, err error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()

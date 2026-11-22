@@ -89,6 +89,7 @@ func normName(s string) string {
 	return strings.ToLower(b.String())
 }
 
+// New validates config defaults and returns a cover/artist-photo Fetcher.
 func New(cfg Config) (*Fetcher, error) {
 	if strings.TrimSpace(cfg.UserAgent) == "" {
 		return nil, fmt.Errorf("artwork: UserAgent is required (app name/version + contact)")

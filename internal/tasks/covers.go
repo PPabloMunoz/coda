@@ -241,6 +241,7 @@ func (r *Runner) claimCoverPrefetch(artistID string) bool {
 	return true
 }
 
+// releaseCoverPrefetch releases the background cover claim for an artist.
 func (r *Runner) releaseCoverPrefetch(artistID string) {
 	r.coverMu.Lock()
 	defer r.coverMu.Unlock()

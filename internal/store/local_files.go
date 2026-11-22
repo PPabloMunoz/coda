@@ -16,6 +16,7 @@ import (
 // uniqueness (destination already tracked).
 var ErrConflict = errors.New("[store]: conflict")
 
+// ListFiles returns a filtered page of local files plus the total count.
 func (st *Store) ListFiles(
 	ctx context.Context,
 	opts FileListOptions,
@@ -118,6 +119,7 @@ func (st *Store) ListFiles(
 	return files, total, nil
 }
 
+// GetFile returns a local file by id, optionally with its linked track context.
 func (st *Store) GetFile(ctx context.Context, id int64, includeTrack bool) (*LocalFile, error) {
 	f := LocalFile{}
 
@@ -273,6 +275,7 @@ type LocalFilesStats struct {
 	Formats  map[string]int64 `json:"formats"`
 }
 
+// GetLocalFilesStats returns total/linked/unlinked counts plus per-format counts.
 func (st *Store) GetLocalFilesStats(ctx context.Context) (*LocalFilesStats, error) {
 	res := &LocalFilesStats{}
 
@@ -352,6 +355,8 @@ type SyncStats struct {
 	Pruned   int64
 }
 
+// SyncLocalFiles upserts scanned files by path (preserving track_id), links
+// tracks via on-disk MBIDs, and prunes rows with scanned_at older than scanStart.
 func (st *Store) SyncLocalFiles(ctx context.Context,
 	files []ScannedFile, scanStart string,
 ) (SyncStats, error) {
@@ -599,6 +604,7 @@ func (st *Store) Link(ctx context.Context,
 	return nil
 }
 
+// Unlink clears the track link for a local file, keeping the file row.
 func (st *Store) Unlink(ctx context.Context, localFileID int64) error {
 	// Update relation
 	_, err := st.db.ExecContext(ctx, `

@@ -10,6 +10,7 @@ import (
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
+// ListReleaseGroups returns a filtered page of release groups plus the total count.
 func (st *Store) ListReleaseGroups(
 	ctx context.Context,
 	opts ReleaseGroupListOptions,
@@ -236,6 +237,7 @@ func (st *Store) attachReleaseSummaries(
 	return nil
 }
 
+// GetReleaseGroup returns a release group by MBID with its artist credits, or ErrNotFound.
 func (st *Store) GetReleaseGroup(ctx context.Context, id string) (*ReleaseGroupParams, error) {
 	var g ReleaseGroupParams
 	var creditID sql.NullInt64
@@ -266,6 +268,8 @@ func (st *Store) GetReleaseGroup(ctx context.Context, id string) (*ReleaseGroupP
 	return &g, nil
 }
 
+// DeleteReleaseGroup deletes a release group (releases/tracks cascade, files unlink)
+// and sweeps orphan credits, returning ErrNotFound when missing.
 func (st *Store) DeleteReleaseGroup(ctx context.Context, id string) error {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {

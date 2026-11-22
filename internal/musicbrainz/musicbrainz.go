@@ -38,6 +38,7 @@ type Client struct {
 	log        *utils.Logger
 }
 
+// New validates config defaults and returns a rate-limited MusicBrainz client.
 func New(cfg Config) (*Client, error) {
 	if strings.TrimSpace(cfg.UserAgent) == "" {
 		return nil, fmt.Errorf("musicbrainz: UserAgent is required (app name/version + contact)")
@@ -64,6 +65,8 @@ func New(cfg Config) (*Client, error) {
 	}, nil
 }
 
+// getJSON GETs path with fmt=json, enforcing the 1.1s rate limit and 3
+// retries with backoff for 429/503/5xx. 404 maps to ErrNotFound; 4xx fails fast.
 func (c *Client) getJSON(ctx context.Context, path string, query url.Values, out any) error {
 	if query == nil {
 		query = url.Values{}
@@ -165,6 +168,7 @@ func backoffDelay(attempt int, retryAfter string) time.Duration {
 	return d
 }
 
+// sleepOrDone sleeps d unless ctx is canceled, reporting whether the sleep ran.
 func sleepOrDone(ctx context.Context, d time.Duration) bool {
 	if d <= 0 {
 		return ctx.Err() == nil

@@ -11,6 +11,8 @@ import (
 	"github.com/ppablomunoz/coda/internal/utils"
 )
 
+// importDiscography fetches official albums/EPs/singles with tracks from MusicBrainz
+// and saves them, logging fetch vs save time.
 func (r *Runner) importDiscography(ctx context.Context, id string) error {
 	mbStart := time.Now()
 	mbReleases, err := r.mb.GetReleasesWithTracksByArtist(ctx, id)
@@ -47,6 +49,7 @@ func ArtistFromMB(m *musicbrainz.Artist) store.Artist {
 	}
 }
 
+// MBCreditToStore converts MusicBrainz credits to store entries, preserving join phrases.
 func MBCreditToStore(c []musicbrainz.ArtistCredit) []store.CreditEntry {
 	if len(c) == 0 {
 		return nil
@@ -65,6 +68,7 @@ func MBCreditToStore(c []musicbrainz.ArtistCredit) []store.CreditEntry {
 	return out
 }
 
+// FullReleaseFromMB converts a MusicBrainz release with media into store params.
 func FullReleaseFromMB(r musicbrainz.Release) store.FullReleaseParams {
 	p := store.FullReleaseParams{
 		ID:     r.ID,
@@ -96,6 +100,7 @@ func FullReleaseFromMB(r musicbrainz.Release) store.FullReleaseParams {
 	return p
 }
 
+// toLowerIfNotNull lowercases s for DB storage, preserving nil.
 func toLowerIfNotNull(s *string) *string {
 	if s != nil {
 		lower := strings.ToLower(*s)

@@ -9,6 +9,7 @@ import (
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
+// getCreditEntries returns ordered credit entries for each credit id in seen.
 func (st *Store) getCreditEntries(
 	ctx context.Context,
 	seen map[int64]struct{},
@@ -61,6 +62,7 @@ func (st *Store) getCreditEntries(
 	return byCredit, nil
 }
 
+// getCreditEntry returns ordered credit entries for a single artist_credit id.
 func (st *Store) getCreditEntry(ctx context.Context, id int64) ([]CreditEntry, error) {
 	creditRows, err := st.db.QueryContext(ctx, `
 		SELECT aci.artist_id, a.name, a.sort_name,

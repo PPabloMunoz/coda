@@ -30,6 +30,7 @@ type Handler struct {
 	coverDir string
 }
 
+// NewHandler builds the Gin engine with /api/v1 routes and the embedded UI fallback.
 func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tasks.Queue,
 	art *artwork.Fetcher, coverDir string,
 ) *gin.Engine {
@@ -93,10 +94,12 @@ func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tas
 	return router
 }
 
+// health answers liveness with 200 ok.
 func (h *Handler) health(c *gin.Context) {
 	c.String(http.StatusOK, "ok")
 }
 
+// parseLimitAndOffset parses limit (1-100, default 20) and offset (>=0, default 0).
 func parseLimitAndOffset(c *gin.Context) (limit int, offset int, err error) {
 	limitStr := c.DefaultQuery("limit", "20")
 	offsetStr := c.DefaultQuery("offset", "0")
@@ -142,6 +145,7 @@ func hasInclude(c *gin.Context, name string) bool {
 	return false
 }
 
+// parseOptionalBool parses an optional bool query param, returning nil when blank.
 func parseOptionalBool(raw string) (*bool, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil
@@ -153,6 +157,7 @@ func parseOptionalBool(raw string) (*bool, error) {
 	return &value, nil
 }
 
+// requireMBID validates raw as a MusicBrainz UUID, mapping failures to ErrInvalidID.
 func requireMBID(raw string) (string, error) {
 	if err := utils.ValidateMBID(raw); err != nil {
 		return "", apperrors.ErrInvalidID
@@ -160,6 +165,7 @@ func requireMBID(raw string) (string, error) {
 	return raw, nil
 }
 
+// requireOptionalMBID passes through blank ids and validates non-blank ones as MBIDs.
 func requireOptionalMBID(raw string) (string, error) {
 	if raw == "" {
 		return "", nil

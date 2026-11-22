@@ -8,6 +8,7 @@ import (
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
+// httpStatusFor maps an AppError code to its HTTP status (unknown codes are 500).
 func httpStatusFor(code string) int {
 	switch code {
 	case "NOT_FOUND":
@@ -27,6 +28,7 @@ func httpStatusFor(code string) int {
 	}
 }
 
+// writeAppError logs err with method/route and aborts with its safe message and code.
 func (h *Handler) writeAppError(c *gin.Context, err error) {
 	appErr, ok := apperrors.Get(err)
 	if !ok {

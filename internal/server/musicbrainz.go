@@ -12,6 +12,7 @@ import (
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
 )
 
+// searchMusicBrainzArtists proxies MusicBrainz artist search, requiring q >= 2 chars.
 func (h *Handler) searchMusicBrainzArtists(c *gin.Context) {
 	ctx := c.Request.Context()
 

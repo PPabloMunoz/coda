@@ -36,6 +36,7 @@ var (
 	ErrInvalidMBID = errors.New("invalid id")
 )
 
+// ValidateMBID reports whether id is a lowercase-hex MusicBrainz UUID.
 func ValidateMBID(id string) error {
 	if match := mbIDRegex.MatchString(id); !match {
 		return ErrInvalidMBID
@@ -43,6 +44,7 @@ func ValidateMBID(id string) error {
 	return nil
 }
 
+// NullIfEmpty returns nil for blank strings so DB columns stay NULL until matched.
 func NullIfEmpty(s string) *string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -51,6 +53,8 @@ func NullIfEmpty(s string) *string {
 	return &s
 }
 
+// SanitizeSegment makes s safe for use as a single path segment, replacing
+// separators, control characters, and reserved symbols and trimming edge dots.
 func SanitizeSegment(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {

@@ -17,6 +17,7 @@ type updateReleaseBody struct {
 	NewReleaseID string `json:"new_release_id"`
 }
 
+// getReleaseGroups lists release groups with artist/type/has-release/primary filters.
 func (h *Handler) getReleaseGroups(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -88,6 +89,7 @@ func (h *Handler) getReleaseGroups(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// getReleaseGroup returns one release group by MBID.
 func (h *Handler) getReleaseGroup(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -108,6 +110,7 @@ func (h *Handler) getReleaseGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, group)
 }
 
+// replaceRelease swaps a group's kept release for another official release in the same group.
 func (h *Handler) replaceRelease(c *gin.Context) {
 	ctx := c.Request.Context()
 	releaseGroupID, err := requireMBID(c.Param("id"))
@@ -156,6 +159,7 @@ func (h *Handler) replaceRelease(c *gin.Context) {
 	c.JSON(http.StatusOK, nil)
 }
 
+// deleteReleaseGroup deletes a release group and its cached cover files.
 func (h *Handler) deleteReleaseGroup(c *gin.Context) {
 	ctx := c.Request.Context()
 	releaseGroupID, err := requireMBID(c.Param("id"))

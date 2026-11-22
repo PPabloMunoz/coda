@@ -49,6 +49,7 @@ func (h *Handler) getReleaseGroupCover(c *gin.Context) {
 	h.serveCover(c, release.ID)
 }
 
+// serveCover ensures and serves the cached cover bytes for a release with ETag caching.
 func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 	ctx := c.Request.Context()
 
@@ -120,6 +121,7 @@ func (h *Handler) refreshReleaseCover(c *gin.Context) {
 	c.JSON(http.StatusOK, row)
 }
 
+// doRefreshReleaseCover drops cached bytes/row for a release and refetches its cover.
 func (h *Handler) doRefreshReleaseCover(ctx context.Context, releaseID string) (*store.CoverParams, error) {
 	rel, err := h.st.GetRelease(ctx, releaseID, false)
 	if err != nil {
@@ -198,6 +200,7 @@ func (h *Handler) getArtistCover(c *gin.Context) {
 	h.serveArtistCover(c, artistID)
 }
 
+// serveArtistCover ensures and serves the cached photo bytes for an artist with ETag caching.
 func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 	ctx := c.Request.Context()
 
