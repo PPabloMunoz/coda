@@ -65,8 +65,9 @@ func (r *Runner) exec(ctx context.Context, t Task) {
 	}
 }
 
-// scanRoots walks configured roots, syncs DB rows by path, prunes missing files,
-// and sweeps orphan credits/collaborators.
+// scanRoots walks configured roots, syncs DB rows by path, auto-links
+// exact-MBID files (tag rewrite + move), prunes missing files, and sweeps
+// orphan credits/collaborators.
 func (r *Runner) scanRoots(ctx context.Context) {
 	r.log.Info("scanning root folders...")
 
@@ -96,10 +97,11 @@ func (r *Runner) scanRoots(ctx context.Context) {
 		r.log.Errorf("scan failed in %s: %v", time.Since(start), err)
 		return
 	}
+	auto := r.autoLinkMoves(ctx)
 	r.cleanupCredits(ctx)
 	r.pruneArtists(ctx)
-	r.log.Infof("scan done: found=%d upserted=%d pruned=%d in %s",
-		stats.Found, stats.Upserted, stats.Pruned, time.Since(start))
+	r.log.Infof("scan done: found=%d upserted=%d pruned=%d autolinked=%d moved=%d skipped=%d in %s",
+		stats.Found, stats.Upserted, stats.Pruned, auto.Linked, auto.Moved, auto.SkippedConflict, time.Since(start))
 }
 
 // importArtist imports an artist's discography, then prefetches covers in the

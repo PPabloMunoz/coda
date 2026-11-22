@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/gin-gonic/gin/binding"
 
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
-	"github.com/ppablomunoz/coda/internal/library"
 	"github.com/ppablomunoz/coda/internal/store"
 	"github.com/ppablomunoz/coda/internal/tags"
 	"github.com/ppablomunoz/coda/internal/tasks"
@@ -101,44 +99,16 @@ type PostLinkBody struct {
 
 // libraryTargetPath builds the on-disk destination for a linked track
 // under root. Filesystem work stays in the caller; this is pure.
+// Single owner is tasks.LibraryTargetPath (reused by the scan auto-link).
 func libraryTargetPath(root string, info *tags.LinkInfo, ext string) (string, error) {
-	artist := info.AlbumArtistDisplay
-	if strings.TrimSpace(artist) == "" {
-		artist = info.ArtistDisplay
-	}
-	return library.Target{
-		Root:   root,
-		Artist: artist,
-		Album:  info.Album,
-		Title:  info.Title,
-		Disc:   info.DiscNumber,
-		Track:  info.TrackNumber,
-		Ext:    ext,
-	}.Path()
+	return tasks.LibraryTargetPath(root, info, ext)
 }
 
 // ensureMoveDestination creates the destination parent dir and reports
-// whether renaming is safe. A pre-existing dst is ErrAlreadyExists so
-// callers fail before writing tags.
+// whether renaming is safe. Single owner is tasks.EnsureMoveDestination
+// (reused by the scan auto-link).
 func ensureMoveDestination(op string, fileID int64, trackID, src, dst string) error {
-	if dst == src {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("%s file=%d track=%q mkdir -> %w", op, fileID, trackID, err),
-		)
-	}
-	if _, err := os.Lstat(dst); err == nil {
-		return apperrors.ErrAlreadyExists
-	} else if !os.IsNotExist(err) {
-		return apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("%s file=%d track=%q stat destination -> %w", op, fileID, trackID, err),
-		)
-	}
-	return nil
+	return tasks.EnsureMoveDestination(op, fileID, trackID, src, dst)
 }
 
 // link writes release tags and cover to a file, moves it to its library path,

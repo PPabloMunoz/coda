@@ -13,7 +13,6 @@ import (
 	"github.com/ppablomunoz/coda/internal/config"
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/store"
-	"github.com/ppablomunoz/coda/internal/tags"
 	"github.com/ppablomunoz/coda/internal/tasks"
 )
 
@@ -145,37 +144,9 @@ func (h *Handler) doRefreshReleaseCover(ctx context.Context, releaseID string) (
 }
 
 // embedCover stamps the cached release art into the audio file as its front
-// cover. No cached art is a no-op (link never blocks on the network); a
-// present-but-unreadable cache or a tag failure surfaces as an error like
-// any other link step.
+// cover. Single owner is tasks.EmbedCover (reused by the scan auto-link).
 func (h *Handler) embedCover(ctx context.Context, filePath, releaseID string) error {
-	row, err := h.st.GetCover(ctx, releaseID)
-	if err != nil {
-		if apperrors.Is(err, apperrors.ErrNotFound) {
-			return nil
-		}
-		return err
-	}
-	path, err := config.CoverPath(h.coverDir, releaseID, row.MIME)
-	if err != nil {
-		return apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("cover path: %w", err),
-		)
-	}
-	img, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// Stale row; drop it so the next GET refetches, link goes on.
-			_ = h.st.DeleteCover(ctx, releaseID)
-			return nil
-		}
-		return apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("cover file=%q read -> %w", releaseID, err),
-		)
-	}
-	return tags.WriteCover(filePath, img)
+	return tasks.EmbedCover(ctx, h.st, h.coverDir, filePath, releaseID)
 }
 
 // removeCoverFiles deletes every cached file for a release (all extensions).
