@@ -14,6 +14,7 @@ import (
 const (
 	CoverSourceCoverArtArchive = "coverartarchive"
 	CoverSourceDeezer          = "deezer"
+	CoverSourceiTunes          = "itunes"
 	CoverSourceUpload          = "upload"
 )
 

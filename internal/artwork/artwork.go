@@ -19,10 +19,12 @@ const (
 	// bypass the fetcher entirely.
 	SourceCoverArtArchive = "coverartarchive"
 	SourceDeezer          = "deezer"
+	SourceiTunes          = "itunes"
 	SourceUpload          = "upload"
 
 	DefaultCAABaseURL          = "https://coverartarchive.org"
 	DefaultDeezerBaseURL       = "https://api.deezer.com"
+	DefaultiTunesBaseURL       = "https://itunes.apple.com"
 	defaultTimeout             = 15 * time.Second
 	defaultMaxBytes      int64 = 15 << 20 // 15MB cap so a rogue response can't blow up the cache
 )
@@ -43,6 +45,7 @@ type Config struct {
 	UserAgent     string
 	CAABaseURL    string
 	DeezerBaseURL string
+	iTunesBaseURL string
 	Timeout       time.Duration
 	MaxBytes      int64
 	Logger        *utils.Logger // optional; transient failures log at Warn
@@ -51,6 +54,7 @@ type Config struct {
 type Fetcher struct {
 	caaBase    string
 	deezerBase string
+	itunesBase string
 	http       *http.Client
 	ua         string
 	maxBytes   int64
@@ -72,6 +76,9 @@ func New(cfg Config) (*Fetcher, error) {
 	if cfg.DeezerBaseURL == "" {
 		cfg.DeezerBaseURL = DefaultDeezerBaseURL
 	}
+	if cfg.iTunesBaseURL == "" {
+		cfg.iTunesBaseURL = DefaultiTunesBaseURL
+	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = defaultTimeout
 	}
@@ -81,6 +88,7 @@ func New(cfg Config) (*Fetcher, error) {
 	return &Fetcher{
 		caaBase:    strings.TrimRight(cfg.CAABaseURL, "/"),
 		deezerBase: strings.TrimRight(cfg.DeezerBaseURL, "/"),
+		itunesBase: strings.TrimRight(cfg.iTunesBaseURL, "/"),
 		http:       &http.Client{Timeout: cfg.Timeout},
 		ua:         cfg.UserAgent,
 		maxBytes:   cfg.MaxBytes,
