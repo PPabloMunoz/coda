@@ -24,9 +24,11 @@ export function artistCard(artist: Artist): HTMLAnchorElement {
   card.setAttribute('aria-label', artist.name);
 
   const cover = el('div', 'artist-card__cover');
-  const avatar = artistAvatar(artist.id, artist.name);
-  setSharedArtName(avatar, sharedArtName('artist', artist.id));
-  cover.append(avatar);
+  const photo = coverArt('artist', artist.id, '', {
+    fallback: () => artistAvatar(artist.id, artist.name),
+  });
+  setSharedArtName(photo, sharedArtName('artist', artist.id));
+  cover.append(photo);
 
   const body = el('div', 'artist-card__body');
   body.append(

@@ -1286,6 +1286,10 @@ select {
 	border-radius: 8px;
 }
 
+.artist-card__cover .cover-img {
+	border: 1px solid rgb(255 255 255 / 0.08);
+}
+
 .artist-card__body {
 	padding: 0.65rem 0.15rem 0.1rem;
 }
