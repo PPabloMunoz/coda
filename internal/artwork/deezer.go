@@ -21,7 +21,6 @@ import (
 type deezerAlbumSearch struct {
 	Data []deezerAlbum `json:"data"`
 }
-
 type deezerAlbum struct {
 	Title       string `json:"title"`
 	CoverXL     string `json:"cover_xl"`
@@ -125,5 +124,109 @@ func (f *Fetcher) fetchDeezer(ctx context.Context, artist, album string) (*Resul
 		MIME:      mime,
 		Source:    SourceDeezer,
 		SourceURL: coverURL,
+	}, nil
+}
+
+// deezerArtistSearch is the subset of /search/artist we read.
+type deezerArtistSearch struct {
+	Data []deezerArtist `json:"data"`
+}
+
+type deezerArtist struct {
+	Name          string `json:"name"`
+	PictureXL     string `json:"picture_xl"`
+	PictureBig    string `json:"picture_big"`
+	PictureMedium string `json:"picture_medium"`
+	Picture       string `json:"picture"`
+}
+
+// fetchDeezerArtist downloads the artist picture for a name. First hit with
+// any picture wins, preferring the largest rendition. No key needed.
+func (f *Fetcher) fetchDeezerArtist(ctx context.Context, name string) (*Result, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, apperrors.ErrNotFound
+	}
+
+	q := url.Values{}
+	q.Set("q", `artist:"`+name+`"`)
+	searchURL := f.deezerBase + "/search/artist?" + q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
+	if err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artwork: build deezer artist request: %w", err),
+		)
+	}
+	req.Header.Set("User-Agent", f.ua)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := f.http.Do(req)
+	if err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artwork: deezer artist request: %w", err),
+		)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, apperrors.ErrNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artwork: deezer artist status %d", resp.StatusCode),
+		)
+	}
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artwork: read deezer artist response: %w", err),
+		)
+	}
+	var search deezerArtistSearch
+	if err := json.Unmarshal(raw, &search); err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artwork: decode deezer artist response: %w", err),
+		)
+	}
+
+	pictureURL := ""
+	for _, a := range search.Data {
+		switch {
+		case a.PictureXL != "":
+			pictureURL = a.PictureXL
+		case a.PictureBig != "":
+			pictureURL = a.PictureBig
+		case a.PictureMedium != "":
+			pictureURL = a.PictureMedium
+		case a.Picture != "":
+			pictureURL = a.Picture
+		}
+		if pictureURL != "" {
+			break
+		}
+	}
+	if pictureURL == "" {
+		return nil, apperrors.ErrNotFound
+	}
+
+	body, mime, err := f.download(ctx, pictureURL)
+	if err != nil {
+		if apperrors.Is(err, apperrors.ErrNotFound) {
+			return nil, apperrors.ErrNotFound
+		}
+		return nil, err
+	}
+	return &Result{
+		Bytes:     body,
+		MIME:      mime,
+		Source:    SourceDeezer,
+		SourceURL: pictureURL,
 	}, nil
 }

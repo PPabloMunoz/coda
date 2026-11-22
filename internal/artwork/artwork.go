@@ -20,13 +20,15 @@ const (
 	SourceCoverArtArchive = "coverartarchive"
 	SourceDeezer          = "deezer"
 	SourceiTunes          = "itunes"
+	SourceWikimedia       = "wikimedia"
 	SourceUpload          = "upload"
 
-	DefaultCAABaseURL          = "https://coverartarchive.org"
-	DefaultDeezerBaseURL       = "https://api.deezer.com"
-	DefaultiTunesBaseURL       = "https://itunes.apple.com"
-	defaultTimeout             = 15 * time.Second
-	defaultMaxBytes      int64 = 15 << 20 // 15MB cap so a rogue response can't blow up the cache
+	DefaultCAABaseURL           = "https://coverartarchive.org"
+	DefaultDeezerBaseURL        = "https://api.deezer.com"
+	DefaultiTunesBaseURL        = "https://itunes.apple.com"
+	DefaultCommonsBaseURL       = "https://commons.wikimedia.org"
+	defaultTimeout              = 15 * time.Second
+	defaultMaxBytes       int64 = 15 << 20 // 15MB cap so a rogue response can't blow up the cache
 )
 
 // Result is one fetched cover image.
@@ -42,23 +44,25 @@ type Result struct {
 type Config struct {
 	// UserAgent is required (app name/version + contact), same convention as
 	// the MusicBrainz client.
-	UserAgent     string
-	CAABaseURL    string
-	DeezerBaseURL string
-	iTunesBaseURL string
-	Timeout       time.Duration
-	MaxBytes      int64
-	Logger        *utils.Logger // optional; transient failures log at Warn
+	UserAgent      string
+	CAABaseURL     string
+	DeezerBaseURL  string
+	iTunesBaseURL  string
+	CommonsBaseURL string
+	Timeout        time.Duration
+	MaxBytes       int64
+	Logger         *utils.Logger // optional; transient failures log at Warn
 }
 
 type Fetcher struct {
-	caaBase    string
-	deezerBase string
-	itunesBase string
-	http       *http.Client
-	ua         string
-	maxBytes   int64
-	log        *utils.Logger
+	caaBase     string
+	deezerBase  string
+	itunesBase  string
+	commonsBase string
+	http        *http.Client
+	ua          string
+	maxBytes    int64
+	log         *utils.Logger
 }
 
 // errImageTooLarge is a control-flow signal, not an API error: download
@@ -79,6 +83,9 @@ func New(cfg Config) (*Fetcher, error) {
 	if cfg.iTunesBaseURL == "" {
 		cfg.iTunesBaseURL = DefaultiTunesBaseURL
 	}
+	if cfg.CommonsBaseURL == "" {
+		cfg.CommonsBaseURL = DefaultCommonsBaseURL
+	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = defaultTimeout
 	}
@@ -86,13 +93,14 @@ func New(cfg Config) (*Fetcher, error) {
 		cfg.MaxBytes = defaultMaxBytes
 	}
 	return &Fetcher{
-		caaBase:    strings.TrimRight(cfg.CAABaseURL, "/"),
-		deezerBase: strings.TrimRight(cfg.DeezerBaseURL, "/"),
-		itunesBase: strings.TrimRight(cfg.iTunesBaseURL, "/"),
-		http:       &http.Client{Timeout: cfg.Timeout},
-		ua:         cfg.UserAgent,
-		maxBytes:   cfg.MaxBytes,
-		log:        cfg.Logger,
+		caaBase:     strings.TrimRight(cfg.CAABaseURL, "/"),
+		deezerBase:  strings.TrimRight(cfg.DeezerBaseURL, "/"),
+		itunesBase:  strings.TrimRight(cfg.iTunesBaseURL, "/"),
+		commonsBase: strings.TrimRight(cfg.CommonsBaseURL, "/"),
+		http:        &http.Client{Timeout: cfg.Timeout},
+		ua:          cfg.UserAgent,
+		maxBytes:    cfg.MaxBytes,
+		log:         cfg.Logger,
 	}, nil
 }
 
@@ -149,6 +157,48 @@ func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) 
 	}
 	if itunesErr != nil {
 		return nil, itunesErr
+	}
+	return nil, apperrors.ErrNotFound
+}
+
+// FetchArtist returns an artist photo, trying Deezer then Wikimedia Commons.
+// Artist art is display-only (never embedded into files). It returns
+// ErrNotFound only when no provider has usable art; transient upstream
+// failures surface as errors so callers retry later instead of caching a
+// miss.
+func (f *Fetcher) FetchArtist(ctx context.Context, artistMBID, artistName string) (*Result, error) {
+	if err := utils.ValidateMBID(artistMBID); err != nil {
+		return nil, apperrors.ErrInvalidID
+	}
+
+	var deezerErr, wikiErr error
+	if res, err := f.fetchDeezerArtist(ctx, artistName); err == nil {
+		return res, nil
+	} else if apperrors.Is(err, apperrors.ErrNotFound) {
+		f.debugf("artwork: no Deezer photo for artist %s", artistMBID)
+	} else if errors.Is(err, errImageTooLarge) {
+		f.debugf("artwork: Deezer photo for artist %s exceeds size limit, trying fallback", artistMBID)
+	} else {
+		deezerErr = err
+		f.warnf("artwork: Deezer photo fetch for artist %s failed: %v", artistMBID, err)
+	}
+
+	if res, err := f.fetchWikimedia(ctx, artistName); err == nil {
+		return res, nil
+	} else if apperrors.Is(err, apperrors.ErrNotFound) {
+		f.debugf("artwork: no Wikimedia photo for artist %s", artistMBID)
+	} else if errors.Is(err, errImageTooLarge) {
+		f.debugf("artwork: Wikimedia photo for artist %s exceeds size limit", artistMBID)
+	} else {
+		wikiErr = err
+		f.warnf("artwork: Wikimedia fetch for artist %s failed: %v", artistMBID, err)
+	}
+
+	if deezerErr != nil {
+		return nil, deezerErr
+	}
+	if wikiErr != nil {
+		return nil, wikiErr
 	}
 	return nil, apperrors.ErrNotFound
 }
