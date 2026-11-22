@@ -26,6 +26,7 @@ type Runner struct {
 	log           *utils.Logger
 }
 
+// NewRunner returns a Runner dispatching queued scan/import/prune work.
 func NewRunner(st *store.Store, mb *musicbrainz.Client, l *utils.Logger, q *Queue,
 	art *artwork.Fetcher, coverDir string,
 ) *Runner {
@@ -39,10 +40,12 @@ func NewRunner(st *store.Store, mb *musicbrainz.Client, l *utils.Logger, q *Queu
 	}
 }
 
+// Start runs queued tasks serially until ctx is canceled.
 func (r *Runner) Start(ctx context.Context) {
 	r.queue.run(ctx, r.exec)
 }
 
+// exec dispatches a task with per-kind timeouts (10m scan, 30m import).
 func (r *Runner) exec(ctx context.Context, t Task) {
 	switch t.Key {
 	case TaskScanRoots:
@@ -62,6 +65,8 @@ func (r *Runner) exec(ctx context.Context, t Task) {
 	}
 }
 
+// scanRoots walks configured roots, syncs DB rows by path, prunes missing files,
+// and sweeps orphan credits/collaborators.
 func (r *Runner) scanRoots(ctx context.Context) {
 	r.log.Info("scanning root folders...")
 
@@ -97,6 +102,8 @@ func (r *Runner) scanRoots(ctx context.Context) {
 		stats.Found, stats.Upserted, stats.Pruned, time.Since(start))
 }
 
+// importArtist imports an artist's discography, then prefetches covers in the
+// background; removed/non-library artists are skipped as done.
 func (r *Runner) importArtist(ctx context.Context, t Task) {
 	if t.ID == "" {
 		r.log.Warn("task import-discography missing artist id, skipping")
@@ -141,6 +148,7 @@ func (r *Runner) importArtist(ctx context.Context, t Task) {
 	r.log.Infof("discography for %q saved in %s", t.ID, time.Since(start))
 }
 
+// pruneArtists soft-deletes collaboration-only artists with no track left.
 func (r *Runner) pruneArtists(ctx context.Context) {
 	n, err := r.st.PruneOrphanCollaborators(ctx)
 	if err != nil {
@@ -152,6 +160,7 @@ func (r *Runner) pruneArtists(ctx context.Context) {
 	}
 }
 
+// cleanupCredits deletes artist_credits rows no longer referenced by any entity.
 func (r *Runner) cleanupCredits(ctx context.Context) {
 	n, err := r.st.CleanupOrphanCredits(ctx)
 	if err != nil {
@@ -163,6 +172,7 @@ func (r *Runner) cleanupCredits(ctx context.Context) {
 	}
 }
 
+// deleteInactiveArtists hard-deletes soft-deleted artists with no credits left.
 func (r *Runner) deleteInactiveArtists(ctx context.Context) {
 	n, err := r.st.DeleteInactiveArtists(ctx)
 	if err != nil {

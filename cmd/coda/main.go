@@ -23,6 +23,8 @@ import (
 	"github.com/ppablomunoz/coda/internal/utils"
 )
 
+// main wires config, DB, MusicBrainz, artwork, queue/runner/scheduler, and the
+// HTTP server, then runs until interrupt with a 10s graceful shutdown.
 func main() {
 	ctx, stop := signal.NotifyContext(
 		context.Background(),

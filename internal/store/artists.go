@@ -10,6 +10,8 @@ import (
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
+// ListArtists returns a filtered page of active artists plus the total count.
+// Unless opts.All, only in_library artists are returned.
 func (st *Store) ListArtists(ctx context.Context, opts ArtistListOptions) ([]Artist, int, error) {
 	var total int
 
@@ -94,6 +96,7 @@ func (st *Store) ListArtists(ctx context.Context, opts ArtistListOptions) ([]Art
 	return artists, total, nil
 }
 
+// GetArtistByID returns an active artist by MBID, or ErrNotFound.
 func (st *Store) GetArtistByID(ctx context.Context, id string) (*Artist, error) {
 	stmt, err := st.db.PrepareContext(ctx, `
 		SELECT id, name, sort_name, disambiguation, active, in_library
@@ -128,6 +131,7 @@ func (st *Store) GetArtistByID(ctx context.Context, id string) (*Artist, error) 
 	return &art, nil
 }
 
+// CreateArtist inserts an artist or reactivates it as active/in_library on conflict.
 func (st *Store) CreateArtist(ctx context.Context, art Artist) error {
 	stmt, err := st.db.PrepareContext(ctx, `
 		INSERT INTO artists (id, name, sort_name, disambiguation, active, in_library)
@@ -157,6 +161,8 @@ func (st *Store) CreateArtist(ctx context.Context, art Artist) error {
 	return nil
 }
 
+// DeleteArtist removes primary release groups for id, guest-only groups with no
+// surviving library artist, soft-deletes the artist, and prunes orphan collaborators.
 func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -316,6 +322,8 @@ func (st *Store) PruneOrphanCollaborators(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
+// pruneOrphanCollaboratorsTx soft-deletes collaboration-only artists with no track
+// credit left in tx, returning rows cleared.
 func pruneOrphanCollaboratorsTx(ctx context.Context, tx *sql.Tx) (int64, error) {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE artists SET active = 0, in_library = 0
@@ -342,6 +350,7 @@ func pruneOrphanCollaboratorsTx(ctx context.Context, tx *sql.Tx) (int64, error) 
 	return n, nil
 }
 
+// DeleteInactiveArtists hard-deletes soft-deleted artists with no credit references left.
 func (st *Store) DeleteInactiveArtists(ctx context.Context) (int64, error) {
 	res, err := st.db.ExecContext(ctx, `
 		DELETE FROM artists 

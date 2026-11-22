@@ -32,6 +32,7 @@ func (h *Handler) getReleases(c *gin.Context) {
 	c.JSON(http.StatusOK, release)
 }
 
+// getRelease returns one release by MBID, optionally with linked files.
 func (h *Handler) getRelease(c *gin.Context) {
 	ctx := c.Request.Context()
 

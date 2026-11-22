@@ -24,6 +24,8 @@ const (
 
 var DefaultConfig = Config{Port: 8687, Roots: []string{}}
 
+// GetConfig loads config.yaml (creating it with defaults on first run),
+// validates roots and port, and returns the effective config.
 func GetConfig(log *utils.Logger) (*Config, error) {
 	var conf Config
 
@@ -78,6 +80,8 @@ func GetConfig(log *utils.Logger) (*Config, error) {
 	return &conf, nil
 }
 
+// validateConfig cleans root paths, resolves symlinks, and rejects empty,
+// relative, duplicate, or nested roots plus invalid ports and non-directories.
 func validateConfig(conf *Config) error {
 	if conf.Port < 1 || conf.Port > 65535 {
 		return fmt.Errorf("port must be between 1-65535")
@@ -156,6 +160,7 @@ func validateConfig(conf *Config) error {
 	return nil
 }
 
+// getConfigPath returns the config path, honoring CODA_CONFIG when set.
 func getConfigPath() (string, error) {
 	if p := os.Getenv("CODA_CONFIG"); p != "" {
 		return p, nil
@@ -163,6 +168,7 @@ func getConfigPath() (string, error) {
 	return defaultConfigPath()
 }
 
+// defaultConfigPath returns the per-OS default config.yaml location.
 func defaultConfigPath() (string, error) {
 	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
 		return filepath.Join(dir, "coda", ConfigName), nil

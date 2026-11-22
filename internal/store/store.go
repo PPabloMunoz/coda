@@ -24,6 +24,8 @@ type Store struct {
 	rootPaths []string
 }
 
+// NewStore opens the SQLite DB (single connection), runs goose migrations, and
+// returns a Store with the configured roots for later AddRootDirs/SyncLocalFiles.
 func NewStore(dsn string, rootPaths []string, log *utils.Logger) (*Store, error) {
 	db, err := openDB(dsn, log)
 	if err != nil {
@@ -32,6 +34,7 @@ func NewStore(dsn string, rootPaths []string, log *utils.Logger) (*Store, error)
 	return &Store{db: db, rootPaths: rootPaths}, nil
 }
 
+// AddRootDirs upserts configured roots as active and deletes rows for removed roots.
 func (st *Store) AddRootDirs(ctx context.Context) error {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -93,6 +96,7 @@ func (st *Store) AddRootDirs(ctx context.Context) error {
 	return nil
 }
 
+// Close closes the underlying DB connection.
 func (st *Store) Close() {
 	_ = st.db.Close()
 }
@@ -102,6 +106,7 @@ func (st *Store) RootPaths() []string {
 	return append([]string(nil), st.rootPaths...)
 }
 
+// openDB creates the DB dir, opens SQLite with MaxOpenConns(1), and runs migrations.
 func openDB(dsn string, log *utils.Logger) (*sql.DB, error) {
 	dir := filepath.Dir(dsn)
 
@@ -129,6 +134,7 @@ func openDB(dsn string, log *utils.Logger) (*sql.DB, error) {
 	return db, nil
 }
 
+// migration applies embedded goose migrations to db.
 func migration(db *sql.DB) error {
 	goose.SetBaseFS(migrationsFS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -140,6 +146,7 @@ func migration(db *sql.DB) error {
 	return nil
 }
 
+// placeholders returns "?,...,?" with n marks for IN clauses; empty for n <= 0.
 func placeholders(n int) string {
 	if n <= 0 {
 		return ""
@@ -147,6 +154,7 @@ func placeholders(n int) string {
 	return strings.Repeat("?,", n-1) + "?"
 }
 
+// nullString converts s to *string, returning nil when NULL.
 func nullString(s sql.NullString) *string {
 	if s.Valid {
 		return &s.String

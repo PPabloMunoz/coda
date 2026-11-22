@@ -106,6 +106,7 @@ func mergeTXXX(dst, src id3v2.UserDefinedTextFrame) id3v2.UserDefinedTextFrame {
 	return dst
 }
 
+// splitTXXXValues splits NUL-separated TXXX values, dropping empties.
 func splitTXXXValues(v string) []string {
 	parts := strings.Split(v, "\x00")
 	out := parts[:0]

@@ -33,6 +33,7 @@ type ArtistCredit struct {
 	Artist     Artist `json:"artist"`
 }
 
+// GetArtistByID fetches a single artist by MBID.
 func (c *Client) GetArtistByID(ctx context.Context, id string) (*Artist, error) {
 	var artist Artist
 	if err := c.getJSON(ctx, "/artist/"+id, nil, &artist); err != nil {
@@ -42,6 +43,7 @@ func (c *Client) GetArtistByID(ctx context.Context, id string) (*Artist, error) 
 	return &artist, nil
 }
 
+// SearchArtists searches artists by name, clamping limit to 1-25 (default 10).
 func (c *Client) SearchArtists(
 	ctx context.Context,
 	query string,

@@ -46,6 +46,7 @@ type FileListOptions struct {
 	Format       string
 }
 
+// likePattern escapes LIKE wildcards and wraps value for unaccent substring match.
 func likePattern(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)
 	value = strings.ReplaceAll(value, `%`, `\%`)
@@ -53,6 +54,7 @@ func likePattern(value string) string {
 	return "%" + value + "%"
 }
 
+// sortExpression maps a sort key to its SQL expression, falling back to fallback.
 func sortExpression(value string, allowed map[string]string, fallback string) string {
 	if expression, ok := allowed[value]; ok {
 		return expression
@@ -60,6 +62,7 @@ func sortExpression(value string, allowed map[string]string, fallback string) st
 	return allowed[fallback]
 }
 
+// orderDirection maps sort order to ASC/DESC, defaulting to ASC.
 func orderDirection(value string) string {
 	if strings.EqualFold(value, "desc") {
 		return "DESC"

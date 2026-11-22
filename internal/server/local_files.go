@@ -19,6 +19,7 @@ import (
 	"github.com/ppablomunoz/coda/internal/tasks"
 )
 
+// getLocalFiles lists scanned files with linked/unlinked, query, format, and track filters.
 func (h *Handler) getLocalFiles(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -60,6 +61,7 @@ func (h *Handler) getLocalFiles(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// getLocalFile returns one file by id, optionally with its linked track context.
 func (h *Handler) getLocalFile(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -82,6 +84,7 @@ func (h *Handler) getLocalFile(c *gin.Context) {
 	c.JSON(http.StatusOK, file)
 }
 
+// stats returns total/linked/unlinked and per-format file counts.
 func (h *Handler) stats(c *gin.Context) {
 	ctx := c.Request.Context()
 	stats, err := h.st.GetLocalFilesStats(ctx)
@@ -138,6 +141,8 @@ func ensureMoveDestination(op string, fileID int64, trackID, src, dst string) er
 	return nil
 }
 
+// link writes release tags and cover to a file, moves it to its library path,
+// and records the track link (204). Occupied destinations fail with 409 untouched.
 func (h *Handler) link(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -280,6 +285,7 @@ func (h *Handler) link(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
+// unlink clears a file's tags and cover and removes its DB track link (204).
 func (h *Handler) unlink(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -329,6 +335,8 @@ func (h *Handler) unlink(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
+// refreshLocalFile rewrites tags/cover for an already-linked file and moves it
+// to its current library path (204).
 func (h *Handler) refreshLocalFile(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -465,6 +473,7 @@ func (h *Handler) refreshLocalFile(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
+// requireLocalFileID validates a numeric file id path param, mapping failures to ErrInvalidID.
 func requireLocalFileID(raw string) (int64, error) {
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id < 1 {

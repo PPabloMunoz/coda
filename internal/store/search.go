@@ -9,6 +9,7 @@ import (
 	"modernc.org/sqlite"
 )
 
+// init registers the deterministic unaccent SQLite function for diacritic-insensitive search.
 func init() {
 	sqlite.MustRegisterDeterministicScalarFunction(
 		"unaccent",

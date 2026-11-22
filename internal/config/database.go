@@ -12,6 +12,8 @@ const (
 	Pragmas = "?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)"
 )
 
+// GetDBPath returns the SQLite DSN, honoring CODA_DB_PATH when set and
+// appending WAL/synchronous/foreign-keys/busy-timeout pragmas otherwise.
 func GetDBPath() (string, error) {
 	if p := os.Getenv("CODA_DB_PATH"); p != "" {
 		return p + Pragmas, nil
@@ -19,6 +21,7 @@ func GetDBPath() (string, error) {
 	return defaultDBPath()
 }
 
+// defaultDBPath returns the per-OS default DB location (data dir, not config dir).
 func defaultDBPath() (string, error) {
 	switch runtime.GOOS {
 	case "windows":

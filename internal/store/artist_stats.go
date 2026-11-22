@@ -74,6 +74,7 @@ func (st *Store) attachArtistTrackStats(ctx context.Context, artists []Artist) e
 	return nil
 }
 
+// GetArtistTrackStats returns track/linked-track counts for id's primary credits.
 func (st *Store) GetArtistTrackStats(
 	ctx context.Context,
 	id string,

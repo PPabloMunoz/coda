@@ -32,6 +32,7 @@ func (st *Store) GetReleaseOfGroup(ctx context.Context,
 	return st.GetRelease(ctx, releaseID, includeFiles)
 }
 
+// GetRelease returns a release with group, track credits, and optional linked files.
 func (st *Store) GetRelease(ctx context.Context,
 	releaseID string, includeFiles bool,
 ) (*FullReleaseParams, error) {
@@ -198,6 +199,7 @@ func (st *Store) attachTrackFiles(
 	return nil
 }
 
+// normalizeRGType maps MusicBrainz primary types to album/ep/single/other.
 func normalizeRGType(t string) string {
 	switch strings.ToLower(strings.TrimSpace(t)) {
 	case "album":

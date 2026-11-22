@@ -29,6 +29,8 @@ type File struct {
 	FormatHint  string // "mp3", no ".mp3"
 }
 
+// Scan walks rootPaths and calls fn for each supported audio file, skipping
+// symlinks, non-regular files, and unreadable entries. It never follows symlinks.
 func Scan(ctx context.Context, rootPaths []string, fn func(File) error) error {
 	if len(rootPaths) == 0 {
 		return nil
@@ -94,6 +96,8 @@ type Target struct {
 	Ext    string // without dot
 }
 
+// Path returns the sanitized Artist/Album/02-03_Title.ext destination under
+// Root, rejecting empty fields, unsupported extensions, and escapes from Root.
 func (t Target) Path() (string, error) {
 	root := filepath.Clean(strings.TrimSpace(t.Root))
 	if root == "" || root == "." {

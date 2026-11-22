@@ -62,6 +62,8 @@ type deezerCredit struct {
 	Name string `json:"name"`
 }
 
+// fetchDeezer searches Deezer albums by artist/album and downloads the first
+// exact title/artist match, preferring the largest rendition. No match is ErrNotFound.
 func (f *Fetcher) fetchDeezer(ctx context.Context, artist, album string) (*Result, error) {
 	artist = strings.TrimSpace(artist)
 	album = strings.TrimSpace(album)

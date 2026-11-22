@@ -15,6 +15,7 @@ type LibraryStats struct {
 	Files         LocalFilesStats `json:"files"`
 }
 
+// GetLibraryStats returns artist/release-group/release/track counts plus file stats.
 func (st *Store) GetLibraryStats(ctx context.Context) (*LibraryStats, error) {
 	stats := &LibraryStats{}
 

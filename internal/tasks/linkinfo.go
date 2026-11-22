@@ -51,6 +51,7 @@ func CreditDisplayName(entries []store.CreditEntry) string {
 	return strings.TrimSpace(display)
 }
 
+// creditDisplay renders joined display names plus per-artist names and MBIDs.
 func creditDisplay(entries []store.CreditEntry) (string, []string, []string) {
 	var display strings.Builder
 	names := make([]string, 0, len(entries))

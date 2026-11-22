@@ -11,6 +11,7 @@ import (
 	"github.com/ppablomunoz/coda/internal/tasks"
 )
 
+// getArtists lists library (or all with ?all=true) artists with pagination and optional track stats.
 func (h *Handler) getArtists(c *gin.Context) {
 	limit, offset, err := parseLimitAndOffset(c)
 	if err != nil {
@@ -39,6 +40,7 @@ func (h *Handler) getArtists(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// getArtist returns one artist, hiding collaboration-only rows unless ?all=true.
 func (h *Handler) getArtist(c *gin.Context) {
 	artistID, err := requireMBID(c.Param("id"))
 	if err != nil {
@@ -72,6 +74,7 @@ func (h *Handler) getArtist(c *gin.Context) {
 	c.JSON(http.StatusOK, artist)
 }
 
+// getArtistImportStatus returns the queued/running/done/failed import state for an artist.
 func (h *Handler) getArtistImportStatus(c *gin.Context) {
 	artistID, err := requireMBID(c.Param("id"))
 	if err != nil {
@@ -94,6 +97,7 @@ func (h *Handler) getArtistImportStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, h.queue.ArtistImportStatus(artistID))
 }
 
+// refreshArtist requeues a discography import for a library artist (202).
 func (h *Handler) refreshArtist(c *gin.Context) {
 	artistID, err := requireMBID(c.Param("id"))
 	if err != nil {
@@ -120,6 +124,8 @@ type PostArtistBody struct {
 	ID string `json:"id" binding:"required"`
 }
 
+// postArtist adds an artist from MusicBrainz by MBID, 201 created, 200 when promoting
+// a collaborator, or 304 when already in the library (refresh still requeued).
 func (h *Handler) postArtist(c *gin.Context) {
 	ctx := c.Request.Context()
 	var body PostArtistBody
@@ -173,6 +179,7 @@ func (h *Handler) postArtist(c *gin.Context) {
 	c.JSON(http.StatusCreated, stArtist)
 }
 
+// deleteArtist removes an artist's primary/guest-only groups and returns pruned collaborators.
 func (h *Handler) deleteArtist(c *gin.Context) {
 	ctx := c.Request.Context()
 	artistID, err := requireMBID(c.Param("id"))

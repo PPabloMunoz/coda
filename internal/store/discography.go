@@ -8,6 +8,8 @@ import (
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
+// SaveDiscography upserts each release's group/release/tracks in one tx,
+// skipping rows with missing ids/titles and deduping by release-group id.
 func (st *Store) SaveDiscography(ctx context.Context,
 	releases []FullReleaseParams,
 ) error {
