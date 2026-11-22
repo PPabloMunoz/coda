@@ -69,6 +69,8 @@ func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tas
 	v1.GET("/artists/:id/import", handler.getArtistImportStatus)
 	v1.POST("/artists", handler.postArtist)
 	v1.POST("/artists/:id/refresh", handler.refreshArtist)
+	v1.GET("/artists/:id/cover", handler.getArtistCover)
+	v1.POST("/artists/:id/cover/refresh", handler.refreshArtistCover)
 
 	// MusicBrainz
 	v1.GET("/musicbrainz/artists", handler.searchMusicBrainzArtists)

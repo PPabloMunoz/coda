@@ -125,6 +125,7 @@ func (r *Runner) importArtist(ctx context.Context, t Task) {
 		r.log.Errorf("importing artist discography %q failed in %s: %v", t.ID, time.Since(start), err)
 		return
 	}
+	r.prefetchArtistCover(sctx, t.ID, art.Name)
 	r.cleanupCredits(sctx)
 	r.pruneArtists(sctx)
 	r.queue.markArtistImportDone(t.ID)

@@ -184,3 +184,109 @@ func removeCoverFiles(coverDir, releaseID string) {
 		_ = os.Remove(m)
 	}
 }
+
+// getArtistCover serves the cached photo for an artist, fetching it on a
+// cache miss (the import usually prefetched it). Missing art answers 404
+// null — the web client treats 404 as null, same as other entities.
+// Display-only: artist photos are never embedded into audio files.
+func (h *Handler) getArtistCover(c *gin.Context) {
+	artistID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	h.serveArtistCover(c, artistID)
+}
+
+func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
+	ctx := c.Request.Context()
+
+	artist, err := h.st.GetArtistByID(ctx, artistID)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	row, err := tasks.EnsureArtistCover(ctx, h.st, h.art, h.coverDir, artistID, artist.Name)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	path, err := config.ArtistCoverPath(h.coverDir, artistID, row.MIME)
+	if err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artist cover path: %w", err)),
+		)
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		// Row without bytes (deleted/moved data dir): drop the stale row
+		// so the next request retries instead of 500ing forever.
+		_ = h.st.DeleteArtistCover(ctx, artistID)
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artist cover artist=%q read -> %w", artistID, err)),
+		)
+		return
+	}
+
+	etag := `"` + strconv.FormatInt(row.SizeBytes, 10) + "-" + row.FetchedAt + `"`
+	if c.GetHeader("If-None-Match") == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	c.Header("ETag", etag)
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Data(http.StatusOK, row.MIME, data)
+}
+
+// refreshArtistCover drops the cached photo for an artist and fetches it
+// again (Deezer, then Wikimedia). Missing art answers 404 null; an upstream
+// failure surfaces as an error so the old state is never confused with "no
+// art".
+func (h *Handler) refreshArtistCover(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	artistID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	artist, err := h.st.GetArtistByID(ctx, artistID)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if h.art == nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artist cover refresh unavailable"),
+		))
+		return
+	}
+
+	_ = h.st.DeleteArtistCover(ctx, artistID)
+	removeArtistCoverFiles(h.coverDir, artistID)
+
+	row, err := tasks.EnsureArtistCover(ctx, h.st, h.art, h.coverDir, artistID, artist.Name)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, row)
+}
+
+// removeArtistCoverFiles deletes every cached file for an artist (all
+// extensions). Artist files carry the "artist-" prefix, so release files are
+// never touched.
+func removeArtistCoverFiles(coverDir, artistID string) {
+	matches, _ := filepath.Glob(filepath.Join(coverDir, "artist-"+artistID+".*"))
+	for _, m := range matches {
+		_ = os.Remove(m)
+	}
+}
