@@ -43,6 +43,14 @@ func LinkInfoFromStore(rel *store.FullReleaseParams, track *store.TrackParams) *
 	}
 }
 
+// CreditDisplayName renders the joined credit display names ("A & B") for
+// text-search fallbacks and cover attribution. Empty when there is no
+// usable credit.
+func CreditDisplayName(entries []store.CreditEntry) string {
+	display, _, _ := creditDisplay(entries)
+	return strings.TrimSpace(display)
+}
+
 func creditDisplay(entries []store.CreditEntry) (string, []string, []string) {
 	var display strings.Builder
 	names := make([]string, 0, len(entries))

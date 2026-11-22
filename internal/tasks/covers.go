@@ -132,9 +132,9 @@ func (r *Runner) prefetchCovers(ctx context.Context, releases []store.FullReleas
 			r.log.Warnf("cover prefetch release %q check: %v", rel.ID, err)
 			continue
 		}
-		artist := creditDisplayName(rel.Credit)
+		artist := CreditDisplayName(rel.Credit)
 		if artist == "" {
-			artist = creditDisplayName(rel.Group.Credit)
+			artist = CreditDisplayName(rel.Group.Credit)
 		}
 		if _, err := EnsureCover(ctx, r.st, r.art, r.coverDir, rel.ID, artist, rel.Title); err != nil {
 			if !apperrors.Is(err, apperrors.ErrNotFound) {
@@ -142,11 +142,4 @@ func (r *Runner) prefetchCovers(ctx context.Context, releases []store.FullReleas
 			}
 		}
 	}
-}
-
-// creditDisplayName renders the joined credit display names ("A & B") for
-// text-search fallbacks. Empty when the release has no usable credit.
-func creditDisplayName(entries []store.CreditEntry) string {
-	display, _, _ := creditDisplay(entries)
-	return strings.TrimSpace(display)
 }
