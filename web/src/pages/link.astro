@@ -1032,6 +1032,9 @@ import PageHeader from '../components/PageHeader.astro';
         }
       }
 
+      // Global suggestions: ranked by the server's (deliberately simple,
+      // heuristic — see internal/store/suggest.go) matcher. The banner only
+      // preselects; the user always confirms via the Link button.
       async function loadSuggestions(file: LocalFile): Promise<void> {
         const token = ++suggestToken;
         clear(wizardSuggest);

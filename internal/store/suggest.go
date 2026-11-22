@@ -96,6 +96,11 @@ type SuggestOptions struct {
 // missing or were cleared by an unlink. Exact track-MBID matches
 // short-circuit; otherwise candidates are pulled by recording MBID, album
 // MBID, or text and scored in Go. Never alters state.
+//
+// NOTE: the ranking below is a deliberately simple additive heuristic over
+// tag/filename signals — good enough to bootstrap suggestions, but expected
+// to be replaced by a more robust matching algorithm (better normalization,
+// weighted/phonetic matching, duration and audio-based signals).
 func (st *Store) SuggestTracks(ctx context.Context, opts SuggestOptions) (*SuggestionResult, error) {
 	limit := opts.Limit
 	if limit < 1 {
@@ -879,6 +884,9 @@ func fileArtistNames(snap *tags.Snapshot) []string {
 }
 
 // scoreCandidate scores one candidate track against the file snapshot.
+// Weights are hand-picked and additive — a simple heuristic, not a tuned
+// model. See SuggestTracks: this is expected to be replaced by a more
+// robust matching algorithm.
 func scoreCandidate(snap *tags.Snapshot, c *suggestCandidate,
 	trackCredit, releaseCredit, groupCredit []CreditEntry,
 ) (float64, []string) {
