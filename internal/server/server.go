@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/ppablomunoz/coda/internal/artwork"
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
 	"github.com/ppablomunoz/coda/internal/store"
@@ -21,19 +22,24 @@ type Response[T any] struct {
 }
 
 type Handler struct {
-	log   *utils.Logger
-	st    *store.Store
-	mb    *musicbrainz.Client
-	queue *tasks.Queue
+	log      *utils.Logger
+	st       *store.Store
+	mb       *musicbrainz.Client
+	queue    *tasks.Queue
+	art      *artwork.Fetcher // nil disables cover lazy-fetch (cache still serves)
+	coverDir string
 }
 
 func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tasks.Queue,
+	art *artwork.Fetcher, coverDir string,
 ) *gin.Engine {
 	handler := Handler{
-		log:   l,
-		st:    st,
-		mb:    mb,
-		queue: q,
+		log:      l,
+		st:       st,
+		mb:       mb,
+		queue:    q,
+		art:      art,
+		coverDir: coverDir,
 	}
 
 	router := gin.New()

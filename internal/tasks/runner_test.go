@@ -28,7 +28,7 @@ func newTestRunner(t *testing.T) (*Runner, *store.Store, *Queue) {
 		t.Fatalf("mb New = %v", err)
 	}
 	q := NewQueue(log)
-	return NewRunner(st, mb, log, q), st, q
+	return NewRunner(st, mb, log, q, nil, ""), st, q
 }
 
 func TestExecUnknownKeyNoPanic(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/ppablomunoz/coda/internal/artwork"
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/library"
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
@@ -12,18 +13,24 @@ import (
 )
 
 type Runner struct {
-	queue *Queue
-	st    *store.Store
-	mb    *musicbrainz.Client // same instance as server, don't make two (rate limiter is per-client)
-	log   *utils.Logger
+	queue    *Queue
+	st       *store.Store
+	mb       *musicbrainz.Client // same instance as server, don't make two (rate limiter is per-client)
+	art      *artwork.Fetcher    // nil disables cover prefetch
+	coverDir string
+	log      *utils.Logger
 }
 
-func NewRunner(st *store.Store, mb *musicbrainz.Client, l *utils.Logger, q *Queue) *Runner {
+func NewRunner(st *store.Store, mb *musicbrainz.Client, l *utils.Logger, q *Queue,
+	art *artwork.Fetcher, coverDir string,
+) *Runner {
 	return &Runner{
-		queue: q,
-		st:    st,
-		mb:    mb,
-		log:   l,
+		queue:    q,
+		st:       st,
+		mb:       mb,
+		art:      art,
+		coverDir: coverDir,
+		log:      l,
 	}
 }
 

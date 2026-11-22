@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/ppablomunoz/coda/internal/artwork"
 	"github.com/ppablomunoz/coda/internal/config"
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
 	"github.com/ppablomunoz/coda/internal/server"
@@ -75,8 +76,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	coverDir := config.CoverDirFromDBPath(dsn)
+	art, err := artwork.New(artwork.Config{
+		UserAgent: "Coda/0.0.1 ( pablomunoz@pablomunoz.dev )",
+		Logger:    log,
+	})
+	if err != nil {
+		log.Error(err.Error())
+		os.Exit(1)
+	}
+
 	queue := tasks.NewQueue(log)
-	runner := tasks.NewRunner(st, mb, log, queue)
+	runner := tasks.NewRunner(st, mb, log, queue, art, coverDir)
 	scheduler := tasks.NewScheduler(queue, log)
 
 	// Start server
@@ -87,7 +98,7 @@ func main() {
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	router := server.NewHandler(log, st, mb, queue)
+	router := server.NewHandler(log, st, mb, queue, art, coverDir)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           router.Handler(),
