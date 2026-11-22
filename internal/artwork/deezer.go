@@ -12,6 +12,34 @@ import (
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
+// isDeezerPlaceholder reports whether a Deezer CDN URL is the blank
+// placeholder served when an item has no picture: the hash segment is empty
+// (…/images/artist//…) and the file carries the 000000-80-0-0 blank mark.
+// Skipped candidates degrade to a miss so the next provider is tried.
+func isDeezerPlaceholder(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	for _, seg := range strings.Split(strings.Trim(u.Path, "/"), "/") {
+		if seg == "" {
+			return true
+		}
+	}
+	return strings.Contains(u.Path, "000000-80-0-0")
+}
+
+// firstUsable returns the first URL that is neither empty nor a Deezer blank
+// placeholder, preferring earlier entries (largest renditions first).
+func firstUsable(urls ...string) string {
+	for _, u := range urls {
+		if u != "" && !isDeezerPlaceholder(u) {
+			return u
+		}
+	}
+	return ""
+}
+
 // Deezer's public search API needs no key, which makes it a good fallback
 // when CAA has no front art. Matches are text-based, so callers pass the
 // release artist + title and the first hit with any cover image wins,
@@ -94,16 +122,12 @@ func (f *Fetcher) fetchDeezer(ctx context.Context, artist, album string) (*Resul
 	}
 	coverURL := ""
 	for _, a := range search.Data {
-		switch {
-		case a.CoverXL != "":
-			coverURL = a.CoverXL
-		case a.CoverBig != "":
-			coverURL = a.CoverBig
-		case a.CoverMedium != "":
-			coverURL = a.CoverMedium
-		case a.Cover != "":
-			coverURL = a.Cover
-		}
+		// Blank placeholders (no art on Deezer's side) are skipped so the
+		// chain falls through to the next provider instead of caching a
+		// gray square.
+		coverURL = firstUsable(
+			a.CoverXL, a.CoverBig, a.CoverMedium, a.Cover,
+		)
 		if coverURL != "" {
 			break
 		}
@@ -198,16 +222,12 @@ func (f *Fetcher) fetchDeezerArtist(ctx context.Context, name string) (*Result, 
 
 	pictureURL := ""
 	for _, a := range search.Data {
-		switch {
-		case a.PictureXL != "":
-			pictureURL = a.PictureXL
-		case a.PictureBig != "":
-			pictureURL = a.PictureBig
-		case a.PictureMedium != "":
-			pictureURL = a.PictureMedium
-		case a.Picture != "":
-			pictureURL = a.Picture
-		}
+		// Blank placeholders (no photo on Deezer's side) are skipped so the
+		// chain falls through to the next provider instead of caching a
+		// gray square.
+		pictureURL = firstUsable(
+			a.PictureXL, a.PictureBig, a.PictureMedium, a.Picture,
+		)
 		if pictureURL != "" {
 			break
 		}
