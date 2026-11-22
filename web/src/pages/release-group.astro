@@ -121,6 +121,7 @@ import Layout from '../components/Layout.astro';
       fmtDuration,
       MBID_RE,
       mbUrl,
+      type CoverInfo,
       type LinkedFile,
       type Release,
       type ReleaseGroup,
@@ -205,9 +206,25 @@ import Layout from '../components/Layout.astro';
       return row;
     }
 
+    function bustCoverImgs(): void {
+      // The endpoint sends a 24h max-age, so bust the <img> URLs or the
+      // browser would keep showing the previous bytes.
+      const stamp = String(Date.now());
+      for (const img of document.querySelectorAll<HTMLImageElement>(
+        'img.cover-img',
+      )) {
+        try {
+          const url = new URL(img.currentSrc || img.src, location.origin);
+          url.searchParams.set('t', stamp);
+          img.src = url.toString();
+        } catch {
+          /* keep the previous art on weird URLs */
+        }
+      }
+    }
+
     function initReleaseGroupPage(): void {
       if (!pathIs('/release-group')) return;
-
       const status = byId<HTMLDivElement>('status');
       const content = byId<HTMLDivElement>('content');
       const crumb = byId<HTMLSpanElement>('crumb');
@@ -305,29 +322,25 @@ import Layout from '../components/Layout.astro';
         release: Release,
         button: HTMLButtonElement,
       ): Promise<void> {
+        await runCoverRefresh(button, () =>
+          api.refreshReleaseCover(release.id),
+        );
+      }
+
+      async function runCoverRefresh(
+        button: HTMLButtonElement,
+        refresh: () => Promise<CoverInfo | null>,
+      ): Promise<void> {
         if (coverInFlight) return;
         coverInFlight = true;
         setBusy(button, true, 'Refreshing…');
         try {
-          const row = await api.refreshReleaseCover(release.id);
+          const row = await refresh();
           if (!row) {
-            toast('No cover art found for this release.', 'info');
+            toast('No cover art found.', 'info');
             return;
           }
-          // The endpoint sends a 24h max-age, so bust the <img> URLs or the
-          // browser would keep showing the previous bytes.
-          const stamp = String(Date.now());
-          for (const img of document.querySelectorAll<HTMLImageElement>(
-            'img.cover-img',
-          )) {
-            try {
-              const url = new URL(img.currentSrc || img.src, location.origin);
-              url.searchParams.set('t', stamp);
-              img.src = url.toString();
-            } catch {
-              /* keep the previous art on weird URLs */
-            }
-          }
+          bustCoverImgs();
           toast(`Cover refreshed (${row.source}).`, 'ok');
         } catch (error) {
           const message =
@@ -567,7 +580,24 @@ import Layout from '../components/Layout.astro';
           deleteButton.addEventListener('click', () =>
             deleteGroup(deleteButton),
           );
-          actions.append(deleteButton);
+          const heroRefresh = el(
+            'button',
+            'btn btn--secondary',
+            'Refresh cover',
+          );
+          heroRefresh.type = 'button';
+          heroRefresh.title =
+            'Fetch the cover art again (Cover Art Archive, then Deezer)';
+          heroRefresh.addEventListener(
+            'click',
+            () =>
+              void runCoverRefresh(heroRefresh, () =>
+                currentGroup
+                  ? api.refreshReleaseGroupCover(currentGroup.id)
+                  : Promise.resolve(null),
+              ),
+          );
+          actions.append(heroRefresh, deleteButton);
 
           renderRelease(release, group);
           status.hidden = true;

@@ -12,6 +12,7 @@ import (
 
 	"github.com/ppablomunoz/coda/internal/config"
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
+	"github.com/ppablomunoz/coda/internal/store"
 	"github.com/ppablomunoz/coda/internal/tags"
 	"github.com/ppablomunoz/coda/internal/tasks"
 )
@@ -110,17 +111,52 @@ func (h *Handler) refreshReleaseCover(c *gin.Context) {
 		return
 	}
 
-	rel, err := h.st.GetRelease(ctx, releaseID, false)
+	row, err := h.doRefreshReleaseCover(ctx, releaseID)
 	if err != nil {
 		h.writeAppError(c, err)
 		return
 	}
+
+	c.JSON(http.StatusOK, row)
+}
+
+// refreshReleaseGroupCover refreshes the cover of the single release kept
+// for a release-group. One release per group is enforced by the UNIQUE on
+// releases.release_group_id.
+func (h *Handler) refreshReleaseGroupCover(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	groupID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	release, err := h.st.GetReleaseOfGroup(ctx, groupID, false)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	row, err := h.doRefreshReleaseCover(ctx, release.ID)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, row)
+}
+
+func (h *Handler) doRefreshReleaseCover(ctx context.Context, releaseID string) (*store.CoverParams, error) {
+	rel, err := h.st.GetRelease(ctx, releaseID, false)
+	if err != nil {
+		return nil, err
+	}
 	if h.art == nil {
-		h.writeAppError(c, apperrors.Wrap(
+		return nil, apperrors.Wrap(
 			apperrors.ErrInternal,
 			fmt.Errorf("cover refresh unavailable"),
-		))
-		return
+		)
 	}
 
 	_ = h.st.DeleteCover(ctx, releaseID)
@@ -130,13 +166,7 @@ func (h *Handler) refreshReleaseCover(c *gin.Context) {
 	if artist == "" {
 		artist = tasks.CreditDisplayName(rel.Group.Credit)
 	}
-	row, err := tasks.EnsureCover(ctx, h.st, h.art, h.coverDir, releaseID, artist, rel.Title)
-	if err != nil {
-		h.writeAppError(c, err)
-		return
-	}
-
-	c.JSON(http.StatusOK, row)
+	return tasks.EnsureCover(ctx, h.st, h.art, h.coverDir, releaseID, artist, rel.Title)
 }
 
 // embedCover stamps the cached release art into the audio file as its front

@@ -77,6 +77,7 @@ func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tas
 	v1.GET("/release-groups", handler.getReleaseGroups)
 	v1.GET("/release-groups/:id", handler.getReleaseGroup)
 	v1.GET("/release-groups/:id/cover", handler.getReleaseGroupCover)
+	v1.POST("/release-groups/:id/cover/refresh", handler.refreshReleaseGroupCover)
 	v1.DELETE("/release-groups/:id", handler.deleteReleaseGroup)
 	v1.PUT("/release-groups/:id/update", handler.replaceRelease)
 
