@@ -2,6 +2,7 @@ package artwork
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -56,6 +57,11 @@ type Fetcher struct {
 	log        *utils.Logger
 }
 
+// errImageTooLarge is a control-flow signal, not an API error: download
+// returns it when a provider's image exceeds maxBytes, and Fetch treats it
+// like a miss so the next provider is tried. It never escapes Fetch.
+var errImageTooLarge = errors.New("artwork: image too large")
+
 func New(cfg Config) (*Fetcher, error) {
 	if strings.TrimSpace(cfg.UserAgent) == "" {
 		return nil, fmt.Errorf("artwork: UserAgent is required (app name/version + contact)")
@@ -96,6 +102,8 @@ func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) 
 		return res, nil
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
 		f.debugf("artwork: no CAA art for release %s", releaseMBID)
+	} else if errors.Is(err, errImageTooLarge) {
+		f.debugf("artwork: CAA art for release %s exceeds size limit, trying fallback", releaseMBID)
 	} else {
 		caaErr = err
 		f.warnf("artwork: CAA fetch for release %s failed: %v", releaseMBID, err)
@@ -105,6 +113,8 @@ func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) 
 		return res, nil
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
 		f.debugf("artwork: no Deezer art for release %s", releaseMBID)
+	} else if errors.Is(err, errImageTooLarge) {
+		f.debugf("artwork: Deezer art for release %s exceeds size limit", releaseMBID)
 	} else {
 		deezerErr = err
 		f.warnf("artwork: Deezer fetch for release %s failed: %v", releaseMBID, err)
@@ -164,10 +174,9 @@ func (f *Fetcher) download(ctx context.Context, url string) ([]byte, string, err
 		)
 	}
 	if int64(len(body)) > f.maxBytes {
-		return nil, "", apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("artwork: image exceeds %d bytes", f.maxBytes),
-		)
+		// Too big for the cache: signal the chain to try the next
+		// provider instead of failing the fetch.
+		return nil, "", errImageTooLarge
 	}
 	if len(body) == 0 {
 		return nil, "", apperrors.Wrap(
