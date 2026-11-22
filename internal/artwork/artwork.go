@@ -144,10 +144,10 @@ func (f *Fetcher) download(ctx context.Context, url string) ([]byte, string, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
+	switch resp.StatusCode {
+	case http.StatusOK:
 		// keep going
-	case resp.StatusCode == http.StatusNotFound:
+	case http.StatusNotFound:
 		return nil, "", apperrors.ErrNotFound
 	default:
 		return nil, "", apperrors.Wrap(

@@ -158,6 +158,13 @@ func (h *Handler) link(c *gin.Context) {
 		)
 		return
 	}
+	if err := h.embedCover(ctx, localFile.Path, fullRelease.ID); err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("link file=%d track=%q write cover -> %w", localFileID, trackID, err)),
+		)
+		return
+	}
 
 	src := localFile.Path
 	dst := src
@@ -286,6 +293,14 @@ func (h *Handler) unlink(c *gin.Context) {
 		return
 	}
 
+	if err := tags.ClearCover(localFile.Path); err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("unlink file=%d clear cover -> %w", localFileID, err)),
+		)
+		return
+	}
+
 	err = h.st.Unlink(ctx, localFileID)
 	if err != nil {
 		h.writeAppError(c, apperrors.Wrap(
@@ -349,6 +364,13 @@ func (h *Handler) refreshLocalFile(c *gin.Context) {
 		h.writeAppError(c, apperrors.Wrap(
 			apperrors.ErrInternal,
 			fmt.Errorf("refresh file=%d track=%q write tags -> %w", localFileID, trackID, err)),
+		)
+		return
+	}
+	if err := h.embedCover(ctx, localFile.Path, fullRelease.ID); err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("refresh file=%d track=%q write cover -> %w", localFileID, trackID, err)),
 		)
 		return
 	}
