@@ -109,13 +109,6 @@ import PageHeader from '../components/PageHeader.astro';
         <button class="btn btn--ghost" id="wizard-back" type="button">
           Back
         </button>
-        <label
-          class="wizard__move"
-          title="Also move the file into its Artist / Album folder when linking"
-        >
-          <input checked id="wizard-move" type="checkbox" />
-          <span>Move file</span>
-        </label>
         <span class="form-status" id="wizard-status" role="status"></span>
         <button
           class="btn btn--primary"
@@ -195,7 +188,6 @@ import PageHeader from '../components/PageHeader.astro';
       const wizardStatus = byId<HTMLSpanElement>('wizard-status');
       const wizardBack = byId<HTMLButtonElement>('wizard-back');
       const wizardNext = byId<HTMLButtonElement>('wizard-next');
-      const wizardMove = byId<HTMLInputElement>('wizard-move');
 
       type Step = 0 | 1 | 2;
 
@@ -821,7 +813,6 @@ import PageHeader from '../components/PageHeader.astro';
           release: null,
           track: null,
         };
-        wizardMove.disabled = false;
 
         wizardFileFormat.textContent = formatKey(file);
         wizardFileName.textContent = baseName(file.path);
@@ -837,21 +828,14 @@ import PageHeader from '../components/PageHeader.astro';
 
         const file = state.file;
         const track = state.track;
-        const move = wizardMove.checked;
 
         wizardNext.disabled = true;
         wizardBack.disabled = true;
-        wizardMove.disabled = true;
-        wizardNext.textContent = move ? 'Moving…' : 'Linking…';
-        setFormStatus(
-          wizardStatus,
-          move
-            ? 'Moving file and writing tags…'
-            : 'Writing tags and linking the file…',
-        );
+        wizardNext.textContent = 'Moving…';
+        setFormStatus(wizardStatus, 'Moving file and writing tags…');
 
         try {
-          const response = await api.link(file.id, track.id, move);
+          const response = await api.link(file.id, track.id);
 
           if (!response.ok) {
             let message = response.statusText;
@@ -864,28 +848,13 @@ import PageHeader from '../components/PageHeader.astro';
               /* keep status text */
             }
             setFormStatus(wizardStatus, message, 'error');
-            wizardMove.disabled = false;
             updateFooter();
             return;
           }
 
-          toast(
-            `${baseName(file.path)} linked${move ? ' and moved' : ''} to “${track.title}”.`,
-            'ok',
-          );
-          if (move) {
-            // The rename changed the path, so reload from the server.
-            await loadFiles();
-          } else {
-            file.track_id = track.id;
-            if (fileStats) {
-              fileStats.unlinked = Math.max(0, fileStats.unlinked - 1);
-              fileStats.linked += 1;
-            }
-            populateFormats();
-            updateStats();
-            renderFiles();
-          }
+          toast(`${baseName(file.path)} linked to “${track.title}”.`, 'ok');
+          // The path may have changed, so reload from the server.
+          await loadFiles();
           dialog.close();
         } catch (error) {
           const message =
@@ -895,7 +864,6 @@ import PageHeader from '../components/PageHeader.astro';
             `Could not link file: ${message}`,
             'error',
           );
-          wizardMove.disabled = false;
           updateFooter();
         }
       }
