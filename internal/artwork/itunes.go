@@ -98,9 +98,19 @@ func (f *Fetcher) fetchiTunes(ctx context.Context, artist, album string) (*Resul
 		)
 	}
 
-	// First hit with artwork wins, preferring the larger rendition.
+	// First usable hit wins: the expected release with artwork, preferring
+	// the larger rendition. Text search is fuzzy, so verify names — a
+	// same-title stranger must never donate art that gets embedded into the
+	// user's files.
 	coverURL := ""
+	wantTitle, wantArtist := normName(album), normName(artist)
 	for _, a := range search.Results {
+		if normName(a.CollectionName) != wantTitle {
+			continue
+		}
+		if wantArtist != "" && normName(a.ArtistName) != wantArtist {
+			continue
+		}
 		switch {
 		case a.ArtworkURL600 != "":
 			coverURL = a.ArtworkURL600

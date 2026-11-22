@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/utils"
@@ -69,6 +72,22 @@ type Fetcher struct {
 // returns it when a provider's image exceeds maxBytes, and Fetch treats it
 // like a miss so the next provider is tried. It never escapes Fetch.
 var errImageTooLarge = errors.New("artwork: image too large")
+
+// normName lowercases and strips diacritics so "Sofía Cámara" matches
+// "Sofia Camara". Same recipe as store.normalizeSearch: text-search
+// providers must verify candidate names or a same-name stranger wins.
+func normName(s string) string {
+	decomposed := norm.NFD.String(strings.TrimSpace(s))
+	var b strings.Builder
+	b.Grow(len(decomposed))
+	for _, r := range decomposed {
+		if unicode.Is(unicode.Mn, r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return strings.ToLower(b.String())
+}
 
 func New(cfg Config) (*Fetcher, error) {
 	if strings.TrimSpace(cfg.UserAgent) == "" {

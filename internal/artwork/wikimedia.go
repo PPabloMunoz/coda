@@ -106,9 +106,15 @@ func (f *Fetcher) fetchWikimedia(ctx context.Context, name string) (*Result, err
 	sort.Slice(pages, func(i, j int) bool { return pages[i].Title < pages[j].Title })
 
 	// First usable image wins, preferring the 1000px thumbnail over the
-	// original upload. The size cap is enforced by download below.
+	// original upload. Filenames can't equality-match, so accept the first
+	// page whose title contains the artist name — a venue shot or stranger
+	// never donates its photo. The size cap is enforced by download below.
 	photoURL := ""
+	want := normName(name)
 	for _, p := range pages {
+		if !strings.Contains(normName(p.Title), want) {
+			continue
+		}
 		for _, img := range p.ImageInfo {
 			switch img.MIME {
 			case "image/jpeg", "image/png", "image/webp":

@@ -50,11 +50,16 @@ type deezerAlbumSearch struct {
 	Data []deezerAlbum `json:"data"`
 }
 type deezerAlbum struct {
-	Title       string `json:"title"`
-	CoverXL     string `json:"cover_xl"`
-	CoverBig    string `json:"cover_big"`
-	CoverMedium string `json:"cover_medium"`
-	Cover       string `json:"cover"`
+	Title       string       `json:"title"`
+	Artist      deezerCredit `json:"artist"`
+	CoverXL     string       `json:"cover_xl"`
+	CoverBig    string       `json:"cover_big"`
+	CoverMedium string       `json:"cover_medium"`
+	Cover       string       `json:"cover"`
+}
+
+type deezerCredit struct {
+	Name string `json:"name"`
 }
 
 func (f *Fetcher) fetchDeezer(ctx context.Context, artist, album string) (*Result, error) {
@@ -121,7 +126,20 @@ func (f *Fetcher) fetchDeezer(ctx context.Context, artist, album string) (*Resul
 		)
 	}
 	coverURL := ""
-	for _, a := range search.Data {
+	wantTitle, wantArtist := normName(album), normName(artist)
+	for i, a := range search.Data {
+		if i >= 10 {
+			break
+		}
+		// Text search is fuzzy: only accept the expected release, so a
+		// same-title stranger never donates its art (which would then be
+		// embedded into the user's files).
+		if normName(a.Title) != wantTitle {
+			continue
+		}
+		if wantArtist != "" && normName(a.Artist.Name) != wantArtist {
+			continue
+		}
 		// Blank placeholders (no art on Deezer's side) are skipped so the
 		// chain falls through to the next provider instead of caching a
 		// gray square.
@@ -221,7 +239,16 @@ func (f *Fetcher) fetchDeezerArtist(ctx context.Context, name string) (*Result, 
 	}
 
 	pictureURL := ""
-	for _, a := range search.Data {
+	want := normName(name)
+	for i, a := range search.Data {
+		if i >= 10 {
+			break
+		}
+		// Text search is fuzzy: only accept the expected artist, so a
+		// same-name stranger never donates its photo.
+		if normName(a.Name) != want {
+			continue
+		}
 		// Blank placeholders (no photo on Deezer's side) are skipped so the
 		// chain falls through to the next provider instead of caching a
 		// gray square.
