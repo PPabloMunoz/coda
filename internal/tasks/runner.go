@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/ppablomunoz/coda/internal/artwork"
@@ -18,7 +19,11 @@ type Runner struct {
 	mb       *musicbrainz.Client // same instance as server, don't make two (rate limiter is per-client)
 	art      *artwork.Fetcher    // nil disables cover prefetch
 	coverDir string
-	log      *utils.Logger
+	// coverPrefetch tracks background cover runs; the import task never
+	// waits for art, so overlapping refreshes must not stack duplicate runs.
+	coverMu       sync.Mutex
+	coverPrefetch map[string]struct{}
+	log           *utils.Logger
 }
 
 func NewRunner(st *store.Store, mb *musicbrainz.Client, l *utils.Logger, q *Queue,
@@ -125,6 +130,10 @@ func (r *Runner) importArtist(ctx context.Context, t Task) {
 		r.log.Errorf("importing artist discography %q failed in %s: %v", t.ID, time.Since(start), err)
 		return
 	}
+	// Covers fill in in the background: the import is done as far as status
+	// is concerned, and the serial task queue stays free for other work.
+	// Gaps are always backfilled lazily on first GET .../cover.
+	go r.prefetchCoversBG(ctx, t.ID)
 	r.prefetchArtistCover(sctx, t.ID, art.Name)
 	r.cleanupCredits(sctx)
 	r.pruneArtists(sctx)

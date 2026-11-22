@@ -25,8 +25,6 @@ func (r *Runner) importDiscography(ctx context.Context, id string) error {
 		return err
 	}
 
-	r.prefetchCovers(ctx, releases)
-
 	return nil
 }
 
