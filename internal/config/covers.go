@@ -48,3 +48,17 @@ func CoverPath(coverDir, releaseID, mime string) (string, error) {
 	}
 	return filepath.Join(coverDir, releaseID+"."+ext), nil
 }
+
+// ArtistCoverPath returns the deterministic cache path for an artist photo.
+// Artist files carry an "artist-" prefix so they never collide with release
+// files. Display-only: artist art is never embedded into audio files.
+func ArtistCoverPath(coverDir, artistID, mime string) (string, error) {
+	if err := utils.ValidateMBID(artistID); err != nil {
+		return "", fmt.Errorf("config: invalid artist id: %w", err)
+	}
+	ext, err := ExtFromMIME(mime)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(coverDir, "artist-"+artistID+"."+ext), nil
+}
