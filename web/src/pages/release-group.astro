@@ -140,6 +140,7 @@ import Layout from '../components/Layout.astro';
       setFormStatus,
       setSharedArtName,
       sharedArtName,
+      coverArt,
       discArt,
       toast,
     } from '../lib/ui';
@@ -383,7 +384,7 @@ import Layout from '../components/Layout.astro';
 
         const panel = el('div', 'release-panel');
         const art = el('div', 'release-panel__art');
-        art.append(discArt(release.id));
+        art.append(coverArt('release', release.id, release.title));
 
         const body = el('div', 'release-panel__body');
         body.append(
@@ -495,9 +496,9 @@ import Layout from '../components/Layout.astro';
 
           document.title = `${group.title} · Coda`;
           crumb.textContent = group.title;
-          const heroDisc = discArt(group.id);
-          setSharedArtName(heroDisc, sharedArtName('group', group.id));
-          heroArt.replaceChildren(heroDisc);
+          const heroCover = coverArt('group', group.id, '', { eager: true });
+          setSharedArtName(heroCover, sharedArtName('group', group.id));
+          heroArt.replaceChildren(heroCover);
           title.textContent = group.title;
           credit.replaceChildren(creditFragment(group.credit));
           groupId.textContent = group.id;

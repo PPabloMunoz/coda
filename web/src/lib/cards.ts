@@ -8,7 +8,7 @@ import {
 import { plural, yearOf } from './format';
 import {
   artistAvatar,
-  discArt,
+  coverArt,
   el,
   link,
   setSharedArtName,
@@ -85,9 +85,9 @@ export function releaseGroupCard(
   card.setAttribute('aria-label', group.title);
 
   const art = el('div', 'rg-card__art');
-  const disc = discArt(group.id);
-  setSharedArtName(disc, sharedArtName('group', group.id));
-  art.append(disc);
+  const cover = coverArt('group', group.id);
+  setSharedArtName(cover, sharedArtName('group', group.id));
+  art.append(cover);
 
   const body = el('div', 'rg-card__body');
   if (showType) {

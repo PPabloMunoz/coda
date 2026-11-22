@@ -190,6 +190,13 @@ export const mbUrl = {
   track: (id: string) => `https://musicbrainz.org/track/${id}`,
 };
 
+/** Cover photo URLs served by the API (404 when the release has no art). */
+export const coverUrl = {
+  release: (id: string) => `/api/v1/releases/${encodeURIComponent(id)}/cover`,
+  releaseGroup: (id: string) =>
+    `/api/v1/release-groups/${encodeURIComponent(id)}/cover`,
+};
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,

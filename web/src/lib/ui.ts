@@ -1,4 +1,4 @@
-import type { CreditEntry } from './api';
+import { coverUrl, type CreditEntry } from './api';
 
 export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -197,6 +197,39 @@ export function artistAvatar(
 
 const TRACK_SVG =
   '<path d="M9.5 17.5V6l9-2v11"/><circle cx="7" cy="17.5" r="2.5"/><circle cx="16" cy="15" r="2.5"/>';
+
+/**
+ * A release/release-group cover photo served by the API (`GET …/cover`),
+ * with the same footprint as {@link discArt}. When the release has no cached
+ * art (404) or the image fails to load, it swaps itself for the deterministic
+ * disc tile — call sites never handle the fallback. The shared-element name
+ * (for Astro's ClientRouter morph) carries over to the fallback tile.
+ */
+export function coverArt(
+  kind: 'release' | 'group',
+  id: string,
+  alt = '',
+  options: { eager?: boolean } = {},
+): HTMLImageElement {
+  const img = document.createElement('img');
+  img.className = 'cover-img';
+  img.src =
+    kind === 'release' ? coverUrl.release(id) : coverUrl.releaseGroup(id);
+  img.alt = alt;
+  img.decoding = 'async';
+  img.loading = options.eager ? 'eager' : 'lazy';
+  img.addEventListener(
+    'error',
+    () => {
+      const fallback = discArt(id);
+      const name = img.style.getPropertyValue('view-transition-name');
+      if (name) setSharedArtName(fallback, name);
+      img.replaceWith(fallback);
+    },
+    { once: true },
+  );
+  return img;
+}
 
 /**
  * A deterministic disc tile for release groups and releases: coloured card

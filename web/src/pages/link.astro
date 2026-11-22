@@ -159,7 +159,7 @@ import PageHeader from '../components/PageHeader.astro';
       pathIs,
       setFormStatus,
       artistAvatar,
-      discArt,
+      coverArt,
       trackArt,
       toast,
     } from '../lib/ui';
@@ -426,7 +426,7 @@ import PageHeader from '../components/PageHeader.astro';
                   })
                 : item.artKind === 'track'
                   ? trackArt(item.artSeed)
-                  : discArt(item.artSeed),
+                  : coverArt('group', item.artSeed, item.title),
             );
           } else {
             art.append(el('span', 'pick__num', item.number ?? ''));
