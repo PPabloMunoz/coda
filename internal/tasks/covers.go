@@ -154,10 +154,12 @@ func (r *Runner) prefetchCoversBG(ctx context.Context, artistID string) {
 		return
 	}
 	if len(releases) == 0 {
+		r.log.Infof("cover prefetch artist %q: nothing to fetch", artistID)
 		return
 	}
 
 	start := time.Now()
+	r.log.Infof("cover prefetch artist %q: %d releases to fetch", artistID, len(releases))
 	jobs := make(chan coverJob)
 	var wg sync.WaitGroup
 	for range coverPrefetchWorkers {
