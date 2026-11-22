@@ -5,7 +5,8 @@ Coda: self-hosted music library manager (Go + SQLite) — a simpler, faster Lida
 ## Git workflow
 
 - `main` is protected — never commit or push to it directly. Do all work in topic branches and merge via PRs.
-- Create branches and PRs with the `gh` CLI (`gh pr create`, `gh pr status`, `gh pr merge`). Keep PRs small and focused.
+- Create branches and PRs with the `gh` CLI (`gh pr create`, `gh pr status`, `gh pr view`). Keep PRs small and focused.
+- Agents never merge PRs — only create them and inspect them (`gh pr view`, `gh pr status`). Merging is done by the human.
 - Commit messages (when used) and PR titles follow Conventional Commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `perf:`, `ci:`, `revert:` (e.g. `feat: add discography import status`).
 
 ## Commands
