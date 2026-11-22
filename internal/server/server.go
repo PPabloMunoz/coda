@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/ppablomunoz/coda/internal/artwork"
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
 	"github.com/ppablomunoz/coda/internal/store"
@@ -21,28 +22,32 @@ type Response[T any] struct {
 }
 
 type Handler struct {
-	log   *utils.Logger
-	st    *store.Store
-	mb    *musicbrainz.Client
-	queue *tasks.Queue
+	log      *utils.Logger
+	st       *store.Store
+	mb       *musicbrainz.Client
+	queue    *tasks.Queue
+	art      *artwork.Fetcher // nil disables cover lazy-fetch (cache still serves)
+	coverDir string
 }
 
 func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tasks.Queue,
+	art *artwork.Fetcher, coverDir string,
 ) *gin.Engine {
 	handler := Handler{
-		log:   l,
-		st:    st,
-		mb:    mb,
-		queue: q,
+		log:      l,
+		st:       st,
+		mb:       mb,
+		queue:    q,
+		art:      art,
+		coverDir: coverDir,
 	}
 
 	router := gin.New()
 	router.Use(gin.Recovery())
 
+	// No access logging: the API stays silent like the UI serving; the app
+	// logs what matters (imports, links, cover fetches) via h.log.
 	v1 := router.Group("/api/v1")
-	v1.Use(gin.LoggerWithConfig(gin.LoggerConfig{
-		SkipPaths: []string{"/api/v1/health"},
-	}))
 
 	v1.GET("/health", handler.health)
 	v1.GET("/stats", handler.libraryStats)
@@ -63,6 +68,8 @@ func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tas
 	v1.GET("/artists/:id/import", handler.getArtistImportStatus)
 	v1.POST("/artists", handler.postArtist)
 	v1.POST("/artists/:id/refresh", handler.refreshArtist)
+	v1.GET("/artists/:id/cover", handler.getArtistCover)
+	v1.POST("/artists/:id/cover/refresh", handler.refreshArtistCover)
 
 	// MusicBrainz
 	v1.GET("/musicbrainz/artists", handler.searchMusicBrainzArtists)
@@ -70,12 +77,15 @@ func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tas
 	// Release Groups
 	v1.GET("/release-groups", handler.getReleaseGroups)
 	v1.GET("/release-groups/:id", handler.getReleaseGroup)
+	v1.GET("/release-groups/:id/cover", handler.getReleaseGroupCover)
 	v1.DELETE("/release-groups/:id", handler.deleteReleaseGroup)
 	v1.PUT("/release-groups/:id/update", handler.replaceRelease)
 
 	// Releases
 	v1.GET("/releases", handler.getReleases)
 	v1.GET("/releases/:id", handler.getRelease)
+	v1.GET("/releases/:id/cover", handler.getReleaseCover)
+	v1.POST("/releases/:id/cover/refresh", handler.refreshReleaseCover)
 
 	// Embedded Astro UI (web/dist). Catch-all, registered last.
 	mountWeb(router)

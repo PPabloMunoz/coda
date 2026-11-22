@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
 	"github.com/ppablomunoz/coda/internal/store"
@@ -11,19 +12,24 @@ import (
 )
 
 func (r *Runner) importDiscography(ctx context.Context, id string) error {
+	mbStart := time.Now()
 	mbReleases, err := r.mb.GetReleasesWithTracksByArtist(ctx, id)
 	if err != nil {
 		return fmt.Errorf("discography releases: %w", err)
 	}
+	mbTook := time.Since(mbStart)
 
 	releases := []store.FullReleaseParams{}
 	for _, r := range mbReleases {
 		releases = append(releases, FullReleaseFromMB(r))
 	}
 
+	saveStart := time.Now()
 	if err := r.st.SaveDiscography(ctx, releases); err != nil {
 		return err
 	}
+	r.log.Infof("discography for %q: musicbrainz %s, save %s (%d releases)",
+		id, mbTook.Round(time.Millisecond), time.Since(saveStart).Round(time.Millisecond), len(releases))
 
 	return nil
 }

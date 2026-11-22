@@ -124,6 +124,7 @@ import Layout from '../components/Layout.astro';
       type Artist,
       type ArtistImportState,
       type ArtistImportStatus,
+      type CoverInfo,
       type Release,
       type ReleaseGroup,
     } from '../lib/api';
@@ -142,6 +143,7 @@ import Layout from '../components/Layout.astro';
       setSharedArtName,
       sharedArtName,
       artistAvatar,
+      coverArt,
       toast,
     } from '../lib/ui';
 
@@ -174,6 +176,23 @@ import Layout from '../components/Layout.astro';
           sensitivity: 'base',
         });
       });
+    }
+
+    function bustCoverImgs(): void {
+      // The endpoint sends a 24h max-age, so bust the <img> URLs or the
+      // browser would keep showing the previous bytes.
+      const stamp = String(Date.now());
+      for (const img of document.querySelectorAll<HTMLImageElement>(
+        'img.cover-img',
+      )) {
+        try {
+          const url = new URL(img.currentSrc || img.src, location.origin);
+          url.searchParams.set('t', stamp);
+          img.src = url.toString();
+        } catch {
+          /* keep the previous art on weird URLs */
+        }
+      }
     }
 
     function initArtistPage(): void {
@@ -221,6 +240,7 @@ import Layout from '../components/Layout.astro';
       let groups: ReleaseGroup[] = [];
       let appearsGroups: ReleaseGroup[] = [];
       let artist: Artist | null = null;
+      let coverInFlight = false;
       let importPollTimer: number | undefined;
       let importPollToken = 0;
       let lastImportState: ArtistImportState = 'idle';
@@ -390,6 +410,30 @@ import Layout from '../components/Layout.astro';
             error instanceof Error ? error.message : String(error);
           toast(`Could not queue refresh: ${message}`, 'error');
         } finally {
+          setBusy(button, false);
+        }
+      }
+
+      async function refreshArtistCover(
+        button: HTMLButtonElement,
+      ): Promise<void> {
+        if (!artist || coverInFlight) return;
+        coverInFlight = true;
+        setBusy(button, true, 'Refreshing…');
+        try {
+          const row: CoverInfo | null = await api.refreshArtistCover(artist.id);
+          if (!row) {
+            toast('No photo found for this artist.', 'info');
+            return;
+          }
+          bustCoverImgs();
+          toast(`Artist photo refreshed (${row.source}).`, 'ok');
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          toast(`Could not refresh photo: ${message}`, 'error');
+        } finally {
+          coverInFlight = false;
           setBusy(button, false);
         }
       }
@@ -750,7 +794,12 @@ import Layout from '../components/Layout.astro';
           document.title = `${artist.name} · Coda`;
           crumb.textContent = artist.name;
 
-          heroArt.replaceChildren(artistAvatar(artist.id, artist.name));
+          heroArt.replaceChildren(
+            coverArt('artist', artist.id, '', {
+              eager: true,
+              fallback: () => artistAvatar(artist.id, artist.name),
+            }),
+          );
           setSharedArtName(
             heroArt.firstElementChild as HTMLElement | null,
             sharedArtName('artist', artist.id),
@@ -772,6 +821,19 @@ import Layout from '../components/Layout.astro';
               'btn btn--secondary',
             ),
           );
+          const photoButton = el(
+            'button',
+            'btn btn--secondary',
+            'Refresh photo',
+          );
+          photoButton.type = 'button';
+          photoButton.title =
+            'Fetch the artist photo again (Deezer, then Wikimedia Commons)';
+          photoButton.addEventListener(
+            'click',
+            () => void refreshArtistCover(photoButton),
+          );
+          artistActions.append(photoButton);
           const refreshButton = el(
             'button',
             'btn btn--ghost',

@@ -140,10 +140,17 @@ func (h *Handler) replaceRelease(c *gin.Context) {
 	}
 
 	stRelease := tasks.FullReleaseFromMB(*newRelease)
+	// Capture the outgoing release so its cached files can be dropped below.
+	// Best-effort: a lookup miss just skips cleanup, the DB row cascades.
+	oldRelease, oldErr := h.st.GetReleaseOfGroup(ctx, releaseGroupID, false)
 	if err := h.st.ReplaceRelease(ctx,
 		releaseGroupID, stRelease); err != nil {
 		h.writeAppError(c, err)
 		return
+	}
+	if oldErr == nil && oldRelease.ID != newReleaseID {
+		_ = h.st.DeleteCover(ctx, oldRelease.ID)
+		removeCoverFiles(h.coverDir, oldRelease.ID)
 	}
 
 	c.JSON(http.StatusOK, nil)
@@ -157,9 +164,16 @@ func (h *Handler) deleteReleaseGroup(c *gin.Context) {
 		return
 	}
 
+	// Capture the kept release so its cached files can be dropped below.
+	// Best-effort: a lookup miss just skips cleanup, DB rows cascade.
+	oldRelease, oldErr := h.st.GetReleaseOfGroup(ctx, releaseGroupID, false)
 	if err := h.st.DeleteReleaseGroup(ctx, releaseGroupID); err != nil {
 		h.writeAppError(c, err)
 		return
+	}
+	if oldErr == nil {
+		_ = h.st.DeleteCover(ctx, oldRelease.ID)
+		removeCoverFiles(h.coverDir, oldRelease.ID)
 	}
 
 	c.JSON(http.StatusOK, nil)

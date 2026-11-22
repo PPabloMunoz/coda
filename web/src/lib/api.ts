@@ -190,6 +190,23 @@ export const mbUrl = {
   track: (id: string) => `https://musicbrainz.org/track/${id}`,
 };
 
+/** Cover photo URLs served by the API (404 when there is no art). */
+export const coverUrl = {
+  release: (id: string) => `/api/v1/releases/${encodeURIComponent(id)}/cover`,
+  releaseGroup: (id: string) =>
+    `/api/v1/release-groups/${encodeURIComponent(id)}/cover`,
+  artist: (id: string) => `/api/v1/artists/${encodeURIComponent(id)}/cover`,
+};
+
+export interface CoverInfo {
+  release_id: string;
+  source: string;
+  source_url: string | null;
+  mime: string;
+  size_bytes: number;
+  fetched_at: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -453,6 +470,16 @@ export const api = {
     request<Release>(
       `/api/v1/releases?group=${encodeURIComponent(groupId)}` +
         (includeFiles ? '&include=files' : ''),
+    ),
+  refreshReleaseCover: (id: string) =>
+    request<CoverInfo>(
+      `/api/v1/releases/${encodeURIComponent(id)}/cover/refresh`,
+      { method: 'POST' },
+    ),
+  refreshArtistCover: (id: string) =>
+    request<CoverInfo>(
+      `/api/v1/artists/${encodeURIComponent(id)}/cover/refresh`,
+      { method: 'POST' },
     ),
 
   link: (fileID: number, trackID: string, move = false) =>
