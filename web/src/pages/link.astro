@@ -103,6 +103,7 @@ import PageHeader from '../components/PageHeader.astro';
       </ol>
 
       <div class="wizard__trail" id="wizard-trail"></div>
+      <div class="wizard__suggest" id="wizard-suggest" hidden></div>
       <div class="wizard__body" id="wizard-body"></div>
 
       <footer class="wizard__foot">
@@ -122,6 +123,52 @@ import PageHeader from '../components/PageHeader.astro';
     </div>
   </dialog>
 
+  <!-- is:global: the banner is built dynamically in JS, so scoped
+    selectors (which require compiler-added attributes) would not match it. -->
+  <style is:global>
+    .wizard__suggest {
+      padding: 0.55rem 1.25rem 0;
+    }
+    .wizard__suggest[hidden] {
+      display: none;
+    }
+    .suggest-banner {
+      display: flex;
+      gap: 0.7rem;
+      align-items: center;
+      padding: 0.6rem 0.75rem;
+      border: 1px solid var(--accent);
+      border-radius: 0.6rem;
+      background: rgb(255 255 255 / 0.03);
+    }
+    .suggest-banner .pick__art {
+      display: block;
+      width: 42px;
+      flex-shrink: 0;
+    }
+    .suggest-banner .cover-img {
+      border-radius: 6px;
+    }
+    .suggest-banner .pick__main {
+      min-width: 0;
+      flex: 1;
+    }
+    .suggest-banner--high {
+      border-color: rgb(61 214 140 / 0.5);
+      background: rgb(61 214 140 / 0.06);
+    }
+    .suggest-banner--low {
+      border-color: rgb(226 166 61 / 0.55);
+      background: rgb(226 166 61 / 0.07);
+    }
+    .suggest-banner__actions {
+      display: flex;
+      gap: 0.4rem;
+      flex-shrink: 0;
+      align-items: center;
+    }
+  </style>
+
   <script>
     import {
       api,
@@ -132,6 +179,7 @@ import PageHeader from '../components/PageHeader.astro';
       type LocalFilesStats,
       type Release,
       type ReleaseGroup,
+      type SuggestedTrack,
       type Track,
     } from '../lib/api';
     import {
@@ -184,6 +232,7 @@ import PageHeader from '../components/PageHeader.astro';
       const wizardFilePath = byId<HTMLParagraphElement>('wizard-file-path');
       const wizardSteps = byId<HTMLOListElement>('wizard-steps');
       const wizardTrail = byId<HTMLDivElement>('wizard-trail');
+      const wizardSuggest = byId<HTMLDivElement>('wizard-suggest');
       const wizardBody = byId<HTMLDivElement>('wizard-body');
       const wizardStatus = byId<HTMLSpanElement>('wizard-status');
       const wizardBack = byId<HTMLButtonElement>('wizard-back');
@@ -216,6 +265,12 @@ import PageHeader from '../components/PageHeader.astro';
       const groupsCache = new Map<string, ReleaseGroup[]>();
       let wizardState: WizardState | null = null;
       let stepToken = 0;
+      let suggestToken = 0;
+      let pendingSuggestedTrackID: string | null = null;
+      // Artist id for which scoped suggestions were loaded (or attempted).
+      // Reset whenever the artist pick changes so re-entering the group step
+      // refetches instead of reusing a stale scope.
+      let scopedArtistID: string | null = null;
 
       function fileRow(file: LocalFile): HTMLElement {
         const row = el('article', 'file-row');
@@ -589,6 +644,11 @@ import PageHeader from '../components/PageHeader.astro';
                   state.group = null;
                   state.release = null;
                   state.track = null;
+                  // A new pick invalidates any scoped suggestion: the next
+                  // group step refetches for this artist.
+                  scopedArtistID = null;
+                  clear(wizardSuggest);
+                  wizardSuggest.hidden = true;
                   markChanged();
                   // Selecting an artist advances immediately; Back/Continue
                   // stay available for manual navigation.
@@ -611,6 +671,16 @@ import PageHeader from '../components/PageHeader.astro';
       async function renderGroupStep(token: number): Promise<void> {
         const state = wizardState;
         if (!state?.artist) return;
+
+        // Second-chance suggestions scoped to the picked artist. Skipped
+        // while an accepted suggestion is being applied (group already set).
+        if (
+          !state.group &&
+          scopedArtistID !== state.artist.id &&
+          !pendingSuggestedTrackID
+        ) {
+          void loadScopedSuggestions(state);
+        }
 
         wizardBody.append(loading('Loading release groups…'));
         try {
@@ -682,6 +752,9 @@ import PageHeader from '../components/PageHeader.astro';
         const state = wizardState;
         if (!state?.group || state.step !== 1) return;
 
+        // A group is now fixed; any scoped banner for the artist is stale.
+        wizardSuggest.hidden = true;
+
         const token = ++stepToken;
         clear(wizardBody);
         wizardBody.append(loading('Loading tracks…'));
@@ -701,6 +774,7 @@ import PageHeader from '../components/PageHeader.astro';
               ),
             );
             updateFooter();
+            pendingSuggestedTrackID = null;
             return;
           }
 
@@ -716,6 +790,7 @@ import PageHeader from '../components/PageHeader.astro';
               ),
             );
             updateFooter();
+            pendingSuggestedTrackID = null;
             return;
           }
 
@@ -723,6 +798,16 @@ import PageHeader from '../components/PageHeader.astro';
           state.track = null;
           state.step = 2;
           renderWizard();
+          if (pendingSuggestedTrackID && wizardState === state) {
+            const match = state.release.tracks.find(
+              (candidate) => candidate.id === pendingSuggestedTrackID,
+            );
+            if (match) {
+              state.track = match;
+              markChanged();
+            }
+            pendingSuggestedTrackID = null;
+          }
         } catch (error) {
           if (token !== stepToken || wizardState !== state) return;
           clear(wizardBody);
@@ -813,6 +898,7 @@ import PageHeader from '../components/PageHeader.astro';
           release: null,
           track: null,
         };
+        scopedArtistID = null;
 
         wizardFileFormat.textContent = formatKey(file);
         wizardFileName.textContent = baseName(file.path);
@@ -820,6 +906,162 @@ import PageHeader from '../components/PageHeader.astro';
 
         if (!dialog.open) dialog.showModal();
         renderWizard();
+        void loadSuggestions(file);
+      }
+
+      function renderSuggestBanner(
+        top: SuggestedTrack,
+        preserveArtist = false,
+      ): void {
+        clear(wizardSuggest);
+
+        const banner = el('div', 'suggest-banner');
+        const art = el('span', 'pick__art');
+        art.append(coverArt('group', top.group.id, top.group.title));
+        banner.append(art);
+
+        const main = el('span', 'pick__main');
+        main.append(el('span', 'eyebrow', 'Suggested match'));
+        const pct = Math.round(top.score * 100);
+        // Confidence tiers mirror the design-system chips: green ≥ 90
+        // (exact/tag-strong), blue 70–89 (good, incl. filename-capped),
+        // amber < 70 (weak — confirm carefully).
+        const tier =
+          top.score >= 0.9 ? 'high' : top.score >= 0.7 ? 'med' : 'low';
+        banner.classList.add(`suggest-banner--${tier}`);
+        main.append(
+          el(
+            'span',
+            'pick__title',
+            `${top.track.title} — ${top.artist.name} · ${top.release.title}`,
+          ),
+        );
+        const details = [
+          top.track.credit?.length ? creditName(top.track.credit) : '',
+          top.reasons.join(' · '),
+          top.has_file ? 'already has a file' : '',
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        if (details) main.append(el('span', 'pick__meta', details));
+        banner.append(main);
+
+        const actions = el('span', 'suggest-banner__actions');
+        const tone =
+          tier === 'high'
+            ? 'chip--ok'
+            : tier === 'low'
+              ? 'chip--warn'
+              : 'chip--type';
+        const score = el('span', `chip ${tone}`, `${pct}% match`);
+        score.title = `Match confidence: ${pct}%`;
+        actions.append(score);
+        const accept = el(
+          'button',
+          'btn btn--sm btn--primary',
+          'Use suggestion',
+        );
+        accept.type = 'button';
+        accept.addEventListener('click', () => {
+          if (!wizardState) return;
+          // Scoped accept: the artist is already fixed by the user's pick.
+          if (!preserveArtist) {
+            wizardState.artist = top.artist;
+          } else if (!wizardState.artist) {
+            return;
+          }
+          wizardState.group = top.group;
+          wizardState.release = null;
+          wizardState.track = null;
+          wizardState.step = 1;
+          pendingSuggestedTrackID = top.track.id;
+          wizardSuggest.hidden = true;
+          renderWizard();
+          void loadReleaseAndAdvance();
+        });
+        const dismiss = el('button', 'btn btn--sm btn--ghost', 'Dismiss');
+        dismiss.type = 'button';
+        dismiss.addEventListener('click', () => {
+          wizardSuggest.hidden = true;
+          clear(wizardSuggest);
+        });
+        actions.append(accept, dismiss);
+        banner.append(actions);
+
+        wizardSuggest.append(banner);
+        wizardSuggest.hidden = false;
+      }
+
+      async function loadScopedSuggestions(state: WizardState): Promise<void> {
+        const artist = state.artist;
+        if (!artist) return;
+        scopedArtistID = artist.id;
+
+        const token = ++suggestToken;
+        clear(wizardSuggest);
+        wizardSuggest.hidden = false;
+        wizardSuggest.append(el('p', 'muted', 'Finding suggestions…'));
+
+        try {
+          const res = await api.getSuggestions(state.file.id, 3, artist.id);
+          if (token !== suggestToken || wizardState !== state) {
+            return;
+          }
+          clear(wizardSuggest);
+          if (!res || res.suggestions.length === 0) {
+            wizardSuggest.append(
+              el(
+                'p',
+                'muted',
+                'No suggestions for this artist — pick a group below.',
+              ),
+            );
+            return;
+          }
+          renderSuggestBanner(res.suggestions[0], true);
+        } catch {
+          if (token !== suggestToken || wizardState !== state) return;
+          clear(wizardSuggest);
+          wizardSuggest.append(
+            el(
+              'p',
+              'muted',
+              'No suggestions for this artist — pick a group below.',
+            ),
+          );
+        }
+      }
+
+      async function loadSuggestions(file: LocalFile): Promise<void> {
+        const token = ++suggestToken;
+        clear(wizardSuggest);
+        wizardSuggest.hidden = false;
+        wizardSuggest.append(el('p', 'muted', 'Finding suggestions…'));
+
+        try {
+          const res = await api.getSuggestions(file.id, 3);
+          if (
+            token !== suggestToken ||
+            !wizardState ||
+            wizardState.file.id !== file.id
+          ) {
+            return;
+          }
+          clear(wizardSuggest);
+          if (!res || res.suggestions.length === 0) {
+            wizardSuggest.append(
+              el('p', 'muted', 'No suggestions found — pick manually below.'),
+            );
+            return;
+          }
+          renderSuggestBanner(res.suggestions[0]);
+        } catch {
+          if (token !== suggestToken || !wizardState) return;
+          clear(wizardSuggest);
+          wizardSuggest.append(
+            el('p', 'muted', 'No suggestions found — pick manually below.'),
+          );
+        }
       }
 
       async function linkSelected(): Promise<void> {
@@ -875,11 +1117,23 @@ import PageHeader from '../components/PageHeader.astro';
       dialog.addEventListener('close', () => {
         wizardState = null;
         stepToken += 1;
+        suggestToken += 1;
+        pendingSuggestedTrackID = null;
+        scopedArtistID = null;
+        clear(wizardSuggest);
+        wizardSuggest.hidden = true;
       });
 
       wizardBack.addEventListener('click', () => {
         if (!wizardState || wizardState.step === 0) return;
         wizardState.step = (wizardState.step - 1) as Step;
+        if (wizardState.step === 0) {
+          // Reconsidering the artist invalidates its scoped suggestion;
+          // re-advancing refetches instead of showing a stale artist.
+          scopedArtistID = null;
+          clear(wizardSuggest);
+          wizardSuggest.hidden = true;
+        }
         renderWizard();
       });
 

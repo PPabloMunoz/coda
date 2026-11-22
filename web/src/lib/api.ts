@@ -132,6 +132,37 @@ export interface Release {
   tracks: Track[];
 }
 
+export interface SuggestedRelease {
+  id: string;
+  title: string;
+  date: string | null;
+  status: string | null;
+}
+
+export interface SuggestedTrack {
+  artist: Artist;
+  group: ReleaseGroup;
+  release: SuggestedRelease;
+  track: Track;
+  score: number;
+  reasons: string[];
+  has_file: boolean;
+}
+
+export interface DetectedTags {
+  title: string;
+  album: string;
+  artists: string[];
+  track: number;
+  disc: number;
+  filename_guess: boolean;
+}
+
+export interface SuggestionResult {
+  detected: DetectedTags;
+  suggestions: SuggestedTrack[];
+}
+
 export type Page<T> = { total: number; items: T[] };
 export type AllPages<T> = { total: number; items: T[] };
 
@@ -488,6 +519,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ track_id: trackID }),
     }),
+  getSuggestions: (fileID: number, limit = 5, artistID?: string) =>
+    request<SuggestionResult>(
+      `/api/v1/files/${fileID}/suggestions?limit=${limit}${artistID ? `&artist=${encodeURIComponent(artistID)}` : ''}`,
+    ),
   scan: () => fetch('/api/v1/scan', { method: 'POST' }),
   unlink: (fileID: number) =>
     fetch(`/api/v1/files/${fileID}/link`, { method: 'DELETE' }),
