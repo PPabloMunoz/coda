@@ -475,11 +475,6 @@ export const api = {
       `/api/v1/releases/${encodeURIComponent(id)}/cover/refresh`,
       { method: 'POST' },
     ),
-  refreshReleaseGroupCover: (id: string) =>
-    request<CoverInfo>(
-      `/api/v1/release-groups/${encodeURIComponent(id)}/cover/refresh`,
-      { method: 'POST' },
-    ),
 
   link: (fileID: number, trackID: string, move = false) =>
     fetch(`/api/v1/files/${fileID}/link`, {

@@ -580,24 +580,7 @@ import Layout from '../components/Layout.astro';
           deleteButton.addEventListener('click', () =>
             deleteGroup(deleteButton),
           );
-          const heroRefresh = el(
-            'button',
-            'btn btn--secondary',
-            'Refresh cover',
-          );
-          heroRefresh.type = 'button';
-          heroRefresh.title =
-            'Fetch the cover art again (Cover Art Archive, then Deezer)';
-          heroRefresh.addEventListener(
-            'click',
-            () =>
-              void runCoverRefresh(heroRefresh, () =>
-                currentGroup
-                  ? api.refreshReleaseGroupCover(currentGroup.id)
-                  : Promise.resolve(null),
-              ),
-          );
-          actions.append(heroRefresh, deleteButton);
+          actions.append(deleteButton);
 
           renderRelease(release, group);
           status.hidden = true;

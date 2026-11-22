@@ -120,33 +120,6 @@ func (h *Handler) refreshReleaseCover(c *gin.Context) {
 	c.JSON(http.StatusOK, row)
 }
 
-// refreshReleaseGroupCover refreshes the cover of the single release kept
-// for a release-group. One release per group is enforced by the UNIQUE on
-// releases.release_group_id.
-func (h *Handler) refreshReleaseGroupCover(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	groupID, err := requireMBID(c.Param("id"))
-	if err != nil {
-		h.writeAppError(c, err)
-		return
-	}
-
-	release, err := h.st.GetReleaseOfGroup(ctx, groupID, false)
-	if err != nil {
-		h.writeAppError(c, err)
-		return
-	}
-
-	row, err := h.doRefreshReleaseCover(ctx, release.ID)
-	if err != nil {
-		h.writeAppError(c, err)
-		return
-	}
-
-	c.JSON(http.StatusOK, row)
-}
-
 func (h *Handler) doRefreshReleaseCover(ctx context.Context, releaseID string) (*store.CoverParams, error) {
 	rel, err := h.st.GetRelease(ctx, releaseID, false)
 	if err != nil {
