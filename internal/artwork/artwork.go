@@ -23,7 +23,7 @@ const (
 	DefaultCAABaseURL          = "https://coverartarchive.org"
 	DefaultDeezerBaseURL       = "https://api.deezer.com"
 	defaultTimeout             = 15 * time.Second
-	defaultMaxBytes      int64 = 10 << 20 // 10MB cap so a rogue response can't blow up the cache
+	defaultMaxBytes      int64 = 15 << 20 // 15MB cap so a rogue response can't blow up the cache
 )
 
 // Result is one fetched cover image.
