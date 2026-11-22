@@ -97,6 +97,48 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 	c.Data(http.StatusOK, row.MIME, data)
 }
 
+// refreshReleaseCover drops the cached cover for a release and fetches it
+// again (CAA, then Deezer). Missing art answers 404 null; an upstream
+// failure surfaces as an error so the old state is never confused with "no
+// art". The row cascades are untouched — only the cache is rebuilt.
+func (h *Handler) refreshReleaseCover(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	releaseID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	rel, err := h.st.GetRelease(ctx, releaseID, false)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if h.art == nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("cover refresh unavailable"),
+		))
+		return
+	}
+
+	_ = h.st.DeleteCover(ctx, releaseID)
+	removeCoverFiles(h.coverDir, releaseID)
+
+	artist := tasks.CreditDisplayName(rel.Credit)
+	if artist == "" {
+		artist = tasks.CreditDisplayName(rel.Group.Credit)
+	}
+	row, err := tasks.EnsureCover(ctx, h.st, h.art, h.coverDir, releaseID, artist, rel.Title)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, row)
+}
+
 // embedCover stamps the cached release art into the audio file as its front
 // cover. No cached art is a no-op (link never blocks on the network); a
 // present-but-unreadable cache or a tag failure surfaces as an error like

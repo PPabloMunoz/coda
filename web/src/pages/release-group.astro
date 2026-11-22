@@ -246,6 +246,7 @@ import Layout from '../components/Layout.astro';
 
       let currentGroup: ReleaseGroup | null = null;
       let switchInFlight = false;
+      let coverInFlight = false;
 
       function openSwitch(release: Release): void {
         if (!currentGroup) return;
@@ -297,6 +298,44 @@ import Layout from '../components/Layout.astro';
         } finally {
           switchInFlight = false;
           setBusy(switchSubmit, false);
+        }
+      }
+
+      async function refreshCover(
+        release: Release,
+        button: HTMLButtonElement,
+      ): Promise<void> {
+        if (coverInFlight) return;
+        coverInFlight = true;
+        setBusy(button, true, 'Refreshing…');
+        try {
+          const row = await api.refreshReleaseCover(release.id);
+          if (!row) {
+            toast('No cover art found for this release.', 'info');
+            return;
+          }
+          // The endpoint sends a 24h max-age, so bust the <img> URLs or the
+          // browser would keep showing the previous bytes.
+          const stamp = String(Date.now());
+          for (const img of document.querySelectorAll<HTMLImageElement>(
+            'img.cover-img',
+          )) {
+            try {
+              const url = new URL(img.currentSrc || img.src, location.origin);
+              url.searchParams.set('t', stamp);
+              img.src = url.toString();
+            } catch {
+              /* keep the previous art on weird URLs */
+            }
+          }
+          toast(`Cover refreshed (${row.source}).`, 'ok');
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          toast(`Could not refresh cover: ${message}`, 'error');
+        } finally {
+          coverInFlight = false;
+          setBusy(button, false);
         }
       }
 
@@ -413,12 +452,25 @@ import Layout from '../components/Layout.astro';
         );
         switchButton.type = 'button';
         switchButton.addEventListener('click', () => openSwitch(release));
+        const refreshButton = el(
+          'button',
+          'btn btn--secondary',
+          'Refresh cover',
+        );
+        refreshButton.type = 'button';
+        refreshButton.title =
+          'Fetch the cover art again (Cover Art Archive, then Deezer)';
+        refreshButton.addEventListener(
+          'click',
+          () => void refreshCover(release, refreshButton),
+        );
         panelActions.append(
           externalLink(
             mbUrl.release(release.id),
             'MusicBrainz ↗',
             'btn btn--secondary',
           ),
+          refreshButton,
           switchButton,
         );
         body.append(panelActions);
