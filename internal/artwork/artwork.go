@@ -96,16 +96,16 @@ func New(cfg Config) (*Fetcher, error) {
 	}, nil
 }
 
-// Fetch returns the release cover, trying providers in order (CAA, then
-// Deezer). It returns ErrNotFound only when no provider has art; transient
-// upstream failures surface as errors so callers retry later instead of
-// caching a miss. Artist/album feed the Deezer text search only.
+// Fetch returns the release cover, trying providers in order (CAA, Deezer,
+// then iTunes). It returns ErrNotFound only when no provider has usable art;
+// transient upstream failures surface as errors so callers retry later
+// instead of caching a miss. Artist/album feed the text-search fallbacks.
 func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) (*Result, error) {
 	if err := utils.ValidateMBID(releaseMBID); err != nil {
 		return nil, apperrors.ErrInvalidID
 	}
 
-	var caaErr, deezerErr error
+	var caaErr, deezerErr, itunesErr error
 	if res, err := f.fetchCAA(ctx, releaseMBID); err == nil {
 		return res, nil
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
@@ -122,10 +122,21 @@ func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) 
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
 		f.debugf("artwork: no Deezer art for release %s", releaseMBID)
 	} else if errors.Is(err, errImageTooLarge) {
-		f.debugf("artwork: Deezer art for release %s exceeds size limit", releaseMBID)
+		f.debugf("artwork: Deezer art for release %s exceeds size limit, trying fallback", releaseMBID)
 	} else {
 		deezerErr = err
 		f.warnf("artwork: Deezer fetch for release %s failed: %v", releaseMBID, err)
+	}
+
+	if res, err := f.fetchiTunes(ctx, artist, album); err == nil {
+		return res, nil
+	} else if apperrors.Is(err, apperrors.ErrNotFound) {
+		f.debugf("artwork: no iTunes art for release %s", releaseMBID)
+	} else if errors.Is(err, errImageTooLarge) {
+		f.debugf("artwork: iTunes art for release %s exceeds size limit", releaseMBID)
+	} else {
+		itunesErr = err
+		f.warnf("artwork: iTunes fetch for release %s failed: %v", releaseMBID, err)
 	}
 
 	// Prefer surfacing a real failure over a miss so callers don't treat an
@@ -135,6 +146,9 @@ func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) 
 	}
 	if deezerErr != nil {
 		return nil, deezerErr
+	}
+	if itunesErr != nil {
+		return nil, itunesErr
 	}
 	return nil, apperrors.ErrNotFound
 }
