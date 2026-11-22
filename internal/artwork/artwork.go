@@ -82,25 +82,42 @@ func New(cfg Config) (*Fetcher, error) {
 	}, nil
 }
 
-// Fetch returns the release cover from the Cover Art Archive. Fallback
-// providers plug in here next: on ErrNotFound the chain continues, while
-// transient upstream failures surface as errors so callers retry later
-// instead of caching a miss. Artist/album are reserved for the text-search
-// fallback and currently unused.
-func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, _, _ string) (*Result, error) {
+// Fetch returns the release cover, trying providers in order (CAA, then
+// Deezer). It returns ErrNotFound only when no provider has art; transient
+// upstream failures surface as errors so callers retry later instead of
+// caching a miss. Artist/album feed the Deezer text search only.
+func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) (*Result, error) {
 	if err := utils.ValidateMBID(releaseMBID); err != nil {
 		return nil, apperrors.ErrInvalidID
 	}
 
-	res, err := f.fetchCAA(ctx, releaseMBID)
-	if err == nil {
+	var caaErr, deezerErr error
+	if res, err := f.fetchCAA(ctx, releaseMBID); err == nil {
 		return res, nil
-	}
-	if !apperrors.Is(err, apperrors.ErrNotFound) {
+	} else if apperrors.Is(err, apperrors.ErrNotFound) {
+		f.debugf("artwork: no CAA art for release %s", releaseMBID)
+	} else {
+		caaErr = err
 		f.warnf("artwork: CAA fetch for release %s failed: %v", releaseMBID, err)
-		return nil, err
 	}
-	f.debugf("artwork: no CAA art for release %s", releaseMBID)
+
+	if res, err := f.fetchDeezer(ctx, artist, album); err == nil {
+		return res, nil
+	} else if apperrors.Is(err, apperrors.ErrNotFound) {
+		f.debugf("artwork: no Deezer art for release %s", releaseMBID)
+	} else {
+		deezerErr = err
+		f.warnf("artwork: Deezer fetch for release %s failed: %v", releaseMBID, err)
+	}
+
+	// Prefer surfacing a real failure over a miss so callers don't treat an
+	// outage as "no art exists".
+	if caaErr != nil {
+		return nil, caaErr
+	}
+	if deezerErr != nil {
+		return nil, deezerErr
+	}
 	return nil, apperrors.ErrNotFound
 }
 

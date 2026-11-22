@@ -1,0 +1,129 @@
+package artwork
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
+)
+
+// Deezer's public search API needs no key, which makes it a good fallback
+// when CAA has no front art. Matches are text-based, so callers pass the
+// release artist + title and the first hit with any cover image wins,
+// preferring the largest rendition.
+
+// deezerAlbumSearch is the subset of /search/album we read.
+type deezerAlbumSearch struct {
+	Data []deezerAlbum `json:"data"`
+}
+
+type deezerAlbum struct {
+	Title       string `json:"title"`
+	CoverXL     string `json:"cover_xl"`
+	CoverBig    string `json:"cover_big"`
+	CoverMedium string `json:"cover_medium"`
+	Cover       string `json:"cover"`
+}
+
+func (f *Fetcher) fetchDeezer(ctx context.Context, artist, album string) (*Result, error) {
+	artist = strings.TrimSpace(artist)
+	album = strings.TrimSpace(album)
+	if artist == "" && album == "" {
+		return nil, apperrors.ErrNotFound
+	}
+
+	var parts []string
+	if artist != "" {
+		parts = append(parts, `artist:"`+artist+`"`)
+	}
+	if album != "" {
+		parts = append(parts, `album:"`+album+`"`)
+	}
+	q := url.Values{}
+	q.Set("q", strings.Join(parts, " "))
+	searchURL := f.deezerBase + "/search/album?" + q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
+	if err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artwork: build deezer request: %w", err),
+		)
+	}
+	req.Header.Set("User-Agent", f.ua)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := f.http.Do(req)
+	if err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artwork: deezer request: %w", err),
+		)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, apperrors.ErrNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artwork: deezer status %d", resp.StatusCode),
+		)
+	}
+
+	// Search payloads are small; still cap the read so a rogue response
+	// can't blow up memory.
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artwork: read deezer response: %w", err),
+		)
+	}
+	var search deezerAlbumSearch
+	if err := json.Unmarshal(raw, &search); err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artwork: decode deezer response: %w", err),
+		)
+	}
+	coverURL := ""
+	for _, a := range search.Data {
+		switch {
+		case a.CoverXL != "":
+			coverURL = a.CoverXL
+		case a.CoverBig != "":
+			coverURL = a.CoverBig
+		case a.CoverMedium != "":
+			coverURL = a.CoverMedium
+		case a.Cover != "":
+			coverURL = a.Cover
+		}
+		if coverURL != "" {
+			break
+		}
+	}
+	if coverURL == "" {
+		return nil, apperrors.ErrNotFound
+	}
+
+	body, mime, err := f.download(ctx, coverURL)
+	if err != nil {
+		if apperrors.Is(err, apperrors.ErrNotFound) {
+			return nil, apperrors.ErrNotFound
+		}
+		return nil, err
+	}
+	return &Result{
+		Bytes:     body,
+		MIME:      mime,
+		Source:    SourceDeezer,
+		SourceURL: coverURL,
+	}, nil
+}
