@@ -87,17 +87,20 @@ func Scan(ctx context.Context, rootPaths []string, fn func(File) error) error {
 }
 
 type Target struct {
-	Root   string
-	Artist string
-	Album  string
-	Title  string
-	Disc   int
-	Track  int
-	Ext    string // without dot
+	Root       string
+	Artist     string
+	Album      string
+	Title      string
+	Disc       int
+	Track      int
+	TotalDiscs int    // <=1 omits the disc prefix; >1 keeps DD-TT_
+	Ext        string // without dot
 }
 
-// Path returns the sanitized Artist/Album/02-03_Title.ext destination under
-// Root, rejecting empty fields, unsupported extensions, and escapes from Root.
+// Path returns the sanitized Artist/Album destination under Root. Single-disc
+// releases (TotalDiscs <= 1) use TT_Title.ext; multi-disc releases keep
+// DD-TT_Title.ext. It rejects empty fields, unsupported extensions, and
+// escapes from Root.
 func (t Target) Path() (string, error) {
 	root := filepath.Clean(strings.TrimSpace(t.Root))
 	if root == "" || root == "." {
@@ -135,11 +138,21 @@ func (t Target) Path() (string, error) {
 	}
 
 	dst := filepath.Join(root, artist, album,
-		fmt.Sprintf("%02d-%02d_%s.%s", t.Disc, t.Track, title, ext))
+		targetFilename(t.Disc, t.Track, t.TotalDiscs, title, ext))
 
 	rel, err := filepath.Rel(root, dst)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("library: destination escapes root")
 	}
 	return dst, nil
+}
+
+// targetFilename omits the disc prefix for single-disc releases (TotalDiscs <=
+// 1, the zero-value default) so files are named TT_Title.ext; multi-disc
+// releases keep DD-TT_Title.ext to avoid collisions across discs.
+func targetFilename(disc, track, totalDiscs int, title, ext string) string {
+	if totalDiscs > 1 {
+		return fmt.Sprintf("%02d-%02d_%s.%s", disc, track, title, ext)
+	}
+	return fmt.Sprintf("%02d_%s.%s", track, title, ext)
 }

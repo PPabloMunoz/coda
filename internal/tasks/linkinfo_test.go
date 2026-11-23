@@ -56,6 +56,9 @@ func TestLinkInfoFromStore(t *testing.T) {
 	if got.TrackNumber != 3 || got.DiscNumber != 1 {
 		t.Errorf("numbers = %d/%d, want 3/1 (disc clamps to 1)", got.TrackNumber, got.DiscNumber)
 	}
+	if got.DiscTotal != 1 {
+		t.Errorf("DiscTotal = %d, want 1 (no track rows = single-disc)", got.DiscTotal)
+	}
 	if got.MBReleaseTrackID != "track-1" || got.MBTrackID != "rec-1" {
 		t.Errorf("mbids = %+v", got)
 	}
@@ -78,6 +81,20 @@ func TestLinkInfoFromStore(t *testing.T) {
 	got = LinkInfoFromStore(relNoCredit, bare)
 	if got.AlbumArtistDisplay != "Group Artist" {
 		t.Errorf("album fallback = %q", got.AlbumArtistDisplay)
+	}
+
+	// Multi-disc release reports the highest disc number.
+	multi := &store.FullReleaseParams{
+		ID: "rel-3", Title: "Anthology",
+		Group: store.ReleaseGroupParams{ID: "rg-3", Title: "G3", Type: "album"},
+		Tracks: []store.TrackParams{
+			{ID: "m1", Disc: 1, Position: 1, Title: "A"},
+			{ID: "m2", Disc: 3, Position: 1, Title: "B"},
+		},
+	}
+	got = LinkInfoFromStore(multi, &store.TrackParams{ID: "m1", Title: "A", Position: 1, Disc: 1})
+	if got.DiscTotal != 3 {
+		t.Errorf("DiscTotal = %d, want 3 (max disc across tracks)", got.DiscTotal)
 	}
 }
 

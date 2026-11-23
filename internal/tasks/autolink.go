@@ -34,13 +34,14 @@ func LibraryTargetPath(root string, info *tags.LinkInfo, ext string) (string, er
 		artist = info.ArtistDisplay
 	}
 	return library.Target{
-		Root:   root,
-		Artist: artist,
-		Album:  info.Album,
-		Title:  info.Title,
-		Disc:   info.DiscNumber,
-		Track:  info.TrackNumber,
-		Ext:    ext,
+		Root:       root,
+		Artist:     artist,
+		Album:      info.Album,
+		Title:      info.Title,
+		Disc:       info.DiscNumber,
+		Track:      info.TrackNumber,
+		TotalDiscs: info.DiscTotal,
+		Ext:        ext,
 	}.Path()
 }
 

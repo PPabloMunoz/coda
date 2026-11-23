@@ -9,9 +9,12 @@ import (
 )
 
 type LinkInfo struct {
-	Title, Album, ArtistDisplay, AlbumArtistDisplay, Date    string
-	Artists, AlbumArtists, MBArtistIDs, MBAlbumArtistIDs     []string
-	TrackNumber, DiscNumber                                  int
+	Title, Album, ArtistDisplay, AlbumArtistDisplay, Date string
+	Artists, AlbumArtists, MBArtistIDs, MBAlbumArtistIDs  []string
+	TrackNumber, DiscNumber                               int
+	// DiscTotal is the highest disc number on the release (1 for single-disc).
+	// It drives filename formatting only; tags still write DiscNumber.
+	DiscTotal                                                int
 	MBTrackID, MBReleaseTrackID, MBAlbumID, MBReleaseGroupID string
 	ReleaseType, ReleaseStatus                               string
 }

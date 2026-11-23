@@ -102,7 +102,31 @@ func TestTargetPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Path() = %v, want nil", err)
 	}
-	want := filepath.Join(root, "The_Beatles", "Abbey_Road", "01-01_Come_Together.mp3")
+	want := filepath.Join(root, "The_Beatles", "Abbey_Road", "01_Come_Together.mp3")
+	if got != want {
+		t.Errorf("Path() = %q, want %q", got, want)
+	}
+}
+
+func TestTargetPathMultiDisc(t *testing.T) {
+	root := t.TempDir()
+
+	got, err := Target{Root: root, Artist: "The Beatles", Album: "Anthology", Title: "Come Together", Disc: 2, Track: 1, TotalDiscs: 3, Ext: "mp3"}.Path()
+	if err != nil {
+		t.Fatalf("Path() = %v, want nil", err)
+	}
+	want := filepath.Join(root, "The_Beatles", "Anthology", "02-01_Come_Together.mp3")
+	if got != want {
+		t.Errorf("Path() = %q, want %q", got, want)
+	}
+
+	// Disc 1 of a multi-disc release keeps the prefix to avoid collisions
+	// across discs in the same album folder.
+	got, err = Target{Root: root, Artist: "A", Album: "B", Title: "C", Disc: 1, Track: 2, TotalDiscs: 2, Ext: "mp3"}.Path()
+	if err != nil {
+		t.Fatalf("Path() = %v, want nil", err)
+	}
+	want = filepath.Join(root, "A", "B", "01-02_C.mp3")
 	if got != want {
 		t.Errorf("Path() = %q, want %q", got, want)
 	}
@@ -143,7 +167,7 @@ func TestTargetPathExtensionNormalized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Path() = %v, want nil", err)
 	}
-	want := filepath.Join(root, "A", "B", "01-02_C.mp3")
+	want := filepath.Join(root, "A", "B", "02_C.mp3")
 	if got != want {
 		t.Errorf("Path() = %q, want %q", got, want)
 	}

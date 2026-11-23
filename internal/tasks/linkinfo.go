@@ -33,6 +33,7 @@ func LinkInfoFromStore(rel *store.FullReleaseParams, track *store.TrackParams) *
 		MBAlbumArtistIDs:   albumIDs,
 		TrackNumber:        track.Position,
 		DiscNumber:         max(track.Disc, 1),
+		DiscTotal:          maxDiscNumber(rel),
 		Date:               deref(rel.Date),
 		MBTrackID:          track.RecordingID,
 		MBReleaseTrackID:   track.ID,
@@ -74,4 +75,19 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// maxDiscNumber reports the highest disc number across the release's tracks,
+// clamped to at least 1. A release with no track rows (or all disc <= 1) is
+// treated as single-disc so filenames omit the disc prefix.
+func maxDiscNumber(rel *store.FullReleaseParams) int {
+	maxDisc := 1
+	if rel != nil {
+		for _, t := range rel.Tracks {
+			if t.Disc > maxDisc {
+				maxDisc = t.Disc
+			}
+		}
+	}
+	return maxDisc
 }
