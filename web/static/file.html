@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="theme-color" content="#17181a" />
+    <meta
+      name="description"
+      content="Coda keeps a local music library linked to MusicBrainz, with tags Navidrome can read."
+    />
+    <title>File · Coda</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">
+      Skip to content
+    </a>
+
+    <div class="shell">
+      <aside class="rail">
+        <a class="brand" href="/" aria-label="Coda home">
+          <img
+            class="brand__logo"
+            src="/logo.png"
+            alt=""
+            width="36"
+            height="36"
+            aria-hidden="true"
+          />
+          <span class="brand__text">
+            <span class="brand__word" translate="no">
+              Coda
+            </span>
+            <span class="brand__tag">Local library</span>
+          </span>
+        </a>
+
+        <nav class="rail__nav" aria-label="Main">
+          <p class="rail__label">Library</p>
+          <a
+            class="rail__link"
+            href="/"
+           
+          >
+            <svg class="rail__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="8.25"></circle>
+              <circle cx="12" cy="12" r="2.1"></circle>
+            </svg>
+            <span>Artists</span>
+            <span class="rail__count" data-stat="artists"></span>
+          </a>
+          <a
+            class="rail__link"
+            href="/release-groups"
+          >
+            <svg class="rail__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m12 3 8.25 4.5L12 12 3.75 7.5 12 3Z"></path>
+              <path d="m4.4 12 7.6 4.15L19.6 12"></path>
+              <path d="m4.4 16.5 7.6 4.15 7.6-4.15"></path>
+            </svg>
+            <span>Release groups</span>
+            <span class="rail__count" data-stat="release_groups"></span>
+          </a>
+
+          <p class="rail__label">Manage</p>
+          <a
+            class="rail__link"
+            href="/link"
+          >
+            <svg class="rail__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10.2 13.8a4.25 4.25 0 0 0 6 0l2.6-2.6a4.25 4.25 0 1 0-6-6l-1.2 1.2"></path>
+              <path d="M13.8 10.2a4.25 4.25 0 0 0-6 0l-2.6 2.6a4.25 4.25 0 1 0 6 6l1.2-1.2"></path>
+            </svg>
+            <span>Unlinked files</span>
+            <span class="rail__count" data-stat="unlinked_files"></span>
+          </a>
+          <a
+            class="rail__link"
+            href="/files"
+            aria-current="page"
+          >
+            <svg class="rail__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3.75 7.5A2.25 2.25 0 0 1 6 5.25h3l2.1 2.25H18A2.25 2.25 0 0 1 20.25 9.75v7.5A2.25 2.25 0 0 1 18 19.5H6a2.25 2.25 0 0 1-2.25-2.25v-9.75Z"></path>
+            </svg>
+            <span>All files</span>
+            <span class="rail__count" data-stat="total_files"></span>
+          </a>
+        </nav>
+
+        <div class="rail__foot">
+          <span class="health" id="health" aria-live="polite">
+            <span class="health__dot" aria-hidden="true"></span>
+            <span class="health__label">Checking library…</span>
+          </span>
+          <button
+            class="btn btn--secondary btn--sm"
+            id="rescan"
+            type="button"
+            title="Rescan root folders for new or removed files"
+          >
+            Rescan library
+          </button>
+          <a
+            class="rail__ext"
+            href="https://musicbrainz.org"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            MusicBrainz <span aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </aside>
+
+      <div class="content">
+        <header class="topbar" aria-label="Site">
+          <div class="topbar__search" id="topbar-search">
+            <label class="search">
+              <input
+                id="artist-search"
+                name="artist-search"
+                type="search"
+                placeholder="Search artists…"
+                autocomplete="off"
+                aria-label="Search artists in your library"
+                role="combobox"
+                aria-expanded="false"
+                aria-controls="artist-search-results"
+                aria-autocomplete="list"
+              />
+            </label>
+            <div
+              class="topbar__results"
+              id="artist-search-results"
+              role="listbox"
+              aria-label="Matching artists in your library"
+              hidden
+            ></div>
+            <kbd class="topbar__kbd" aria-hidden="true">
+              ⌘K
+            </kbd>
+          </div>
+        </header>
+
+        <main class="page" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb">
+    <a href="/files">All files</a>
+    <span>/</span>
+    <span id="crumb">File</span>
+  </nav>
+
+  <header class="page-head">
+    <div class="page-head__copy">
+      <p class="eyebrow">Local file</p>
+      <h1 id="file-name">File</h1>
+      <p class="page-head__desc mono" id="file-path"></p>
+    </div>
+    <div class="page-head__actions" id="actions"></div>
+  </header>
+
+  <div class="notice" id="status">
+    Loading file…
+  </div>
+
+  <div id="content" hidden>
+    <div class="stat-row">
+      <div class="stat-card">
+        <span class="stat-card__label">Format</span>
+        <span class="stat-card__value" id="stat-format">
+          —
+        </span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-card__label">Size</span>
+        <span class="stat-card__value" id="stat-size">
+          —
+        </span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-card__label">Scanned</span>
+        <span class="stat-card__value" id="stat-scanned">
+          —
+        </span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-card__label">Link</span>
+        <span class="stat-card__value" id="stat-link">
+          —
+        </span>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data-table detail-table">
+        <tbody>
+          <tr>
+            <th scope="row">Path</th>
+            <td class="mono" id="detail-path"></td>
+          </tr>
+          <tr>
+            <th scope="row">Format hint</th>
+            <td id="detail-format"></td>
+          </tr>
+          <tr>
+            <th scope="row">Size</th>
+            <td id="detail-size"></td>
+          </tr>
+          <tr>
+            <th scope="row">Modified</th>
+            <td id="detail-mtime"></td>
+          </tr>
+          <tr>
+            <th scope="row">Scanned</th>
+            <td id="detail-scanned"></td>
+          </tr>
+          <tr>
+            <th scope="row">Track MBID</th>
+            <td class="mono" id="detail-track"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div id="link-panel" class="link-panel-slot"></div>
+  </div></main>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="/js/layout.js"></script>
+    <script type="module" src="/js/page-file.js"></script>
+  </body>
+</html>

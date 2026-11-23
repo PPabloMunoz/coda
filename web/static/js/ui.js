@@ -1,62 +1,51 @@
-import { coverUrl, type CreditEntry } from './api';
+// Shared DOM helpers and deterministic placeholder art.
+// Ported verbatim from the Astro `src/lib/ui.ts` — types stripped, runtime identical.
 
-export function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className?: string,
-  text?: string,
-): HTMLElementTagNameMap[K] {
+import { coverUrl } from './api.js';
+
+export function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text != null) node.textContent = text;
   return node;
 }
 
-export function clear(node: Element): void {
+export function clear(node) {
   node.replaceChildren();
 }
 
-export function byId<T extends HTMLElement = HTMLElement>(id: string): T {
+export function byId(id) {
   const node = document.getElementById(id);
   if (!node) throw new Error(`Missing #${id}`);
-  return node as T;
+  return node;
 }
 
-export function pathIs(...paths: string[]): boolean {
+export function pathIs(...paths) {
   const path = location.pathname.replace(/\/+$/, '') || '/';
   return paths.includes(path);
 }
 
-export function link(
-  href: string,
-  text: string,
-  className?: string,
-): HTMLAnchorElement {
+export function link(href, text, className) {
   const anchor = el('a', className, text);
   anchor.href = href;
   return anchor;
 }
 
-export function externalLink(
-  href: string,
-  text: string,
-  className?: string,
-): HTMLAnchorElement {
+export function externalLink(href, text, className) {
   const anchor = link(href, text, className);
   anchor.target = '_blank';
   anchor.rel = 'noreferrer noopener';
   return anchor;
 }
 
-export function normalize(value: string | null | undefined): string {
+export function normalize(value) {
   return (value ?? '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
 }
 
-export function creditFragment(
-  credit: CreditEntry[] | null | undefined,
-): DocumentFragment {
+export function creditFragment(credit) {
   const fragment = document.createDocumentFragment();
   if (!credit || credit.length === 0) {
     fragment.append(document.createTextNode('Unknown artist'));
@@ -80,7 +69,7 @@ export function creditFragment(
 
 const ART_HUES = [36, 22, 152, 168, 210, 8, 42, 145];
 
-function hashString(value: string): number {
+function hashString(value) {
   let hash = 2166136261;
   for (let i = 0; i < value.length; i += 1) {
     hash ^= value.charCodeAt(i);
@@ -89,7 +78,7 @@ function hashString(value: string): number {
   return hash >>> 0;
 }
 
-export function initials(value: string): string {
+export function initials(value) {
   const words = value
     .trim()
     .split(/\s+/)
@@ -108,22 +97,18 @@ export function initials(value: string): string {
 /**
  * The deterministic hue for an art tile seed (artist, group, release or
  * track id). Exposed so pages can paint a same-hue placeholder before the
- * data arrives — used for the shared-element art transition.
+ * data arrives.
  */
-export function artHue(seed: string): number {
+export function artHue(seed) {
   return ART_HUES[hashString(seed || '?') % ART_HUES.length];
 }
 
 /**
- * Shared-element name pairing a card tile with its detail hero. Astro's
- * ClientRouter drives the snapshot; matching `view-transition-name`s morph
- * one into the other. Returns null under reduced motion so the navigation
- * falls back to the plain crossfade.
+ * Shared-element name pairing a card tile with its detail hero. Kept as a
+ * `view-transition-name` hook; harmless when the browser has no active view
+ * transition. Returns null under reduced motion.
  */
-export function sharedArtName(
-  kind: 'artist' | 'group',
-  id: string,
-): string | null {
+export function sharedArtName(kind, id) {
   if (
     typeof matchMedia !== 'undefined' &&
     matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -134,10 +119,7 @@ export function sharedArtName(
 }
 
 /** Applies (or clears) a shared-element name on an art tile. */
-export function setSharedArtName(
-  node: HTMLElement | null | undefined,
-  name: string | null,
-): void {
+export function setSharedArtName(node, name) {
   if (!node) return;
   if (name) node.style.setProperty('view-transition-name', name);
   else node.style.removeProperty('view-transition-name');
@@ -149,12 +131,7 @@ export function setSharedArtName(
  * for tiny contexts like pickers, where the name would be unreadable.
  * No disc, no images, no network.
  */
-export function artistAvatar(
-  seed: string,
-  label = seed,
-  className = '',
-  options: { maxChars?: number; variant?: 'name' | 'initials' } = {},
-): HTMLDivElement {
+export function artistAvatar(seed, label = seed, className = '', options = {}) {
   const { maxChars = 20, variant = 'name' } = options;
   const root = el('div', `avatar${className ? ` ${className}` : ''}`);
   const hash = hashString(seed || label);
@@ -202,18 +179,10 @@ const TRACK_SVG =
  * A cover photo served by the API (`GET …/cover`), with the same footprint
  * as the deterministic tiles. When the item has no cached art (404) or the
  * image fails to load, it swaps itself for the fallback tile (disc by
- * default) — call sites never handle the fallback. The shared-element name
- * (for Astro's ClientRouter morph) carries over to the fallback tile.
+ * default) — call sites never handle the fallback.
  */
-export function coverArt(
-  kind: 'release' | 'group' | 'artist',
-  id: string,
-  alt = '',
-  options: {
-    eager?: boolean;
-    fallback?: () => HTMLElement;
-  } = {},
-): HTMLImageElement {
+export function coverArt(kind, id, alt = '', options = {}) {
+  const { eager, fallback } = options;
   const img = document.createElement('img');
   img.className = 'cover-img';
   img.src =
@@ -224,14 +193,14 @@ export function coverArt(
         : coverUrl.artist(id);
   img.alt = alt;
   img.decoding = 'async';
-  img.loading = options.eager ? 'eager' : 'lazy';
+  img.loading = eager ? 'eager' : 'lazy';
   img.addEventListener(
     'error',
     () => {
-      const fallback = options.fallback ? options.fallback() : discArt(id);
+      const fb = fallback ? fallback() : discArt(id);
       const name = img.style.getPropertyValue('view-transition-name');
-      if (name) setSharedArtName(fallback, name);
-      img.replaceWith(fallback);
+      if (name) setSharedArtName(fb, name);
+      img.replaceWith(fb);
     },
     { once: true },
   );
@@ -243,7 +212,7 @@ export function coverArt(
  * stock with a vinyl record and a blank centre label. No letters, no images,
  * no network.
  */
-export function discArt(seed: string, className = ''): HTMLDivElement {
+export function discArt(seed, className = '') {
   const root = el('div', `disc${className ? ` ${className}` : ''}`);
   const hash = hashString(seed || 'disc');
   const hue = ART_HUES[hash % ART_HUES.length];
@@ -264,7 +233,7 @@ export function discArt(seed: string, className = ''): HTMLDivElement {
  * A deterministic icon tile for tracks: tinted card stock with a music-note
  * glyph. No letters, no images, no network.
  */
-export function trackArt(seed: string, className = ''): HTMLDivElement {
+export function trackArt(seed, className = '') {
   const root = el('div', `art art--track${className ? ` ${className}` : ''}`);
   const hash = hashString(seed || 'track');
   const hue = ART_HUES[hash % ART_HUES.length];
@@ -284,12 +253,9 @@ export function trackArt(seed: string, className = ''): HTMLDivElement {
   return root;
 }
 
-let toastTimer: number | undefined;
+let toastTimer;
 
-export function toast(
-  message: string,
-  tone: 'ok' | 'error' | 'info' = 'ok',
-): void {
+export function toast(message, tone = 'ok') {
   const node = document.getElementById('toast');
   if (!node) return;
 
@@ -303,21 +269,13 @@ export function toast(
   }, 4200);
 }
 
-export function setFormStatus(
-  node: HTMLElement | null,
-  message: string,
-  tone: 'ok' | 'error' | 'info' = 'info',
-): void {
+export function setFormStatus(node, message, tone = 'info') {
   if (!node) return;
   node.textContent = message;
   node.dataset.tone = tone;
 }
 
-export function setBusy(
-  button: HTMLButtonElement | null,
-  busy: boolean,
-  busyLabel = 'Working…',
-): void {
+export function setBusy(button, busy, busyLabel = 'Working…') {
   if (!button) return;
   if (busy) {
     if (!button.dataset.label) button.dataset.label = button.textContent ?? '';
@@ -329,12 +287,8 @@ export function setBusy(
   }
 }
 
-export async function mapLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results = Array.from({ length: items.length }) as R[];
+export async function mapLimit(items, limit, fn) {
+  const results = Array.from({ length: items.length });
   let next = 0;
 
   const workers = Array.from(
@@ -353,11 +307,7 @@ export async function mapLimit<T, R>(
   return results;
 }
 
-export function skeletonGrid(
-  container: HTMLElement,
-  count = 8,
-  variant: 'artist' | 'group' = 'artist',
-): void {
+export function skeletonGrid(container, count = 8, variant = 'artist') {
   clear(container);
   for (let i = 0; i < count; i += 1) {
     const card = el('div', variant === 'artist' ? 'artist-card' : 'rg-card');
@@ -372,18 +322,13 @@ export function skeletonGrid(
   }
 }
 
-export function emptyState(
-  title: string,
-  body: string,
-  action?: { href: string; label: string },
-): HTMLDivElement {
+export function emptyState(title, body, action) {
   const wrap = el('div', 'empty');
   wrap.append(
     el('p', 'eyebrow', 'Nothing here'),
     el('h3', '', title),
     el('p', '', body),
   );
-  if (action)
-    wrap.append(link(action.href, action.label, 'btn btn--secondary'));
+  if (action) wrap.append(link(action.href, action.label, 'btn btn--secondary'));
   return wrap;
 }
