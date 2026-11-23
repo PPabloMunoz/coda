@@ -318,7 +318,7 @@ func (st *Store) SaveFullRelease(ctx context.Context, tx *sql.Tx, p FullReleaseP
 func (st *Store) ReplaceRelease(ctx context.Context, groupID string, p FullReleaseParams) error {
 	if p.Group.ID != groupID {
 		return apperrors.Wrap(
-			apperrors.ErrInternal,
+			apperrors.ErrInvalidInput,
 			fmt.Errorf("release-group mismatch: release belongs to %q, not %q",
 				p.Group.ID,
 				groupID,

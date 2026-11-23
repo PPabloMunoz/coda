@@ -138,7 +138,15 @@ func (h *Handler) replaceRelease(c *gin.Context) {
 		ctx, releaseGroupID, newReleaseID,
 	)
 	if err != nil {
-		h.writeAppError(c, err)
+		if apperrors.Is(err, apperrors.ErrNotFound) ||
+			apperrors.Is(err, apperrors.ErrInvalidInput) {
+			h.writeAppError(c, err)
+			return
+		}
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrMusicBrainzFailed,
+			fmt.Errorf("switch release: %w", err),
+		))
 		return
 	}
 

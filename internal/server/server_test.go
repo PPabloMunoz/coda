@@ -307,3 +307,30 @@ func TestDeleteReleaseGroupFlow(t *testing.T) {
 		t.Errorf("bad id = %d, want 400", w.Code)
 	}
 }
+
+func TestReplaceReleaseValidation(t *testing.T) {
+	groupID := "d5b32d03-2aaf-4baf-ba5d-3721d095b833"
+	otherRelease := "11111111-1111-1111-1111-111111111111"
+	env := newTestEnv(t)
+	env.mbMux.HandleFunc("/release/"+otherRelease, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(musicbrainz.Release{
+			ID: otherRelease, Title: "Other", Status: "Official",
+			ReleaseGroup: musicbrainz.ReleaseGroup{ID: "22222222-2222-2222-2222-222222222222"},
+		})
+	})
+	w := doRequest(t, env.router, "PUT", "/api/v1/release-groups/"+groupID+"/update",
+		map[string]string{"new_release_id": otherRelease})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("cross-group = %d, want 400", w.Code)
+	}
+
+	badMB := "33333333-3333-3333-3333-333333333333"
+	env.mbMux.HandleFunc("/release/"+badMB, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	})
+	w = doRequest(t, env.router, "PUT", "/api/v1/release-groups/"+groupID+"/update",
+		map[string]string{"new_release_id": badMB})
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("mb failure = %d, want 502", w.Code)
+	}
+}
