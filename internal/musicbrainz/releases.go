@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
 type ReleaseGroup struct {
@@ -104,10 +106,16 @@ func (c *Client) GetReleaseByID(ctx context.Context, releaseGroupID, releaseID s
 		return nil, fmt.Errorf("musicbrainz: release: %w", err)
 	}
 	if r.Status != "" && !strings.EqualFold(r.Status, "official") {
-		return nil, fmt.Errorf("musicbrainz: release %s is not official (status %q)", releaseID, r.Status)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("musicbrainz: release %s is not official (status %q)", releaseID, r.Status),
+		)
 	}
 	if r.ReleaseGroup.ID != releaseGroupID {
-		return nil, fmt.Errorf("musicbrainz: release %s belongs to release-group %s, not %s", releaseID, r.ReleaseGroup.ID, releaseGroupID)
+		return nil, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("musicbrainz: release %s belongs to release-group %s, not %s", releaseID, r.ReleaseGroup.ID, releaseGroupID),
+		)
 	}
 	return &r, nil
 }

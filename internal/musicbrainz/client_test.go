@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
 func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
@@ -127,8 +129,8 @@ func TestGetReleaseByIDValidation(t *testing.T) {
 			ReleaseGroup: ReleaseGroup{ID: "other-group"},
 		})
 	})
-	if _, err := c.GetReleaseByID(context.Background(), "want-group", "rel-1"); err == nil {
-		t.Error("wrong group = nil, want error")
+	if _, err := c.GetReleaseByID(context.Background(), "want-group", "rel-1"); !apperrors.Is(err, apperrors.ErrInvalidInput) {
+		t.Errorf("wrong group = %v, want INVALID_INPUT", err)
 	}
 
 	// Non-official.
@@ -138,7 +140,7 @@ func TestGetReleaseByIDValidation(t *testing.T) {
 			ReleaseGroup: ReleaseGroup{ID: "g1"},
 		})
 	})
-	if _, err := c2.GetReleaseByID(context.Background(), "g1", "rel-1"); err == nil {
-		t.Error("bootleg = nil, want error")
+	if _, err := c2.GetReleaseByID(context.Background(), "g1", "rel-1"); !apperrors.Is(err, apperrors.ErrInvalidInput) {
+		t.Errorf("bootleg = %v, want INVALID_INPUT", err)
 	}
 }
