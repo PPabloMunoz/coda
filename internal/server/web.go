@@ -12,11 +12,24 @@ import (
 	webui "github.com/ppablomunoz/coda/web"
 )
 
-// mountWeb serves the embedded Astro build (web/dist).
+// pageRoutes maps UI paths to their committed static files. Query strings
+// (e.g. /artist?id=…) don't affect file serving — only the path matters.
+var pageRoutes = map[string]string{
+	"/":               "index.html",
+	"/artists":        "artists.html",
+	"/artist":         "artist.html",
+	"/release-groups": "release-groups.html",
+	"/release-group":  "release-group.html",
+	"/link":           "link.html",
+	"/files":          "files.html",
+	"/file":           "file.html",
+}
+
+// mountWeb serves the embedded vanilla UI (web/static).
 // API routes are registered before this and take precedence; unknown
 // /api/* paths get a JSON 404 from NoRoute below, never UI content.
 func mountWeb(r *gin.Engine) {
-	sub, err := fs.Sub(webui.Dist, "dist")
+	sub, err := fs.Sub(webui.Static, "static")
 	if err != nil {
 		r.GET("/", func(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "web build missing"})
@@ -39,22 +52,25 @@ func mountWeb(r *gin.Engine) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
-		// Real file (/_astro/…, /favicon.ico, …)? Serve it.
-		if trimmed := strings.TrimPrefix(path.Clean("/"+p), "/"); trimmed != "" {
-			if f, statErr := fs.Stat(sub, trimmed); statErr == nil {
-				if !f.IsDir() {
-					serveFSFile(c, sub, trimmed)
-					return
-				}
-				// Prerendered Astro dir (e.g. /artists/) → its index.
-				if _, indexErr := fs.Stat(sub, trimmed+"/index.html"); indexErr == nil {
-					serveFSFile(c, sub, trimmed+"/index.html")
-					return
-				}
+		clean := path.Clean("/" + p)
+		// UI page (trailing slash tolerated: /artist/ → artist.html).
+		if file, ok := pageRoutes[clean]; ok {
+			serveFSFile(c, sub, file)
+			return
+		}
+		if file, ok := pageRoutes[strings.TrimSuffix(clean, "/")]; ok {
+			serveFSFile(c, sub, file)
+			return
+		}
+		// Real file (/css/…, /js/…, /logo.png, …)? Serve it.
+		if trimmed := strings.TrimPrefix(clean, "/"); trimmed != "" {
+			if f, statErr := fs.Stat(sub, trimmed); statErr == nil && !f.IsDir() {
+				serveFSFile(c, sub, trimmed)
+				return
 			}
 		}
-		// SPA fallback: unknown UI path → index.html.
-		// (If Astro has no client-side routes, swap this for a JSON 404.)
+		// Unknown UI path → home. (There are no client-side routes; every
+		// page above is a real file, so this only fires on stale links.)
 		serveFSFile(c, sub, "index.html")
 	})
 }
@@ -73,6 +89,10 @@ func serveFSFile(c *gin.Context, sub fs.FS, name string) {
 		ctype = "application/octet-stream"
 	} else if strings.HasPrefix(ctype, "text/") && !strings.Contains(ctype, "charset") {
 		ctype += "; charset=utf-8"
+	}
+	// ES modules need an explicit JS content type on some platforms.
+	if strings.HasSuffix(name, ".js") && !strings.Contains(ctype, "javascript") {
+		ctype = "text/javascript; charset=utf-8"
 	}
 	c.Data(http.StatusOK, ctype, data)
 }

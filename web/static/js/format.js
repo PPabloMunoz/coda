@@ -1,9 +1,9 @@
-export function baseName(path: string): string {
+export function baseName(path) {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
 }
 
-export function dirName(path: string): string {
+export function dirName(path) {
   const normalized = path.replace(/[\\/]+$/, '');
   const index = Math.max(
     normalized.lastIndexOf('/'),
@@ -12,13 +12,13 @@ export function dirName(path: string): string {
   return index > 0 ? normalized.slice(0, index) : '';
 }
 
-export function extension(path: string): string {
+export function extension(path) {
   const name = baseName(path);
   const dot = name.lastIndexOf('.');
   return dot > 0 ? name.slice(dot + 1).toUpperCase() : 'FILE';
 }
 
-export function formatBytes(bytes: number): string {
+export function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   const exponent = Math.min(
@@ -29,7 +29,7 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
 }
 
-export function formatDate(value: string | null | undefined): string {
+export function formatDate(value) {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -40,7 +40,7 @@ export function formatDate(value: string | null | undefined): string {
   }).format(date);
 }
 
-export function formatDateTime(value: string | null | undefined): string {
+export function formatDateTime(value) {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -53,21 +53,17 @@ export function formatDateTime(value: string | null | undefined): string {
   }).format(date);
 }
 
-export function yearOf(value: string | null | undefined): string {
+export function yearOf(value) {
   if (!value) return '';
   const match = value.match(/\d{4}/);
   return match ? match[0] : '';
 }
 
-export function typeLabel(value: string | null | undefined): string {
+export function typeLabel(value) {
   if (!value) return 'Other';
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-export function plural(
-  count: number,
-  singular: string,
-  pluralForm?: string,
-): string {
+export function plural(count, singular, pluralForm) {
   return `${count} ${count === 1 ? singular : (pluralForm ?? `${singular}s`)}`;
 }

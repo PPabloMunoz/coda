@@ -1,11 +1,8 @@
-import {
-  api,
-  creditName,
-  type Artist,
-  type Release,
-  type ReleaseGroup,
-} from './api';
-import { plural, yearOf } from './format';
+// Card builders shared by the library pages.
+// Ported verbatim from the Astro `src/lib/cards.ts` — types stripped, runtime identical.
+
+import { api, creditName } from './api.js';
+import { plural, yearOf } from './format.js';
 import {
   artistAvatar,
   coverArt,
@@ -13,9 +10,9 @@ import {
   link,
   setSharedArtName,
   sharedArtName,
-} from './ui';
+} from './ui.js';
 
-export function artistCard(artist: Artist): HTMLAnchorElement {
+export function artistCard(artist) {
   const card = link(
     `/artist?id=${encodeURIComponent(artist.id)}`,
     '',
@@ -69,15 +66,7 @@ export function artistCard(artist: Artist): HTMLAnchorElement {
   return card;
 }
 
-export interface ReleaseGroupCard {
-  card: HTMLAnchorElement;
-  releaseLine: HTMLParagraphElement;
-}
-
-export function releaseGroupCard(
-  group: ReleaseGroup,
-  options: { showCredit?: boolean; showType?: boolean } = {},
-): ReleaseGroupCard {
+export function releaseGroupCard(group, options = {}) {
   const { showCredit = true, showType = true } = options;
   const card = link(
     `/release-group?id=${encodeURIComponent(group.id)}`,
@@ -121,26 +110,13 @@ export function releaseGroupCard(
   return { card, releaseLine };
 }
 
-export type ReleaseCompleteness = 'complete' | 'partial' | 'missing';
-
-export function releaseCompleteness(
-  trackCount: number,
-  linkedCount: number,
-): ReleaseCompleteness {
+export function releaseCompleteness(trackCount, linkedCount) {
   if (trackCount > 0 && linkedCount >= trackCount) return 'complete';
   if (linkedCount > 0) return 'partial';
   return 'missing';
 }
 
-function setCompletenessLine(
-  line: HTMLParagraphElement,
-  opts: {
-    year: string;
-    title: string;
-    trackCount: number;
-    linkedCount: number;
-  },
-): void {
+function setCompletenessLine(line, opts) {
   const status = releaseCompleteness(opts.trackCount, opts.linkedCount);
   line.classList.remove(
     'is-loading',
@@ -161,7 +137,7 @@ function setCompletenessLine(
   line.setAttribute('aria-label', line.title);
 }
 
-function markCardMissing(line: HTMLParagraphElement): void {
+function markCardMissing(line) {
   const card = line.closest('.rg-card');
   if (card) {
     card.classList.remove('is-complete', 'is-partial');
@@ -169,11 +145,7 @@ function markCardMissing(line: HTMLParagraphElement): void {
   }
 }
 
-export async function hydrateReleaseLine(
-  line: HTMLParagraphElement,
-  group: ReleaseGroup,
-  cache?: Map<string, Release | null>,
-): Promise<boolean> {
+export async function hydrateReleaseLine(line, group, cache) {
   try {
     if (group.release) {
       if (!line.isConnected) return true;
@@ -186,7 +158,7 @@ export async function hydrateReleaseLine(
       return true;
     }
 
-    let release: Release | null | undefined = cache?.get(group.id);
+    let release = cache?.get(group.id);
     if (release === undefined) {
       release = await api.getReleaseByGroup(group.id, true);
       cache?.set(group.id, release);
