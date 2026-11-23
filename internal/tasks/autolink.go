@@ -27,9 +27,14 @@ type AutoLinkStats struct {
 }
 
 // LibraryTargetPath builds the on-disk destination for a linked track under
-// root. Filesystem work stays in the caller; this is pure.
+// root. The artist folder uses the first release-group artist only; tags
+// still carry the full credits. Filesystem work stays in the caller; this is
+// pure.
 func LibraryTargetPath(root string, info *tags.LinkInfo, ext string) (string, error) {
-	artist := info.AlbumArtistDisplay
+	artist := info.FolderArtist
+	if strings.TrimSpace(artist) == "" {
+		artist = info.AlbumArtistDisplay
+	}
 	if strings.TrimSpace(artist) == "" {
 		artist = info.ArtistDisplay
 	}

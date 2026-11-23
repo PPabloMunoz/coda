@@ -98,6 +98,52 @@ func TestLinkInfoFromStore(t *testing.T) {
 	}
 }
 
+func TestFolderArtistFromGroup(t *testing.T) {
+	rel := &store.FullReleaseParams{
+		ID: "rel-1", Title: "Album",
+		Credit: []store.CreditEntry{{ArtistID: "r1", Name: "Release Artist", CreditedName: "Release Artist"}},
+		Group: store.ReleaseGroupParams{
+			ID: "rg-1", Title: "Group", Type: "album",
+			Credit: []store.CreditEntry{
+				{ArtistID: "g1", Name: "Group First", CreditedName: "Group First"},
+				{ArtistID: "g2", Name: "Group Second", CreditedName: "Group Second", JoinPhrase: ""},
+			},
+		},
+	}
+	track := &store.TrackParams{ID: "t1", Title: "Song", Position: 1, Disc: 1}
+	got := LinkInfoFromStore(rel, track)
+	if got.FolderArtist != "Group First" {
+		t.Errorf("FolderArtist = %q, want first group artist", got.FolderArtist)
+	}
+	if got.AlbumArtistDisplay != "Release Artist" {
+		t.Errorf("AlbumArtistDisplay = %q, want full release display (tags unchanged)", got.AlbumArtistDisplay)
+	}
+
+	// No group credit: falls back to release, then track credit.
+	bare := &store.FullReleaseParams{
+		ID: "rel-2", Title: "Album2",
+		Credit: []store.CreditEntry{{ArtistID: "r2", Name: "Release Only"}},
+		Group:  store.ReleaseGroupParams{ID: "rg-2", Title: "G2", Type: "single"},
+	}
+	if got := LinkInfoFromStore(bare, track); got.FolderArtist != "Release Only" {
+		t.Errorf("FolderArtist = %q, want release fallback", got.FolderArtist)
+	}
+	empty := &store.FullReleaseParams{
+		ID: "rel-3", Title: "Album3",
+		Group: store.ReleaseGroupParams{ID: "rg-3", Title: "G3", Type: "single"},
+	}
+	credited := &store.TrackParams{
+		ID: "t2", Title: "Song", Position: 1, Disc: 1,
+		Credit: []store.CreditEntry{{ArtistID: "t1", Name: "Plain", CreditedName: "As Credited"}},
+	}
+	if got := LinkInfoFromStore(empty, credited); got.FolderArtist != "As Credited" {
+		t.Errorf("FolderArtist = %q, want credited track fallback", got.FolderArtist)
+	}
+	if got := LinkInfoFromStore(empty, track); got.FolderArtist != "" {
+		t.Errorf("FolderArtist = %q, want empty when nothing credited", got.FolderArtist)
+	}
+}
+
 func TestDeref(t *testing.T) {
 	if deref(nil) != "" {
 		t.Error("deref(nil) != empty")

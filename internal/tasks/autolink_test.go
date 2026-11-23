@@ -66,6 +66,41 @@ func TestLibraryTargetPathOmitsDiscPrefixWhenTotalUnknown(t *testing.T) {
 	}
 }
 
+func TestLibraryTargetPathUsesFirstGroupArtist(t *testing.T) {
+	root := t.TempDir()
+	got, err := LibraryTargetPath(root, &tags.LinkInfo{
+		Title: "Song", Album: "Album",
+		AlbumArtistDisplay: "Alice & Bob",
+		AlbumArtists:       []string{"Alice", "Bob"},
+		FolderArtist:       "Alice",
+		TrackNumber:        1, DiscNumber: 1, DiscTotal: 1,
+	}, "mp3")
+	if err != nil {
+		t.Fatalf("LibraryTargetPath = %v, want nil", err)
+	}
+	want := filepath.Join(root, "Alice", "Album", "01_Song.mp3")
+	if got != want {
+		t.Errorf("path = %q, want %q", got, want)
+	}
+}
+
+func TestLibraryTargetPathFallsBackWithoutFolderArtist(t *testing.T) {
+	root := t.TempDir()
+	got, err := LibraryTargetPath(root, &tags.LinkInfo{
+		Title: "Song", Album: "Album",
+		AlbumArtistDisplay: "Alice & Bob",
+		AlbumArtists:       []string{"Alice", "Bob"},
+		TrackNumber:        1, DiscNumber: 1, DiscTotal: 1,
+	}, "mp3")
+	if err != nil {
+		t.Fatalf("LibraryTargetPath = %v, want nil", err)
+	}
+	want := filepath.Join(root, "Alice_&_Bob", "Album", "01_Song.mp3")
+	if got != want {
+		t.Errorf("path = %q, want %q", got, want)
+	}
+}
+
 func TestEnsureMoveDestination(t *testing.T) {
 	root := t.TempDir()
 	if err := EnsureMoveDestination("test", 1, "track", root+"/a.mp3", root+"/a.mp3"); err != nil {

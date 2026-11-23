@@ -14,7 +14,11 @@ type LinkInfo struct {
 	TrackNumber, DiscNumber                               int
 	// DiscTotal is the highest disc number on the release (1 for single-disc).
 	// It drives filename formatting only; tags still write DiscNumber.
-	DiscTotal                                                int
+	DiscTotal int
+	// FolderArtist is the library folder name source: the first artist of
+	// the release-group credit (falling back to release, then track credit).
+	// Tags still carry the full credit lists.
+	FolderArtist                                             string
 	MBTrackID, MBReleaseTrackID, MBAlbumID, MBReleaseGroupID string
 	ReleaseType, ReleaseStatus                               string
 }
