@@ -47,7 +47,7 @@ function renderFileCell(files) {
   return cell;
 }
 
-function renderTrack(track) {
+function renderTrack(track, options = {}) {
   const row = el('tr');
 
   const disc = el('td', 'num', String(track.disc));
@@ -73,7 +73,7 @@ function renderTrack(track) {
   );
 
   row.append(
-    disc,
+    ...(options.hideDisc ? [] : [disc]),
     number,
     titleCell,
     creditCell,
@@ -82,6 +82,40 @@ function renderTrack(track) {
     renderFileCell(track.files),
   );
   return row;
+}
+
+function renderTrackTable(tracks, showDisc) {
+  const tableWrap = el('div', 'table-wrap');
+  const table = el('table', 'data-table');
+  const thead = el('thead');
+  const headRow = el('tr');
+  const labels = showDisc
+    ? ['Disc', '#', 'Title', 'Artist', 'Length', 'MusicBrainz', 'Local file']
+    : ['#', 'Title', 'Artist', 'Length', 'MusicBrainz', 'Local file'];
+  for (const label of labels) {
+    headRow.append(el('th', '', label));
+  }
+  thead.append(headRow);
+  table.append(thead);
+  const tbody = el('tbody');
+  if (tracks.length === 0) {
+    const row = el('tr');
+    const cell = el('td', 'muted', 'No tracks stored for this release.');
+    cell.colSpan = labels.length;
+    row.append(cell);
+    tbody.append(row);
+  } else {
+    const fragment = document.createDocumentFragment();
+    for (const track of tracks) {
+      fragment.append(
+        showDisc ? renderTrack(track) : renderTrack(track, { hideDisc: true }),
+      );
+    }
+    tbody.append(fragment);
+  }
+  table.append(tbody);
+  tableWrap.append(table);
+  return tableWrap;
 }
 
 function bustCoverImgs() {
@@ -369,38 +403,38 @@ function initReleaseGroupPage() {
     tracksSection.hidden = false;
 
     clear(tracksWrap);
-    const tableWrap = el('div', 'table-wrap');
-    const table = el('table', 'data-table');
-    const thead = el('thead');
-    const headRow = el('tr');
-    for (const label of [
-      'Disc',
-      '#',
-      'Title',
-      'Artist',
-      'Length',
-      'MusicBrainz',
-      'Local file',
-    ]) {
-      headRow.append(el('th', '', label));
-    }
-    thead.append(headRow);
-    table.append(thead);
-    const tbody = el('tbody');
-    if (tracks.length === 0) {
-      const row = el('tr');
-      const cell = el('td', 'muted', 'No tracks stored for this release.');
-      cell.colSpan = 7;
-      row.append(cell);
-      tbody.append(row);
-    } else {
+    const discs = [...new Set(tracks.map((track) => track.disc))].sort(
+      (a, b) => a - b,
+    );
+    if (discs.length > 1) {
       const fragment = document.createDocumentFragment();
-      for (const track of tracks) fragment.append(renderTrack(track));
-      tbody.append(fragment);
+      for (const disc of discs) {
+        const section = el('section', 'disc-section');
+        const head = el('div', 'disc-section__head');
+        head.append(
+          el('h3', 'disc-section__title', `Disc ${disc}`),
+          el(
+            'span',
+            'disc-section__meta',
+            plural(
+              tracks.filter((track) => track.disc === disc).length,
+              'track',
+            ),
+          ),
+        );
+        section.append(head);
+        section.append(
+          renderTrackTable(
+            tracks.filter((track) => track.disc === disc),
+            false,
+          ),
+        );
+        fragment.append(section);
+      }
+      tracksWrap.append(fragment);
+    } else {
+      tracksWrap.append(renderTrackTable(tracks, false));
     }
-    table.append(tbody);
-    tableWrap.append(table);
-    tracksWrap.append(tableWrap);
   }
 
   async function load() {

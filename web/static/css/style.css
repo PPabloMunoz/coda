@@ -2008,6 +2008,27 @@ select {
 	line-height: 1.1;
 }
 
+.disc-section + .disc-section {
+	margin-top: 1.5rem;
+}
+
+.disc-section__head {
+	display: flex;
+	align-items: baseline;
+	gap: 0.6rem;
+	margin: 0 0 0.6rem;
+}
+
+.disc-section__title {
+	margin: 0;
+	font-size: 1.05rem;
+}
+
+.disc-section__meta {
+	color: var(--muted);
+	font-size: 0.8rem;
+}
+
 .release-panel__meta {
 	display: flex;
 	gap: 0.45rem;

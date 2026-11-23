@@ -31,8 +31,10 @@ func LinkInfoFromStore(rel *store.FullReleaseParams, track *store.TrackParams) *
 		AlbumArtistDisplay: albumDisplay,
 		AlbumArtists:       albumNames,
 		MBAlbumArtistIDs:   albumIDs,
+		FolderArtist:       folderArtist(rel, track),
 		TrackNumber:        track.Position,
 		DiscNumber:         max(track.Disc, 1),
+		DiscTotal:          maxDiscNumber(rel),
 		Date:               deref(rel.Date),
 		MBTrackID:          track.RecordingID,
 		MBReleaseTrackID:   track.ID,
@@ -74,4 +76,54 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// folderArtist picks the library folder name source: the first artist of the
+// release-group credit, falling back to the release and then the track credit.
+// Blank when no credit names anything usable (callers fall back to display).
+func folderArtist(rel *store.FullReleaseParams, track *store.TrackParams) string {
+	if rel != nil {
+		if name := firstCreditName(rel.Group.Credit); name != "" {
+			return name
+		}
+		if name := firstCreditName(rel.Credit); name != "" {
+			return name
+		}
+	}
+	if track != nil {
+		if name := firstCreditName(track.Credit); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// firstCreditName returns the first usable artist name (credited name, else
+// plain name), skipping blank entries.
+func firstCreditName(entries []store.CreditEntry) string {
+	for _, e := range entries {
+		name := e.CreditedName
+		if strings.TrimSpace(name) == "" {
+			name = e.Name
+		}
+		if strings.TrimSpace(name) != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// maxDiscNumber reports the highest disc number across the release's tracks,
+// clamped to at least 1. A release with no track rows (or all disc <= 1) is
+// treated as single-disc so filenames omit the disc prefix.
+func maxDiscNumber(rel *store.FullReleaseParams) int {
+	maxDisc := 1
+	if rel != nil {
+		for _, t := range rel.Tracks {
+			if t.Disc > maxDisc {
+				maxDisc = t.Disc
+			}
+		}
+	}
+	return maxDisc
 }
