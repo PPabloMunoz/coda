@@ -73,7 +73,7 @@ function initLinkPage() {
   let scopedArtistID = null;
 
   function fileRow(file) {
-    const row = el('article', 'file-row');
+    const row = el('article', 'file-row is-unlinked');
 
     const format = el('div', 'file-row__format', formatKey(file));
 
@@ -87,18 +87,21 @@ function initLinkPage() {
     meta.append(
       el('span', '', formatBytes(file.size_bytes)),
       el('span', '', `Scanned ${formatDate(file.scanned_at)}`),
-      el('span', 'chip chip--warn', 'Unlinked'),
     );
     main.append(meta);
 
     const actions = el('div', 'file-row__actions');
     actions.append(
-      link(`/file?id=${file.id}`, 'Details', 'btn btn--sm btn--ghost'),
+      link(
+        `/file?id=${file.id}`,
+        'Details',
+        'btn btn--sm btn--icon btn--icon-info',
+      ),
     );
 
     const linkButton = el(
       'button',
-      'btn btn--sm btn--primary',
+      'btn btn--sm btn--primary btn--icon btn--icon-link',
       'Link to track',
     );
     linkButton.type = 'button';

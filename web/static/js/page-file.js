@@ -155,12 +155,14 @@ function initFilePage() {
       setText('stat-format', (file.format_hint || 'audio').toUpperCase());
       setText('stat-size', formatBytes(file.size_bytes));
       setText('stat-scanned', formatDate(file.scanned_at));
-      byId('stat-link').replaceChildren(
-        el(
-          'span',
-          file.track_id ? 'chip chip--ok' : 'chip chip--warn',
-          file.track_id ? 'Linked' : 'Unlinked',
-        ),
+      setText('stat-link', file.track_id ? 'Linked' : 'Unlinked');
+      byId('stat-link-card').classList.toggle(
+        'is-linked',
+        Boolean(file.track_id),
+      );
+      byId('stat-link-card').classList.toggle(
+        'is-unlinked',
+        !file.track_id,
       );
 
       setText('detail-path', file.path);

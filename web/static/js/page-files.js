@@ -44,7 +44,10 @@ function initFilesPage() {
   limitSelect.value = String(limit);
 
   function fileRow(file) {
-    const row = el('article', 'file-row');
+    const row = el(
+      'article',
+      `file-row ${file.track_id ? 'is-linked' : 'is-unlinked'}`,
+    );
 
     const format = el(
       'div',
@@ -76,11 +79,6 @@ function initFilesPage() {
       el('span', '', formatBytes(file.size_bytes)),
       el('span', '', `Scanned ${formatDate(file.scanned_at)}`),
     );
-    if (file.track_id) {
-      meta.append(el('span', 'chip chip--ok', 'Linked'));
-    } else {
-      meta.append(el('span', 'chip chip--warn', 'Unlinked'));
-    }
     main.append(meta);
 
     const actions = el('div', 'file-row__actions');
