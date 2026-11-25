@@ -20,8 +20,8 @@ import {
   clear,
   el,
   emptyState,
-  externalLink,
   link,
+  mbLogoLink,
   toast,
 } from './ui.js';
 
@@ -87,22 +87,36 @@ function initFilesPage() {
     main.append(meta);
 
     const actions = el('div', 'file-row__actions');
-    actions.append(link(`/file?id=${file.id}`, 'Details', 'btn btn--sm'));
+    actions.append(
+      link(
+        `/file?id=${file.id}`,
+        'Details',
+        'btn btn--sm btn--icon btn--icon-info',
+      ),
+    );
 
     if (file.track_id) {
       actions.append(
-        externalLink(
+        mbLogoLink(
           mbUrl.track(file.track_id),
-          'Track ↗',
-          'btn btn--sm btn--ghost',
+          'btn btn--sm',
+          'Open track on MusicBrainz',
         ),
       );
-      const refresh = el('button', 'btn btn--sm btn--secondary', 'Refresh');
+      const refresh = el(
+        'button',
+        'btn btn--sm btn--secondary btn--icon btn--icon-refresh',
+        'Refresh',
+      );
       refresh.type = 'button';
       refresh.title = 'Rewrite tags from the linked track';
       refresh.addEventListener('click', () => refreshFile(file, refresh));
       actions.append(refresh);
-      const unlink = el('button', 'btn btn--sm btn--danger', 'Unlink');
+      const unlink = el(
+        'button',
+        'btn btn--sm btn--danger btn--icon btn--icon-trash',
+        'Unlink',
+      );
       unlink.type = 'button';
       unlink.addEventListener('click', () => unlinkFile(file, unlink));
       actions.append(unlink);
@@ -111,7 +125,7 @@ function initFilesPage() {
         link(
           `/link?file=${file.id}`,
           'Link to track',
-          'btn btn--sm btn--primary',
+          'btn btn--sm btn--primary btn--icon btn--icon-link',
         ),
       );
     }
