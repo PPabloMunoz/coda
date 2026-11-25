@@ -177,11 +177,14 @@ function initReleaseGroupPage() {
   const switchSubmit = byId('switch-submit');
 
   let currentGroup = null;
+  let currentRelease = null;
+  let heroRefreshButton = null;
+  let heroSwitchButton = null;
   let switchInFlight = false;
   let coverInFlight = false;
 
   function openSwitch(release) {
-    if (!currentGroup) return;
+    if (!currentGroup || !release) return;
     form.reset();
     setFormStatus(switchStatus, '');
     switchCurrent.textContent = `Current: ${release.title} · ${release.id}`;
@@ -315,22 +318,20 @@ function initReleaseGroupPage() {
   }
 
   function renderRelease(release, group) {
+    currentRelease = release;
+    const hasRelease = Boolean(release);
+    if (heroRefreshButton) heroRefreshButton.hidden = !hasRelease;
+    if (heroSwitchButton) heroSwitchButton.hidden = !hasRelease;
+
     if (!release) {
       savedStatus.textContent = 'None';
       releaseMeta.textContent = '';
       trackTotal.textContent = '—';
       tracksSection.hidden = true;
-      const firstArtist = group.credit?.[0]?.artist_id;
       releasePanel.replaceChildren(
         emptyState(
           'No release saved for this group',
-          'The release group is imported, but its release has not been saved yet. The discography import may still be running.',
-          firstArtist
-            ? {
-                href: `/artist?id=${encodeURIComponent(firstArtist)}`,
-                label: 'Back to artist',
-              }
-            : undefined,
+          'The discography import may still be running. Refresh in a moment.',
         ),
       );
       return;
@@ -348,40 +349,10 @@ function initReleaseGroupPage() {
         'eyebrow',
         release.status ? typeLabel(release.status) : 'Release',
       ),
-      el('h3', 'release-panel__title', release.title),
     );
-
-    const meta = el('div', 'release-panel__meta');
-    if (release.date) meta.append(el('span', '', release.date));
-    meta.append(
-      el('span', 'chip chip--type', typeLabel(release.group.type)),
-      el('span', 'chip', plural(release.tracks?.length ?? 0, 'track')),
-    );
-    body.append(meta);
-
-    const panelActions = el('div', 'release-panel__actions');
-    const switchButton = el(
-      'button',
-      'btn btn--secondary btn--icon btn--icon-repeat',
-      'Switch release…',
-    );
-    switchButton.type = 'button';
-    switchButton.addEventListener('click', () => openSwitch(release));
-    const refreshButton = el(
-      'button',
-      'btn btn--secondary btn--icon btn--icon-refresh',
-      'Refresh cover',
-    );
-    refreshButton.type = 'button';
-    refreshButton.title =
-      'Fetch the cover art again (Cover Art Archive, then Deezer)';
-    refreshButton.addEventListener(
-      'click',
-      () => void refreshCover(release, refreshButton),
-    );
-    panelActions.append(refreshButton, switchButton);
-    body.append(panelActions);
-
+    if (release.date) {
+      body.append(el('p', 'muted', `Released ${release.date}`));
+    }
     const extRow = el('p', 'ext-links');
     extRow.append(
       mbLogoLink(
@@ -487,6 +458,29 @@ function initReleaseGroupPage() {
       );
       groupMbRow.hidden = false;
       typeNode.textContent = typeLabel(group.type);
+      const switchButton = el(
+        'button',
+        'btn btn--secondary btn--icon btn--icon-repeat',
+        'Switch release…',
+      );
+      switchButton.type = 'button';
+      switchButton.addEventListener(
+        'click',
+        () => void openSwitch(currentRelease),
+      );
+      heroSwitchButton = switchButton;
+      const refreshButton = el(
+        'button',
+        'btn btn--secondary btn--icon btn--icon-refresh',
+        'Refresh cover',
+      );
+      refreshButton.type = 'button';
+      refreshButton.title =
+        'Fetch the cover art again (Cover Art Archive, then Deezer)';
+      refreshButton.addEventListener('click', () => {
+        if (currentRelease) void refreshCover(currentRelease, refreshButton);
+      });
+      heroRefreshButton = refreshButton;
       const deleteButton = el(
         'button',
         'btn btn--danger btn--icon btn--icon-trash',
@@ -496,7 +490,7 @@ function initReleaseGroupPage() {
       deleteButton.addEventListener('click', () =>
         deleteGroup(deleteButton),
       );
-      actions.replaceChildren(deleteButton);
+      actions.replaceChildren(switchButton, refreshButton, deleteButton);
 
       renderRelease(release, group);
       status.hidden = true;

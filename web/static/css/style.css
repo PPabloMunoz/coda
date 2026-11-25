@@ -1494,11 +1494,8 @@ select {
 	min-width: 0;
 }
 
-.release-panel__title {
-	margin: 0.2rem 0 0.3rem;
-	font-family: var(--font-display);
-	font-size: clamp(1.3rem, 2.5vw, 1.8rem);
-	line-height: 1.1;
+.release-panel__body > .ext-links {
+	margin-top: 0.7rem;
 }
 
 .disc-section + .disc-section {
@@ -1520,23 +1517,6 @@ select {
 .disc-section__meta {
 	color: var(--muted);
 	font-size: 0.8rem;
-}
-
-.release-panel__meta {
-	display: flex;
-	gap: 0.45rem;
-	flex-wrap: wrap;
-	align-items: center;
-	margin-top: 0.55rem;
-	color: var(--muted);
-	font-size: 0.78rem;
-}
-
-.release-panel__actions {
-	display: flex;
-	gap: 0.45rem;
-	flex-wrap: wrap;
-	margin-top: 1rem;
 }
 
 /* ---------- tables ---------- */
