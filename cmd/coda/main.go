@@ -32,11 +32,51 @@ var version = "dev"
 // main wires config, DB, MusicBrainz, artwork, queue/runner/scheduler, and the
 // HTTP server, then runs until interrupt with a 10s graceful shutdown.
 func main() {
+	configPath := flag.String(
+		"config",
+		"",
+		"config file path (overrides CODA_CONFIG)",
+	)
+	checkConfig := flag.Bool(
+		"check-config",
+		false,
+		"print resolved config and exit without starting",
+	)
 	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: coda [flags]\n\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Flags:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(flag.CommandLine.Output(), "\nConfig file (first run creates it):\n")
+		fmt.Fprintf(
+			flag.CommandLine.Output(),
+			"  macOS: ~/Library/Application Support/Coda/config.yaml\n",
+		)
+		fmt.Fprintf(flag.CommandLine.Output(), "  Linux: ~/.config/coda/config.yaml\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Env overrides:\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  CODA_CONFIG  config file path (or --config)\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  CODA_DB_PATH database file path\n")
+		fmt.Fprintf(
+			flag.CommandLine.Output(),
+			"  CODA_PORT    server port (1-65535)\n",
+		)
+		fmt.Fprintf(
+			flag.CommandLine.Output(),
+			"  CODA_ROOTS   OS path list of music dirs (: on macOS/Linux, ; on Windows)\n",
+		)
+		fmt.Fprintf(flag.CommandLine.Output(), "\nExamples:\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  coda --version\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  coda --help\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  coda --check-config\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  coda --config /path/to/config.yaml\n")
+	}
 	flag.Parse()
 	if *showVersion {
 		fmt.Printf("coda %s\n", version)
 		return
+	}
+	if *configPath != "" {
+		_ = os.Setenv("CODA_CONFIG", *configPath)
 	}
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
@@ -66,6 +106,18 @@ func main() {
 	dbPath, _, _ := strings.Cut(dsn, "?")
 	log.Infof("db dir: %s", filepath.Dir(dbPath))
 	log.Debugf("db file: %s", dbPath)
+
+	if *checkConfig {
+		fmt.Printf("coda %s\n", version)
+		fmt.Printf("port: %d\n", cfg.Port)
+		fmt.Printf("roots: %d\n", len(cfg.Roots))
+		for _, r := range cfg.Roots {
+			fmt.Printf("  - %s\n", r)
+		}
+		fmt.Printf("db: %s\n", dbPath)
+		fmt.Printf("covers: %s\n", config.CoverDirFromDBPath(dsn))
+		return
+	}
 
 	st, err := store.NewStore(dsn, cfg.Roots, log)
 	if err != nil {

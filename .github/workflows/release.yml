@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   build:
@@ -44,7 +45,11 @@ jobs:
           go build -trimpath \
             -ldflags="-s -w -X main.version=${VERSION}" \
             -o "dist/coda-${GOOS}-${GOARCH}" ./cmd/coda
-          "./dist/coda-${GOOS}-${GOARCH}" --version || true
+          # Only the native runner binary can execute; cross-arch
+          # darwin/arm64 builds fail with exec format error, so gate it.
+          if [ "${GOOS}" = "linux" ] && [ "${GOARCH}" = "amd64" ]; then
+            "./dist/coda-${GOOS}-${GOARCH}" --version
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
@@ -71,3 +76,41 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Image name must stay lowercase for ghcr.io even though the repo
+      # owner has uppercase letters.
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/ppablomunoz/coda
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.tags }}
+          labels: ${{ steps.meta.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
