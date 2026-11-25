@@ -1,6 +1,9 @@
 .git
+.github
 bin/
+vendor/
 testdata/
+*.db*
 coverage.out
 data/
 music/

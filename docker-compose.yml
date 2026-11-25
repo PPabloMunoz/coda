@@ -2,28 +2,31 @@ name: coda
 
 services:
   coda:
-    image: ghcr.io/ppablomunoz/coda:latest
+    image: ghcr.io/ppablomunoz/coda:${CODA_TAG:-latest}
     # Lidarr-style ownership: files coda moves/tags are written as PUID:PGID.
-    # Make sure ./music and ./data are owned by the same ids on the host
+    # Make sure the music and data dirs are owned by the same ids on the host
     # (e.g. `sudo chown -R 1000:1000 music data`), otherwise the scan
     # fails and linking cannot move files.
     user: "${PUID:-1000}:${PGID:-1000}"
     ports:
-      - "8687:8687"
-    environment:
-      CODA_PORT: "8687"
-      CODA_ROOTS: /music
-      CODA_CONFIG: /data/config.yaml
-      CODA_DB_PATH: /data/coda.db
-      GIN_MODE: release
+      # Coda has no authentication: bind to 127.0.0.1 (or put it behind a
+      # reverse proxy) unless your LAN is trusted.
+      - "${CODA_PORT:-8687}:8687"
+    # CODA_ROOTS, CODA_CONFIG, CODA_DB_PATH and GIN_MODE are set in the image.
     volumes:
-      - ./music:/music:rw
-      - ./data:/data:rw
+      - ${MUSIC_DIR:-./music}:/music
+      - ${DATA_DIR:-./data}:/data
     restart: unless-stopped
-    healthcheck:
-      test:
-        ["CMD-SHELL", "wget -qO- http://127.0.0.1:8687/api/v1/health | grep -q ok"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+    # Coda's graceful shutdown allows up to 10s; Docker's default 10s grace
+    # would SIGKILL it right at that edge and could cut a SQLite write short.
+    stop_grace_period: 20s
+    # Hardening. Only /music and /data are written; drop read_only/tmpfs if
+    # something unexpected needs to write elsewhere.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # The healthcheck is defined in the image (HEALTHCHECK in the Dockerfile).
