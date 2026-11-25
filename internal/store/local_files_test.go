@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -346,4 +347,29 @@ func TestCleanupOrphanCredits(t *testing.T) {
 		t.Fatalf("CleanupOrphanCredits = %v", err)
 	}
 	_ = n
+}
+
+func TestIsUniqueViolation(t *testing.T) {
+	root := t.TempDir()
+	st := newTestStore(t, root)
+	rootID := testRootID(t, st)
+	if _, err := st.db.Exec(
+		`INSERT INTO local_files (root_id, path, size_bytes, mtime_ns, format_hint, scanned_at)
+		 VALUES (?, '/root/a.mp3', 1, 1, 'mp3', '2024-01-01 00:00:00')`, rootID,
+	); err != nil {
+		t.Fatalf("insert = %v", err)
+	}
+	_, err := st.db.Exec(
+		`INSERT INTO local_files (root_id, path, size_bytes, mtime_ns, format_hint, scanned_at)
+		 VALUES (?, '/root/a.mp3', 1, 1, 'mp3', '2024-01-01 00:00:00')`, rootID,
+	)
+	if err == nil {
+		t.Fatal("duplicate insert = nil error, want a UNIQUE violation")
+	}
+	if !isUniqueViolation(err) {
+		t.Errorf("isUniqueViolation(%v) = false, want true (driver code mismatch)", err)
+	}
+	if isUniqueViolation(nil) || isUniqueViolation(errors.New("some other error")) {
+		t.Error("non-sqlite errors must not classify as unique violations")
+	}
 }

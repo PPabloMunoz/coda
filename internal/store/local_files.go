@@ -11,11 +11,22 @@ import (
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/tags"
 	"github.com/ppablomunoz/coda/internal/utils"
+
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // ErrConflict is returned when a link/move would violate local_files.path
 // uniqueness (destination already tracked).
 var ErrConflict = errors.New("[store]: conflict")
+
+// isUniqueViolation reports whether err is SQLite's UNIQUE-constraint
+// error, so callers can map it to ErrAlreadyExists without matching
+// error strings.
+func isUniqueViolation(err error) bool {
+	var se *sqlite.Error
+	return errors.As(err, &se) && se.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+}
 
 // ListFiles returns a filtered page of local files plus the total count.
 func (st *Store) ListFiles(
@@ -721,7 +732,7 @@ func (st *Store) Link(ctx context.Context,
 		trackID, newPath, sizeBytes, mtimeNs, fileID,
 	)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		if isUniqueViolation(err) {
 			return apperrors.ErrAlreadyExists
 		}
 		return apperrors.Wrap(
