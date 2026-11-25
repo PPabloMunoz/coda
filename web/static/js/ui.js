@@ -41,8 +41,10 @@ export function externalLink(href, text, className) {
 /**
  * An outbound MusicBrainz link rendered as the MusicBrainz logo instead of
  * text. Always pass an accessible `label` since the image is decorative.
+ * Pass `text` to render a labeled row link (logo + word) instead of an icon
+ * button.
  */
-export function mbLogoLink(href, className, label = 'MusicBrainz') {
+export function mbLogoLink(href, className, label = 'MusicBrainz', text) {
   const anchor = link(href, '', className);
   anchor.target = '_blank';
   anchor.rel = 'noreferrer noopener';
@@ -53,6 +55,7 @@ export function mbLogoLink(href, className, label = 'MusicBrainz') {
   img.className = 'mb-logo';
   img.setAttribute('aria-hidden', 'true');
   anchor.append(img);
+  if (text) anchor.append(el('span', '', text));
   return anchor;
 }
 

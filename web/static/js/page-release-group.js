@@ -146,7 +146,8 @@ function initReleaseGroupPage() {
   const heroArt = byId('hero-art');
   const title = byId('title');
   const credit = byId('credit');
-  const groupId = byId('group-id');
+  const groupMb = byId('group-mb');
+  const groupMbRow = byId('group-mb-row');
   const actions = byId('actions');
   const typeNode = byId('type');
   const savedStatus = byId('saved-status');
@@ -340,9 +341,6 @@ function initReleaseGroupPage() {
     releaseMeta.textContent = plural(release.tracks?.length ?? 0, 'track');
 
     const panel = el('div', 'release-panel');
-    const art = el('div', 'release-panel__art');
-    art.append(coverArt('release', release.id, release.title));
-
     const body = el('div', 'release-panel__body');
     body.append(
       el(
@@ -358,21 +356,20 @@ function initReleaseGroupPage() {
     meta.append(
       el('span', 'chip chip--type', typeLabel(release.group.type)),
       el('span', 'chip', plural(release.tracks?.length ?? 0, 'track')),
-      el('span', 'mono', release.id),
     );
     body.append(meta);
 
     const panelActions = el('div', 'release-panel__actions');
     const switchButton = el(
       'button',
-      'btn btn--secondary',
+      'btn btn--secondary btn--icon btn--icon-repeat',
       'Switch release…',
     );
     switchButton.type = 'button';
     switchButton.addEventListener('click', () => openSwitch(release));
     const refreshButton = el(
       'button',
-      'btn btn--secondary',
+      'btn btn--secondary btn--icon btn--icon-refresh',
       'Refresh cover',
     );
     refreshButton.type = 'button';
@@ -382,18 +379,21 @@ function initReleaseGroupPage() {
       'click',
       () => void refreshCover(release, refreshButton),
     );
-    panelActions.append(
-      mbLogoLink(
-        mbUrl.release(release.id),
-        'btn btn--secondary',
-        `Open ${release.title} on MusicBrainz`,
-      ),
-      refreshButton,
-      switchButton,
-    );
+    panelActions.append(refreshButton, switchButton);
     body.append(panelActions);
 
-    panel.append(art, body);
+    const extRow = el('p', 'ext-links');
+    extRow.append(
+      mbLogoLink(
+        mbUrl.release(release.id),
+        'ext-link',
+        `Open ${release.title} on MusicBrainz`,
+        'MusicBrainz',
+      ),
+    );
+    body.append(extRow);
+
+    panel.append(body);
     releasePanel.replaceChildren(panel);
 
     const tracks = release.tracks ?? [];
@@ -480,21 +480,23 @@ function initReleaseGroupPage() {
       heroArt.replaceChildren(heroCover);
       title.textContent = group.title;
       credit.replaceChildren(creditFragment(group.credit));
-      groupId.textContent = group.id;
-      typeNode.textContent = typeLabel(group.type);
-      actions.replaceChildren(
-        mbLogoLink(
-          mbUrl.releaseGroup(group.id),
-          'btn btn--secondary',
-          `Open ${group.title} on MusicBrainz`,
-        ),
+      groupMb.href = mbUrl.releaseGroup(group.id);
+      groupMb.setAttribute(
+        'aria-label',
+        `Open ${group.title} on MusicBrainz`,
       );
-      const deleteButton = el('button', 'btn btn--danger', 'Remove group');
+      groupMbRow.hidden = false;
+      typeNode.textContent = typeLabel(group.type);
+      const deleteButton = el(
+        'button',
+        'btn btn--danger btn--icon btn--icon-trash',
+        'Remove group',
+      );
       deleteButton.type = 'button';
       deleteButton.addEventListener('click', () =>
         deleteGroup(deleteButton),
       );
-      actions.append(deleteButton);
+      actions.replaceChildren(deleteButton);
 
       renderRelease(release, group);
       status.hidden = true;

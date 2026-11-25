@@ -750,8 +750,7 @@ select {
 	background: var(--panel);
 }
 
-.detail-hero__art .cover-img,
-.release-panel__art .cover-img {
+.detail-hero__art .cover-img {
 	border-radius: 0;
 }
 
@@ -1485,11 +1484,7 @@ select {
 }
 
 .release-panel {
-	display: grid;
-	grid-template-columns: 110px minmax(0, 1fr);
-	gap: 1.2rem;
-	align-items: start;
-	padding: 1rem;
+	padding: 1.1rem 1.2rem;
 	border: 1px solid var(--line-soft);
 	border-radius: 12px;
 	background: var(--panel);
@@ -2840,6 +2835,10 @@ dialog[open] {
 	--btn-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='12' y1='5' x2='12' y2='19'/%3E%3Cline x1='5' y1='12' x2='19' y2='12'/%3E%3C/svg%3E");
 }
 
+.btn--icon-repeat {
+	--btn-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='17 1 21 5 17 9'/%3E%3Cpath d='M3 11V9a4 4 0 0 1 4-4h14'/%3E%3Cpolyline points='7 23 3 19 7 15'/%3E%3Cpath d='M21 13v2a4 4 0 0 1-4 4H3'/%3E%3C/svg%3E");
+}
+
 .btn--icon-refresh:disabled::before {
 	animation: mast-spin 0.9s linear infinite;
 }
@@ -2914,11 +2913,6 @@ dialog[open] {
 
 	.rg-grid {
 		grid-template-columns: 1fr;
-	}
-
-	.release-panel {
-		grid-template-columns: 82px minmax(0, 1fr);
-		gap: 0.8rem;
 	}
 
 	.lib-head__actions {
