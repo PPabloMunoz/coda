@@ -141,7 +141,7 @@ func (r *Runner) importArtist(ctx context.Context, t Task) {
 	// is concerned, and the serial task queue stays free for other work.
 	// Gaps are always backfilled lazily on first GET .../cover.
 	go r.prefetchCoversBG(ctx, t.ID)
-	r.prefetchArtistCover(ctx, t.ID, art.Name)
+	go r.prefetchArtistCover(ctx, t.ID, art.Name)
 	r.cleanupCredits(ctx)
 	r.pruneArtists(ctx)
 	r.queue.markArtistImportDone(t.ID)

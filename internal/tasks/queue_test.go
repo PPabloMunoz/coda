@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"errors"
+	"sync"
 	"testing"
 )
 
@@ -122,4 +123,32 @@ func TestMarkUnknownNoPanic(t *testing.T) {
 	q.markArtistImportRunning("nope")
 	q.markArtistImportDone("nope")
 	q.markArtistImportFailed("nope", errors.New("x"))
+}
+
+func TestWithCoverLockSerializesSameRelease(t *testing.T) {
+	const goroutines, perGoroutine = 8, 25
+
+	// Deliberately unlocked: only withCoverLock's serialization makes the
+	// read-modify-write lossless. Lost updates mean the lock leaked.
+	counter := 0
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < perGoroutine; i++ {
+				if err := withCoverLock("release-1", func() error {
+					counter++
+					return nil
+				}); err != nil {
+					t.Errorf("withCoverLock: %v", err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if counter != goroutines*perGoroutine {
+		t.Errorf("counter = %d, want %d (lost updates mean the per-release lock leaked)",
+			counter, goroutines*perGoroutine)
+	}
 }
