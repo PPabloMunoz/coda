@@ -59,21 +59,3 @@ func (st *Store) GetTrackFullRelease(ctx context.Context, trackID string) (
 
 	return release, track, nil
 }
-
-// trackExists reports whether a track id exists in tx; empty id is false, no error.
-func (st *Store) trackExists(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
-	if id == "" {
-		return false, nil
-	}
-	var exists bool
-	err := tx.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM tracks WHERE id = ?)`, id,
-	).Scan(&exists)
-	if err != nil {
-		return false, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("query exist track: %w", err),
-		)
-	}
-	return exists, nil
-}

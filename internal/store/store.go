@@ -22,6 +22,7 @@ var migrationsFS embed.FS
 type Store struct {
 	db        *sql.DB
 	rootPaths []string
+	log       *utils.Logger
 }
 
 // NewStore opens the SQLite DB (single connection), runs goose migrations, and
@@ -31,7 +32,7 @@ func NewStore(dsn string, rootPaths []string, log *utils.Logger) (*Store, error)
 	if err != nil {
 		return nil, err
 	}
-	return &Store{db: db, rootPaths: rootPaths}, nil
+	return &Store{db: db, rootPaths: rootPaths, log: log}, nil
 }
 
 // AddRootDirs upserts configured roots as active and deletes rows for removed roots.

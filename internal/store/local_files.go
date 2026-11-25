@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
@@ -353,10 +354,20 @@ type SyncStats struct {
 	Found    int
 	Upserted int
 	Pruned   int64
+	// Failed lists paths whose tags could not be read. They are still
+	// synced (keeping any existing track link) but never link by MBID,
+	// and they don't fail the sync.
+	Failed []string
 }
 
 // SyncLocalFiles upserts scanned files by path (preserving track_id), links
 // tracks via on-disk MBIDs, and prunes rows with scanned_at older than scanStart.
+//
+// Tag reads happen before the transaction: with the store's single SQLite
+// connection, holding a write tx across per-file filesystem I/O would stall
+// every other request for the whole scan. Files unchanged since the previous
+// scan (same size and mtime) skip the tag parse entirely, so rescanning a
+// settled library is DB-cheap.
 func (st *Store) SyncLocalFiles(ctx context.Context,
 	files []ScannedFile, scanStart string,
 ) (SyncStats, error) {
@@ -409,6 +420,89 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 		)
 	}
 
+	// Phase 1: on-disk state as of the previous scan, so unchanged files
+	// can skip the tag parse.
+	known := make(map[string][2]int64, len(files)) // path -> {mtime_ns, size}
+	ph = placeholders(len(rootIDs))
+	ids := make([]any, 0, len(rootIDs))
+	for _, id := range rootIDs {
+		ids = append(ids, id)
+	}
+	krows, err := st.db.QueryContext(ctx,
+		"SELECT path, mtime_ns, size_bytes FROM local_files WHERE root_id IN ("+ph+")",
+		ids...,
+	)
+	if err != nil {
+		return SyncStats{}, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query known local files: %w", err),
+		)
+	}
+	for krows.Next() {
+		var path string
+		var mtime, size int64
+		if err := krows.Scan(&path, &mtime, &size); err != nil {
+			_ = krows.Close()
+			return SyncStats{}, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan known local files: %w", err),
+			)
+		}
+		known[path] = [2]int64{mtime, size}
+	}
+	if err := krows.Err(); err != nil {
+		_ = krows.Close()
+		return SyncStats{}, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading known local files: %w", err),
+		)
+	}
+	_ = krows.Close()
+
+	// Phase 2: tag reads outside any tx. A read failure still syncs the
+	// file (keeping its existing link) but is reported, never fatal.
+	stats := SyncStats{Found: len(files)}
+
+	type row struct {
+		rootID  int64
+		path    string
+		size    int64
+		mtime   int64
+		hint    string
+		trackID string
+	}
+	batch := make([]row, 0, len(files))
+	seen := make(map[string]struct{})
+	for _, f := range files {
+		id, ok := rootIDs[f.LibraryRoot]
+		if !ok {
+			return SyncStats{}, apperrors.Wrap(
+				apperrors.ErrNotFound,
+				fmt.Errorf("unknown root %q", f.LibraryRoot),
+			)
+		}
+
+		r := row{rootID: id, path: f.Path, size: f.SizeBytes, mtime: f.MtimeNs, hint: f.FormatHint}
+		if prev, ok := known[f.Path]; ok && prev[0] == f.MtimeNs && prev[1] == f.SizeBytes {
+			batch = append(batch, r) // unchanged since the last scan
+			continue
+		}
+
+		snap, err := tags.Read(f.Path)
+		if err != nil {
+			st.log.Warnf("scan sync file=%q read tags: %v", f.Path, err)
+			stats.Failed = append(stats.Failed, f.Path)
+			batch = append(batch, r)
+			continue
+		}
+		if tid := strings.TrimSpace(snap.MBReleaseTrackID); tid != "" {
+			r.trackID = tid
+			seen[tid] = struct{}{}
+		}
+		batch = append(batch, r)
+	}
+
+	// Phase 3: one short write tx — all DB work, no filesystem I/O.
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
 		return SyncStats{}, apperrors.Wrap(
@@ -417,6 +511,11 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 		)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	exists, err := st.existingTracks(ctx, tx, seen)
+	if err != nil {
+		return SyncStats{}, err
+	}
 
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO local_files(root_id, path, size_bytes,
@@ -438,47 +537,27 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 	}
 	defer func() { _ = stmt.Close() }()
 
-	stats := SyncStats{Found: len(files)}
-	for _, f := range files {
-		id, ok := rootIDs[f.LibraryRoot]
-		if !ok {
-			return SyncStats{}, apperrors.Wrap(
-				apperrors.ErrNotFound,
-				fmt.Errorf("unknown root %q", f.LibraryRoot),
-			)
-		}
-
-		snap, err := tags.Read(f.Path)
-		if err != nil {
-			return SyncStats{}, apperrors.Wrap(
-				apperrors.ErrInternal,
-				fmt.Errorf("read file tags %q: %w", f.Path, err),
-			)
-		}
-
-		exists, err := st.trackExists(ctx, tx, snap.MBReleaseTrackID)
-		if err != nil {
-			return SyncStats{}, err
-		}
-
+	for _, r := range batch {
 		trackID := ""
-		if exists {
-			trackID = snap.MBReleaseTrackID
+		if r.trackID != "" {
+			if _, ok := exists[r.trackID]; ok {
+				trackID = r.trackID
+			}
 		}
 
 		if _, err := stmt.ExecContext(
 			ctx,
-			id,
-			f.Path,
-			f.SizeBytes,
-			f.MtimeNs,
-			f.FormatHint,
+			r.rootID,
+			r.path,
+			r.size,
+			r.mtime,
+			r.hint,
 			scanStart,
 			utils.NullIfEmpty(trackID),
 		); err != nil {
 			return SyncStats{}, apperrors.Wrap(
 				apperrors.ErrInternal,
-				fmt.Errorf("upsert %q: %w", f.Path, err),
+				fmt.Errorf("upsert %q: %w", r.path, err),
 			)
 		}
 		stats.Upserted++
@@ -509,6 +588,59 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 	}
 
 	return stats, nil
+}
+
+// existingTracks returns the subset of ids present in tracks, prefetching
+// them in chunks inside tx so the sync loop needs no per-file lookup.
+func (st *Store) existingTracks(ctx context.Context, tx *sql.Tx, ids map[string]struct{}) (map[string]struct{}, error) {
+	out := make(map[string]struct{}, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+
+	all := make([]string, 0, len(ids))
+	for id := range ids {
+		all = append(all, id)
+	}
+	sort.Strings(all)
+
+	const chunk = 500
+	for start := 0; start < len(all); start += chunk {
+		end := min(start+chunk, len(all))
+		ph := placeholders(end - start)
+		args := make([]any, 0, end-start)
+		for _, id := range all[start:end] {
+			args = append(args, id)
+		}
+		qrows, err := tx.QueryContext(ctx,
+			"SELECT id FROM tracks WHERE id IN ("+ph+")", args...)
+		if err != nil {
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("query existing tracks: %w", err),
+			)
+		}
+		for qrows.Next() {
+			var id string
+			if err := qrows.Scan(&id); err != nil {
+				_ = qrows.Close()
+				return nil, apperrors.Wrap(
+					apperrors.ErrInternal,
+					fmt.Errorf("scan existing tracks: %w", err),
+				)
+			}
+			out[id] = struct{}{}
+		}
+		if err := qrows.Err(); err != nil {
+			_ = qrows.Close()
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("reading existing tracks: %w", err),
+			)
+		}
+		_ = qrows.Close()
+	}
+	return out, nil
 }
 
 // GetRoot returns the library root row for id, or ErrNotFound.

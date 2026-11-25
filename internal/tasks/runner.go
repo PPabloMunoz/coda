@@ -100,8 +100,8 @@ func (r *Runner) scanRoots(ctx context.Context) {
 	auto := r.autoLinkMoves(ctx)
 	r.cleanupCredits(ctx)
 	r.pruneArtists(ctx)
-	r.log.Infof("scan done: found=%d upserted=%d pruned=%d autolinked=%d moved=%d skipped=%d in %s",
-		stats.Found, stats.Upserted, stats.Pruned, auto.Linked, auto.Moved, auto.SkippedConflict, time.Since(start))
+	r.log.Infof("scan done: found=%d upserted=%d pruned=%d failed=%d autolinked=%d moved=%d skipped=%d in %s",
+		stats.Found, stats.Upserted, stats.Pruned, len(stats.Failed), auto.Linked, auto.Moved, auto.SkippedConflict, time.Since(start))
 }
 
 // importArtist imports an artist's discography, then prefetches covers in the
