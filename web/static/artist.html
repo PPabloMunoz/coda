@@ -96,16 +96,23 @@
         <header class="detail-hero">
           <div class="detail-hero__art" id="hero-art"></div>
           <div class="detail-hero__body">
-            <h1 id="artist-name"></h1>
+            <div class="artist-title">
+              <h1 id="artist-name"></h1>
+              <a
+                id="artist-mb"
+                class="title-mb"
+                href="/"
+                hidden
+                aria-label="Open on MusicBrainz"
+              >
+                <img class="mb-logo" src="/musicbrainz.svg" alt="" aria-hidden="true" />
+              </a>
+            </div>
             <p class="detail-hero__meta" id="artist-meta"></p>
             <p class="detail-hero__id mono" id="artist-id"></p>
             <div class="detail-hero__actions" id="artist-actions"></div>
             <p class="import-status" id="import-status" role="status" hidden></p>
             <p class="hero-facts">
-              <span><strong id="group-total">—</strong> release groups</span>
-              <span aria-hidden="true">·</span>
-              <span><strong id="release-total">—</strong> saved</span>
-              <span aria-hidden="true">·</span>
               <span><strong id="track-total">—</strong> tracks linked</span>
             </p>
           </div>

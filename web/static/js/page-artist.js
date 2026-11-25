@@ -14,7 +14,6 @@ import {
   el,
   emptyState,
   mapLimit,
-  mbLogoLink,
   normalize,
   setBusy,
   setSharedArtName,
@@ -75,12 +74,11 @@ function initArtistPage() {
   const crumb = byId('crumb');
   const heroArt = byId('hero-art');
   const artistName = byId('artist-name');
+  const artistMb = byId('artist-mb');
   const artistMeta = byId('artist-meta');
   const artistId = byId('artist-id');
   const artistActions = byId('artist-actions');
   const importStatusNode = byId('import-status');
-  const groupTotal = byId('group-total');
-  const releaseTotal = byId('release-total');
   const trackTotal = byId('track-total');
   const groupStatus = byId('group-status');
   const legendComplete = byId('legend-complete');
@@ -144,6 +142,12 @@ function initArtistPage() {
       sharedArtName('artist', collab.id),
     );
     artistName.textContent = collab.name;
+    artistMb.href = mbUrl.artist(collab.id);
+    artistMb.setAttribute(
+      'aria-label',
+      `Open ${collab.name} on MusicBrainz`,
+    );
+    artistMb.hidden = false;
 
     const meta = ['Not in your library yet'];
     if (collab.disambiguation) meta.push(collab.disambiguation);
@@ -153,21 +157,16 @@ function initArtistPage() {
     artistMeta.textContent = meta.join(' · ');
     artistId.textContent = collab.id;
 
-    artistActions.replaceChildren(
-      mbLogoLink(
-        mbUrl.artist(collab.id),
-        'btn btn--secondary',
-        `Open ${collab.name} on MusicBrainz`,
-      ),
+    const addButton = el(
+      'button',
+      'btn btn--primary btn--icon btn--icon-plus',
+      'Add to library',
     );
-    const addButton = el('button', 'btn btn--primary', 'Add to library');
     addButton.type = 'button';
     addButton.addEventListener('click', () => addToLibrary(addButton));
-    artistActions.append(addButton);
+    artistActions.replaceChildren(addButton);
 
     importStatusNode.hidden = true;
-    groupTotal.textContent = '—';
-    releaseTotal.textContent = '—';
     trackTotal.textContent = '—';
     groupStatus.textContent = '';
     appearsSection.hidden = true;
@@ -389,12 +388,6 @@ function initArtistPage() {
     }
   }
 
-  function savedReleaseCount() {
-    return groups.filter(
-      (group) => group.release || releaseCache.get(group.id),
-    ).length;
-  }
-
   function setTrackStats(current) {
     if (!current.stats) {
       trackTotal.textContent = '—';
@@ -408,7 +401,6 @@ function initArtistPage() {
       hydrateReleaseLine(line, group, releaseCache),
     );
     if (!updateTotals) return;
-    releaseTotal.textContent = `${savedReleaseCount()} of ${plural(groups.length, 'release group')}`;
 
     let complete = 0;
     let partial = 0;
@@ -508,7 +500,7 @@ function initArtistPage() {
       if (!groups.length) {
         const button = el(
           'button',
-          'btn btn--primary',
+          'btn btn--primary btn--icon btn--icon-refresh',
           'Refresh discography',
         );
         button.type = 'button';
@@ -579,8 +571,6 @@ function initArtistPage() {
         setTrackStats(artist);
       }
       releaseCache.clear();
-      groupTotal.textContent = String(groups.length);
-      releaseTotal.textContent = '—';
       renderGroups();
     } catch (error) {
       const message =
@@ -674,16 +664,15 @@ function initArtistPage() {
       artistMeta.textContent = meta.join(' · ') || 'MusicBrainz artist';
       artistId.textContent = artist.id;
 
-      artistActions.replaceChildren(
-        mbLogoLink(
-          mbUrl.artist(artist.id),
-          'btn btn--secondary',
-          `Open ${artist.name} on MusicBrainz`,
-        ),
+      artistMb.href = mbUrl.artist(artist.id);
+      artistMb.setAttribute(
+        'aria-label',
+        `Open ${artist.name} on MusicBrainz`,
       );
+      artistMb.hidden = false;
       const photoButton = el(
         'button',
-        'btn btn--secondary',
+        'btn btn--secondary btn--icon btn--icon-photo',
         'Refresh photo',
       );
       photoButton.type = 'button';
@@ -696,22 +685,24 @@ function initArtistPage() {
       artistActions.append(photoButton);
       const refreshButton = el(
         'button',
-        'btn btn--ghost',
+        'btn btn--secondary btn--icon btn--icon-refresh',
         'Refresh discography',
       );
       refreshButton.type = 'button';
       refreshButton.addEventListener('click', () =>
         refreshDiscography(refreshButton),
       );
-      const deleteButton = el('button', 'btn btn--danger', 'Remove artist');
+      const deleteButton = el(
+        'button',
+        'btn btn--danger btn--icon btn--icon-trash',
+        'Remove artist',
+      );
       deleteButton.type = 'button';
       deleteButton.addEventListener('click', () =>
         deleteArtist(deleteButton),
       );
-      artistActions.append(refreshButton, deleteButton);
+      artistActions.replaceChildren(photoButton, refreshButton, deleteButton);
 
-      groupTotal.textContent = String(groups.length);
-      releaseTotal.textContent = '—';
       setTrackStats(artist);
 
       status.hidden = true;
