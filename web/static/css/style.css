@@ -1211,14 +1211,30 @@ select {
 	white-space: nowrap;
 }
 
+.chip--ok,
+.chip--warn {
+	text-transform: none;
+	letter-spacing: 0.02em;
+	font-size: 0.72rem;
+}
+
 .chip--ok::before,
 .chip--warn::before {
 	content: '';
-	width: 0.45em;
-	height: 0.45em;
+	width: 1em;
+	height: 1em;
 	flex: none;
-	border-radius: 50%;
 	background: currentColor;
+	-webkit-mask: var(--badge-icon) center / contain no-repeat;
+	mask: var(--badge-icon) center / contain no-repeat;
+}
+
+.chip--ok {
+	--badge-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 11.08V12a10 10 0 1 1-5.93-9.14'/%3E%3Cpolyline points='22 4 12 14.01 9 11.01'/%3E%3C/svg%3E");
+}
+
+.chip--warn {
+	--badge-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9' stroke-dasharray='4 3'/%3E%3C/svg%3E");
 }
 
 .chip--type {
