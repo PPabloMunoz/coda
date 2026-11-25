@@ -4,9 +4,9 @@
 # bootstrap dependencies (Alpine has no bash by default).
 #
 # One-liner:
-#   curl -fsSL https://raw.githubusercontent.com/PPabloMunoz/coda/main/scripts/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/PPabloMunoz/coda/main/scripts/install.sh | sudo sh
 # With options (note the `-s --` separator when piping):
-#   curl -fsSL .../scripts/install.sh | sudo bash -s -- --roots /mnt/music --port 8687
+#   curl -fsSL .../scripts/install.sh | sudo sh -s -- --roots /mnt/music --port 8687
 #   sudo ./scripts/install.sh --version 0.1.2 --roots /mnt/music:/mnt/other
 #
 # What it does: downloads the release binary + checksums.txt, verifies the
@@ -68,7 +68,7 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-[ "$(id -u)" -eq 0 ] || fail "run as root (e.g. pipe into 'sudo bash')"
+[ "$(id -u)" -eq 0 ] || fail "run as root (e.g. pipe into 'sudo sh')"
 
 # INIT is systemd (Debian/Ubuntu), openrc (Alpine), or none.
 if [ -d /run/openrc ] || command -v rc-service >/dev/null 2>&1; then

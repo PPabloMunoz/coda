@@ -29,7 +29,7 @@ Best for a Proxmox LXC/VM or any bare-metal host. POSIX `sh`, needs only
 `curl` (installed for you via `apt`/`apk` when missing):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/PPabloMunoz/coda/main/scripts/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/PPabloMunoz/coda/main/scripts/install.sh | sudo sh
 ```
 
 This fetches the latest release binary, verifies `checksums.txt`, installs
@@ -39,7 +39,7 @@ Alpine. No YAML editing. Then open `http://<host>:8687`.
 
 ```sh
 # pin a version, port, library and data dir (roots are ':'-separated)
-curl -fsSL https://raw.githubusercontent.com/PPabloMunoz/coda/main/scripts/install.sh | sudo bash -s -- \
+curl -fsSL https://raw.githubusercontent.com/PPabloMunoz/coda/main/scripts/install.sh | sudo sh -s -- \
   --version 0.1.1 --port 8687 --roots /mnt/music --data-dir /var/lib/coda
 ```
 
