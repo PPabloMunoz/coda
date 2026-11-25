@@ -2961,7 +2961,7 @@ dialog[open] {
 	max-width: 1120px;
 	margin: 0 auto;
 	padding: 0 1.25rem;
-	overflow-x: auto;
+	flex-wrap: wrap;
 }
 
 .mast__tabs a {
@@ -3073,12 +3073,27 @@ dialog[open] {
 }
 
 .lib-grid .artist-card__cover {
-	border-radius: 6px;
+	overflow: hidden;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--panel-2);
 }
 
 .lib-grid .avatar,
 .lib-grid .cover-img {
-	border-radius: 6px;
+	border: 0;
+	border-radius: 0;
+}
+
+.lib-grid .avatar {
+	min-height: 152px;
+}
+
+.lib-grid .avatar__initials {
+	font-size: 1.5rem;
+	font-weight: 700;
+	letter-spacing: 0.03em;
+	color: var(--text);
 }
 
 .lib-grid .artist-card__name {
@@ -3338,6 +3353,17 @@ dialog[open] {
 		order: 3;
 		flex: 1 1 100%;
 		max-width: none;
+	}
+
+	.mast__tabs-inner {
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		scrollbar-width: none;
+		-ms-overflow-style: none;
+	}
+
+	.mast__tabs-inner::-webkit-scrollbar {
+		display: none;
 	}
 
 	.mast__tabs-ext {

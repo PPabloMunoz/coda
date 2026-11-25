@@ -22,20 +22,17 @@ export function artistCard(artist) {
 
   const cover = el('div', 'artist-card__cover');
   const photo = coverArt('artist', artist.id, '', {
-    fallback: () => artistAvatar(artist.id, artist.name),
+    fallback: () =>
+      artistAvatar(artist.id, artist.name, '', { variant: 'initials' }),
   });
   setSharedArtName(photo, sharedArtName('artist', artist.id));
   cover.append(photo);
 
   const body = el('div', 'artist-card__body');
-  body.append(
-    el('h2', 'artist-card__name', artist.name),
-    el(
-      'p',
-      'artist-card__meta',
-      artist.disambiguation || artist['sort-name'] || 'Artist',
-    ),
-  );
+  body.append(el('h2', 'artist-card__name', artist.name));
+  if (artist.disambiguation) {
+    body.append(el('p', 'artist-card__meta', artist.disambiguation));
+  }
 
   if (artist.stats) {
     const total = artist.stats.track_count;
