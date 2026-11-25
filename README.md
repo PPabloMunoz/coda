@@ -23,6 +23,45 @@ file to a release track.
 
 ## Install
 
+### Install script (Debian/Ubuntu/Alpine)
+
+Best for a Proxmox LXC/VM or any bare-metal host. POSIX `sh`, needs only
+`curl` (installed for you via `apt`/`apk` when missing):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/PPabloMunoz/coda/main/scripts/install.sh | sudo sh
+```
+
+This fetches the latest release binary, verifies `checksums.txt`, installs
+to `/usr/local/bin/coda`, creates a `coda` user, and starts a service with
+env-only config — a systemd unit on Debian/Ubuntu, an OpenRC service on
+Alpine. No YAML editing. Then open `http://<host>:8687`.
+
+Supported flags: `--version` (default: latest), `--port`, `--roots`
+(`:`-separated), `--data-dir`, `--user`, `--no-service`, `--help`.
+Re-run the script to upgrade.
+
+### Docker Compose
+
+Config via env, no YAML editing:
+
+```sh
+mkdir -p music data
+sudo chown -R 1000:1000 music data
+PUID=$(id -u) PGID=$(id -g) docker compose up -d
+curl localhost:8687/api/v1/health
+# upgrade later:
+docker compose pull && docker compose up -d
+```
+
+The compose file uses `ghcr.io/ppablomunoz/coda:latest` and mounts
+`./music:/music:rw` plus `./data:/data:rw` (DB, covers, and generated
+`config.yaml` all live under `/data`). Ownership follows `PUID`/`PGID`
+like Lidarr: coda runs as that user, so the host dirs must be owned by
+the same ids or the scan fails and linking cannot move files.
+
+### Manual binary
+
 Download the binary for your platform plus `checksums.txt` from
 [GitHub Releases](https://github.com/PPabloMunoz/coda/releases), verify it,
 and put `coda` on your `PATH` (requires Go only to build from source,
@@ -37,25 +76,22 @@ coda --help
 go run ./cmd/coda --version
 ```
 
-Or with Docker Compose (config via env, no YAML editing):
-
-```sh
-mkdir -p music data
-sudo chown -R 1000:1000 music data
-PUID=$(id -u) PGID=$(id -g) docker compose up -d
-curl localhost:8687/api/v1/health
-```
-
-The compose file uses `ghcr.io/ppablomunoz/coda:latest` and mounts
-`./music:/music:rw` plus `./data:/data:rw` (DB, covers, and generated
-`config.yaml` all live under `/data`). Ownership follows `PUID`/`PGID`
-like Lidarr: coda runs as that user, so the host dirs must be owned by
-the same ids or the scan fails and linking cannot move files.
-
 ## How to use
 
 The UI is committed static files
 under `web/static/` — no build step, no Node, no package manager.
+
+`coda --help` prints all flags. The useful ones:
+
+- `coda --version` — print version and exit (release builds report the
+  tag, e.g. `0.1.2`; local builds report `dev`).
+- `coda --check-config` — print the resolved port, roots, DB and covers
+  dir, then exit without starting. Use it to validate a new setup or
+  container env.
+- `coda --config /path/to/config.yaml` — same as setting `CODA_CONFIG`.
+
+Env overrides win over the config file: `CODA_CONFIG`, `CODA_DB_PATH`,
+`CODA_PORT`, `CODA_ROOTS`.
 
 ```sh
 go run ./cmd/coda
