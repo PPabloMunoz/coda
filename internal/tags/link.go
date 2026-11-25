@@ -100,33 +100,39 @@ func ToMap(s *Snapshot) map[string][]string {
 	return out
 }
 
-// WriteTags writes tags to path and normalizes MP3 TXXX descriptions to Picard casing.
+// WriteTags writes tags to path and normalizes MP3 TXXX descriptions to
+// Picard casing. Both passes land on a temp copy that replaces path
+// atomically, so a crash mid-write cannot corrupt the file.
 func WriteTags(path string, tags map[string][]string) error {
-	if err := taglib.WriteTags(path, tags, 0); err != nil {
-		return fmt.Errorf("tags: write %q: %w", path, err)
-	}
-	if err := normalizeMP3TXXX(path); err != nil {
-		return fmt.Errorf("tags: write %q: %w", path, err)
-	}
-	return nil
+	return mutate(path, func(tmp string) error {
+		if err := taglib.WriteTags(tmp, tags, 0); err != nil {
+			return fmt.Errorf("tags: write %q: %w", path, err)
+		}
+		if err := normalizeMP3TXXX(tmp); err != nil {
+			return fmt.Errorf("tags: write %q: %w", path, err)
+		}
+		return nil
+	})
 }
 
-// ClearTags removes only LinkKeys from path, preserving all other frames, then normalizes MP3 TXXX.
+// ClearTags removes only LinkKeys from path, preserving all other frames,
+// then normalizes MP3 TXXX. The read-modify-write runs on a temp copy of
+// path that replaces it atomically.
 func ClearTags(path string) error {
-	keys := LinkKeys()
-
-	raw, err := taglib.ReadTags(path)
-	if err != nil {
-		return fmt.Errorf("tags: read %q: %w", path, err)
-	}
-	for _, k := range keys {
-		delete(raw, k)
-	}
-	if err := taglib.WriteTags(path, raw, taglib.Clear); err != nil {
-		return fmt.Errorf("tags: clear %q: %w", path, err)
-	}
-	if err := normalizeMP3TXXX(path); err != nil {
-		return fmt.Errorf("tags: clear %q: %w", path, err)
-	}
-	return nil
+	return mutate(path, func(tmp string) error {
+		raw, err := taglib.ReadTags(tmp)
+		if err != nil {
+			return fmt.Errorf("tags: read %q: %w", path, err)
+		}
+		for _, k := range LinkKeys() {
+			delete(raw, k)
+		}
+		if err := taglib.WriteTags(tmp, raw, taglib.Clear); err != nil {
+			return fmt.Errorf("tags: clear %q: %w", path, err)
+		}
+		if err := normalizeMP3TXXX(tmp); err != nil {
+			return fmt.Errorf("tags: clear %q: %w", path, err)
+		}
+		return nil
+	})
 }
