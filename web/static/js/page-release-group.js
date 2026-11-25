@@ -137,6 +137,7 @@ function initReleaseGroupPage() {
   const status = byId('status');
   const content = byId('content');
   const crumb = byId('crumb');
+  const crumbArtist = byId('crumb-artist');
   const heroArt = byId('hero-art');
   const title = byId('title');
   const credit = byId('credit');
@@ -289,7 +290,7 @@ function initReleaseGroupPage() {
       window.location.assign(
         artistId
           ? `/artist?id=${encodeURIComponent(artistId)}`
-          : '/release-groups',
+          : '/',
       );
     } catch (error) {
       const message =
@@ -460,6 +461,15 @@ function initReleaseGroupPage() {
 
       document.title = `${group.title} · Coda`;
       crumb.textContent = group.title;
+      const firstCredit = group.credit?.[0];
+      if (firstCredit?.artist_id) {
+        crumbArtist.textContent =
+          firstCredit.credited_name || firstCredit.name || 'Artist';
+        crumbArtist.href = `/artist?id=${encodeURIComponent(firstCredit.artist_id)}`;
+      } else {
+        crumbArtist.textContent = 'Artists';
+        crumbArtist.href = '/';
+      }
       const heroCover = coverArt('group', group.id, '', { eager: true });
       setSharedArtName(heroCover, sharedArtName('group', group.id));
       heroArt.replaceChildren(heroCover);

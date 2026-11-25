@@ -68,11 +68,8 @@
       </div>
       <div class="mast__tabs">
         <nav class="mast__tabs-inner" aria-label="Library sections">
-          <a href="/">
+          <a href="/" aria-current="page">
             Artists<span class="mast__tabs-count" data-stat="artists"></span>
-          </a>
-          <a href="/release-groups" aria-current="page">
-            Release groups<span class="mast__tabs-count" data-stat="release_groups"></span>
           </a>
           <a href="/link">
             Unlinked<span class="mast__tabs-count" data-stat="unlinked_files"></span>
@@ -96,7 +93,7 @@
       <nav class="crumbs" aria-label="Breadcrumb">
         <a href="/">Artists</a>
         <span>/</span>
-        <a href="/release-groups">Release groups</a>
+        <a id="crumb-artist" href="/">Artists</a>
         <span>/</span>
         <span id="crumb">Release group</span>
       </nav>
