@@ -28,7 +28,6 @@
             aria-hidden="true"
           />
           <span class="mast__word" translate="no">Coda</span>
-          <span class="mast__tag">Local library</span>
         </a>
 
         <div class="mast__search" id="topbar-search">
@@ -58,20 +57,14 @@
           </kbd>
         </div>
 
-        <div class="mast__status">
-          <span class="health" id="health" aria-live="polite">
-            <span class="health__dot" aria-hidden="true"></span>
-            <span class="health__label">Checking library…</span>
-          </span>
-          <button
-            class="btn btn--secondary btn--sm"
-            id="rescan"
-            type="button"
-            title="Scan root folders for new or removed files"
-          >
-            Rescan
-          </button>
-        </div>
+        <button
+          class="btn btn--secondary btn--sm mast__rescan"
+          id="rescan"
+          type="button"
+          title="Scan root folders for new or removed files"
+        >
+          Rescan
+        </button>
       </div>
       <div class="mast__tabs">
         <nav class="mast__tabs-inner" aria-label="Library sections">

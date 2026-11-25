@@ -2894,14 +2894,6 @@ dialog[open] {
 	letter-spacing: -0.01em;
 }
 
-.mast__tag {
-	color: var(--faint);
-	font-size: 0.68rem;
-	font-weight: 600;
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-}
-
 .mast__search {
 	position: relative;
 	max-width: 15rem;
@@ -2944,10 +2936,24 @@ dialog[open] {
 	background: var(--panel);
 }
 
-.mast__status {
-	display: flex;
-	align-items: center;
-	gap: 0.6rem;
+.mast__rescan::before {
+	content: '';
+	width: 0.85em;
+	height: 0.85em;
+	flex: none;
+	background: currentColor;
+	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='23 4 23 10 17 10'/%3E%3Cpath d='M20.49 15a9 9 0 1 1-2.12-9.36L23 10'/%3E%3C/svg%3E") center / contain no-repeat;
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='23 4 23 10 17 10'/%3E%3Cpath d='M20.49 15a9 9 0 1 1-2.12-9.36L23 10'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.mast__rescan:disabled::before {
+	animation: mast-spin 0.9s linear infinite;
+}
+
+@keyframes mast-spin {
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .mast__tabs {
@@ -3370,8 +3376,6 @@ dialog[open] {
 		display: none;
 	}
 
-	.mast__tag,
-	.mast__status .health__label,
 	.topbar__kbd,
 	.mast__kbd {
 		display: none;
