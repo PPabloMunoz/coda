@@ -37,14 +37,9 @@ to `/usr/local/bin/coda`, creates a `coda` user, and starts a service with
 env-only config — a systemd unit on Debian/Ubuntu, an OpenRC service on
 Alpine. No YAML editing. Then open `http://<host>:8687`.
 
-```sh
-# pin a version, port, library and data dir (roots are ':'-separated)
-curl -fsSL https://raw.githubusercontent.com/PPabloMunoz/coda/main/scripts/install.sh | sudo sh -s -- \
-  --version 0.1.1 --port 8687 --roots /mnt/music --data-dir /var/lib/coda
-```
-
-Flags: `--version`, `--port`, `--roots`, `--data-dir`, `--user`,
-`--no-service`, `--help`. Re-run the script to upgrade.
+Supported flags: `--version` (default: latest), `--port`, `--roots`
+(`:`-separated), `--data-dir`, `--user`, `--no-service`, `--help`.
+Re-run the script to upgrade.
 
 ### Docker Compose
 
