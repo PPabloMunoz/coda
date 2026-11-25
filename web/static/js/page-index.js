@@ -260,7 +260,9 @@ function initArtistsPage() {
     artistSearchToken += 1;
     setFormStatus(addStatus, '');
     dialog.showModal();
-    requestAnimationFrame(() => artistSearchInput.focus());
+    if (window.matchMedia('(pointer: fine)').matches) {
+      requestAnimationFrame(() => artistSearchInput.focus());
+    }
   }
 
   function closeAdd() {

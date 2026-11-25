@@ -188,7 +188,9 @@ function initReleaseGroupPage() {
     setFormStatus(switchStatus, '');
     switchCurrent.textContent = `Current: ${release.title} · ${release.id}`;
     dialog.showModal();
-    requestAnimationFrame(() => mbidInput.focus());
+    if (window.matchMedia('(pointer: fine)').matches) {
+      requestAnimationFrame(() => mbidInput.focus());
+    }
   }
 
   function closeSwitch() {

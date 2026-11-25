@@ -46,7 +46,7 @@ function initFilePage() {
 
     body.append(
         el('p', 'eyebrow', 'MusicBrainz link'),
-        el('h3', '', 'This file isn’t linked yet'),
+        el('h2', 'link-panel__title', 'This file isn’t linked yet'),
         el(
           'p',
           'muted',

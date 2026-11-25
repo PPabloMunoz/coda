@@ -168,8 +168,8 @@ function initTopbarSearch() {
   const kbd = container.querySelector('.topbar__kbd');
   if (kbd) {
     kbd.textContent = /mac/i.test(navigator.platform ?? '')
-      ? '⌘K'
-      : 'Ctrl K';
+      ? '⌘\u00A0K'
+      : 'Ctrl\u00A0K';
   }
 
   document.addEventListener('keydown', (event) => {

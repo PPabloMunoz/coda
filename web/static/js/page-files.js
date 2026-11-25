@@ -43,6 +43,15 @@ function initFilesPage() {
   let searchTimer;
   limitSelect.value = String(limit);
 
+  // Deep-linkable view state: limit/offset come from pageParams, the rest
+  // is restored here so shared URLs reopen the same filtered view.
+  const initialParams = new URLSearchParams(location.search);
+  filter.value = initialParams.get('q') ?? '';
+  const initialSort = `${initialParams.get('sort') ?? 'path'}:${initialParams.get('order') ?? 'asc'}`;
+  if ([...sortSelect.options].some((option) => option.value === initialSort)) {
+    sortSelect.value = initialSort;
+  }
+
   function fileRow(file) {
     const row = el(
       'article',
@@ -239,9 +248,10 @@ function initFilesPage() {
     status.textContent = 'Loading files…';
 
     try {
+      const query = filter.value.trim();
       const page = await api.listFiles(limit, offset, {
         includeTrack: true,
-        query: filter.value.trim(),
+        query,
         sort: sortField,
         order: sortOrder,
       });
@@ -257,11 +267,17 @@ function initFilesPage() {
       }
 
       render();
-      history.replaceState(
-        history.state,
-        '',
-        `?limit=${limit}&offset=${offset}`,
-      );
+
+      const urlParams = new URLSearchParams({
+        limit: String(limit),
+        offset: String(offset),
+      });
+      if (query) urlParams.set('q', query);
+      if (sortField !== 'path' || sortOrder !== 'asc') {
+        urlParams.set('sort', sortField);
+        urlParams.set('order', sortOrder);
+      }
+      history.replaceState(history.state, '', `?${urlParams.toString()}`);
     } catch (error) {
       if (token !== loadToken) return;
       clear(list);

@@ -303,47 +303,20 @@ button {
 	outline: none;
 }
 
-/* Staggered entrance: toolbars and grids follow. Home and artist pages opt
-   out of the replay (see .lib-grid and [data-page] overrides). */
-.toolbar {
-	animation: coda-rise 260ms var(--ease-out) 40ms both;
+/* Grids paint without an entrance: they re-render on every keystroke
+   while filtering, so an entrance would replay constantly. Heroes keep
+   their one-shot rise. Large lists also skip offscreen work. */
+.artist-grid,
+.rg-grid,
+.file-list {
+	overflow: visible;
 }
 
 .artist-grid > *,
 .rg-grid > *,
-.file-list > *,
-.stat-row > *,
-.release-panel,
-.table-wrap {
-	animation: coda-rise 300ms var(--ease-out) both;
-}
-
-.artist-grid > *:nth-child(2),
-.rg-grid > *:nth-child(2),
-.file-list > *:nth-child(2),
-.stat-row > *:nth-child(2) {
-	animation-delay: 60ms;
-}
-
-.artist-grid > *:nth-child(3),
-.rg-grid > *:nth-child(3),
-.file-list > *:nth-child(3),
-.stat-row > *:nth-child(3) {
-	animation-delay: 90ms;
-}
-
-.artist-grid > *:nth-child(4),
-.rg-grid > *:nth-child(4),
-.file-list > *:nth-child(4),
-.stat-row > *:nth-child(4) {
-	animation-delay: 120ms;
-}
-
-.artist-grid > *:nth-child(n + 5),
-.rg-grid > *:nth-child(n + 5),
-.file-list > *:nth-child(n + 5),
-.stat-row > *:nth-child(n + 5) {
-	animation-delay: 150ms;
+.file-list > * {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 220px;
 }
 
 /* ---------- page header ---------- */
@@ -1667,9 +1640,11 @@ select {
 	margin-top: 1.4rem;
 }
 
-.link-panel h3 {
+.link-panel__title {
 	margin: 0.15rem 0 0.4rem;
 	font-size: 1.35rem;
+	font-weight: 650;
+	letter-spacing: -0.01em;
 }
 
 .link-panel__id {
@@ -2357,7 +2332,7 @@ dialog[open] {
 .toast {
 	position: fixed;
 	right: 1.15rem;
-	bottom: 1.15rem;
+	bottom: calc(1.15rem + env(safe-area-inset-bottom, 0px));
 	z-index: 300;
 	display: flex;
 	align-items: center;
@@ -2487,6 +2462,12 @@ dialog[open] {
 	align-items: center;
 	gap: 0.6rem;
 	color: var(--text);
+	text-decoration: none;
+	transition: opacity 150ms var(--ease-out);
+}
+
+.mast__brand:hover {
+	opacity: 0.8;
 	text-decoration: none;
 }
 
@@ -2673,6 +2654,7 @@ dialog[open] {
 	margin-top: 0.4rem;
 	color: var(--muted);
 	font-size: 0.9rem;
+	text-wrap: pretty;
 }
 
 .lib-head__actions {
@@ -2734,12 +2716,6 @@ dialog[open] {
 
 .lib-grid .artist-card__meta {
 	font-size: 0.74rem;
-}
-
-.lib-grid > *,
-.lib-head,
-.lib .toolbar {
-	animation: none;
 }
 
 /* ---------- artist page ---------- */

@@ -52,6 +52,8 @@ export function mbLogoLink(href, className, label = 'MusicBrainz', text) {
   const img = document.createElement('img');
   img.src = '/musicbrainz.svg';
   img.alt = '';
+  img.width = 26;
+  img.height = 26;
   img.className = 'mb-logo';
   img.setAttribute('aria-hidden', 'true');
   anchor.append(img);
@@ -200,7 +202,8 @@ const TRACK_SVG =
  * A cover photo served by the API (`GET …/cover`), with the same footprint
  * as the deterministic tiles. When the item has no cached art (404) or the
  * image fails to load, it swaps itself for the fallback tile (disc by
- * default) — call sites never handle the fallback.
+ * default) — call sites never handle the fallback. No width/height: artwork
+ * dimensions vary per item and CSS (`aspect-ratio: 1`) reserves the space.
  */
 export function coverArt(kind, id, alt = '', options = {}) {
   const { eager, fallback } = options;
@@ -294,6 +297,12 @@ export function setFormStatus(node, message, tone = 'info') {
   if (!node) return;
   node.textContent = message;
   node.dataset.tone = tone;
+  if (tone === 'error' && message) {
+    // Move focus to the error so screen-reader and keyboard users land on
+    // it; the node is only ever focused programmatically.
+    if (!node.hasAttribute('tabindex')) node.setAttribute('tabindex', '-1');
+    node.focus({ preventScroll: true });
+  }
 }
 
 export function setBusy(button, busy, busyLabel = 'Working…') {

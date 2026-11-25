@@ -316,7 +316,7 @@ function initLinkPage() {
 
     wrap.append(listNode);
 
-    if (options.autoFocus !== false) {
+    if (options.autoFocus !== false && window.matchMedia('(pointer: fine)').matches) {
       requestAnimationFrame(() => input.focus());
     }
 
@@ -333,10 +333,13 @@ function initLinkPage() {
     return Boolean(state.track);
   }
 
+  const NEXT_LABELS = ['Choose release group', 'Choose track', 'Link file'];
+  const BACK_LABELS = ['Back', 'Back to artists', 'Back to release groups'];
+
   function updateFooter() {
     if (!wizardState) return;
-    wizardNext.textContent =
-      wizardState.step === 2 ? 'Link file' : 'Continue';
+    wizardNext.textContent = NEXT_LABELS[wizardState.step] ?? 'Continue';
+    wizardBack.textContent = BACK_LABELS[wizardState.step] ?? 'Back';
     wizardNext.disabled = !canContinue();
     wizardBack.disabled = wizardState.step === 0;
   }
