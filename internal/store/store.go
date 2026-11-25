@@ -55,7 +55,7 @@ func (st *Store) AddRootDirs(ctx context.Context) error {
 		if execErr != nil {
 			return apperrors.Wrap(
 				apperrors.ErrInternal,
-				fmt.Errorf("error inserting root %q into DB: %w", r, err),
+				fmt.Errorf("error inserting root %q into DB: %w", r, execErr),
 			)
 		}
 	}
