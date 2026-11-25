@@ -77,7 +77,7 @@ func (h *Handler) getReleaseGroups(c *gin.Context) {
 			Primary:        primary,
 		})
 	if err != nil {
-		h.writeAppError(c, apperrors.Wrap(apperrors.ErrInternal, err))
+		h.writeAppError(c, err)
 		return
 	}
 
