@@ -7,7 +7,7 @@ import (
 )
 
 // getReleases resolves the release kept for a release-group:
-// GET /api/releases?group=<release-group-mbid>. One release per group is
+// GET /api/v1/releases?group=<release-group-mbid>. One release per group is
 // enforced by the UNIQUE on releases.release_group_id. The group param is
 // required; a group with no saved release yet answers 404 null.
 func (h *Handler) getReleases(c *gin.Context) {

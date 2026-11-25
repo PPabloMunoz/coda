@@ -89,7 +89,7 @@ func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tas
 	v1.GET("/releases/:id/cover", handler.getReleaseCover)
 	v1.POST("/releases/:id/cover/refresh", handler.refreshReleaseCover)
 
-	// Embedded Astro UI (web/dist). Catch-all, registered last.
+	// Embedded vanilla static UI (web/static). Catch-all, registered last.
 	mountWeb(router)
 
 	return router
