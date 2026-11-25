@@ -77,7 +77,6 @@ function initArtistPage() {
   const artistMb = byId('artist-mb');
   const artistMbRow = byId('artist-mb-row');
   const artistMeta = byId('artist-meta');
-  const artistId = byId('artist-id');
   const artistActions = byId('artist-actions');
   const importStatusNode = byId('import-status');
   const trackTotal = byId('track-total');
@@ -158,7 +157,6 @@ function initArtistPage() {
       meta.push(`Sort name: ${collab['sort-name']}`);
     }
     artistMeta.textContent = meta.join(' · ');
-    artistId.textContent = collab.id;
 
     const addButton = el(
       'button',
@@ -681,7 +679,6 @@ function initArtistPage() {
         meta.push(`Sort name: ${artist['sort-name']}`);
       }
       artistMeta.textContent = meta.join(' · ') || 'MusicBrainz artist';
-      artistId.textContent = artist.id;
 
       artistMb.href = mbUrl.artist(artist.id);
       artistMb.setAttribute(
