@@ -5,7 +5,7 @@
   <p>Accurate metadata first. Automation only when it's trustworthy.</p>
 </div>
 
-> Coda is currently being built — expect breaking changes.
+> Coda `0.1.0` is the first release — early prototype, expect breaking changes in `0.x`.
 
 ## What is Coda
 
@@ -21,9 +21,20 @@ Scanning is read-only: ambiguous matches are surfaced for review, never
 guessed silently. Tags are written only when you explicitly link/unlink a
 file to a release track.
 
+## Install
+
+Download the binary for your platform from
+[GitHub Releases](https://github.com/PPabloMunoz/coda/releases), or build
+from source (requires Go, developed with go1.27.3):
+
+```sh
+coda --version
+go run ./cmd/coda --version
+```
+
 ## How to use
 
-Requires Go (developed with go1.27.3). The UI is committed static files
+The UI is committed static files
 under `web/static/` — no build step, no Node, no package manager.
 
 ```sh

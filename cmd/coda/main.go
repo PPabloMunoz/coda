@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -23,9 +24,20 @@ import (
 	"github.com/ppablomunoz/coda/internal/utils"
 )
 
+// version is stamped at release time via:
+// go build -ldflags "-X main.version=0.1.0" ./cmd/coda
+// Local builds report "dev".
+var version = "dev"
+
 // main wires config, DB, MusicBrainz, artwork, queue/runner/scheduler, and the
 // HTTP server, then runs until interrupt with a 10s graceful shutdown.
 func main() {
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Printf("coda %s\n", version)
+		return
+	}
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
@@ -70,7 +82,7 @@ func main() {
 	}
 
 	mb, err := musicbrainz.New(musicbrainz.Config{
-		UserAgent: "Coda/0.1.0 ( pablomunoz@pablomunoz.dev )",
+		UserAgent: fmt.Sprintf("Coda/%s ( pablomunoz@pablomunoz.dev )", version),
 		Logger:    log,
 	})
 	if err != nil {
@@ -80,7 +92,7 @@ func main() {
 
 	coverDir := config.CoverDirFromDBPath(dsn)
 	art, err := artwork.New(artwork.Config{
-		UserAgent: "Coda/0.1.0 ( pablomunoz@pablomunoz.dev )",
+		UserAgent: fmt.Sprintf("Coda/%s ( pablomunoz@pablomunoz.dev )", version),
 		Logger:    log,
 	})
 	if err != nil {
