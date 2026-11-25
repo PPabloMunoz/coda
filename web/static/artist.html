@@ -96,18 +96,13 @@
         <header class="detail-hero">
           <div class="detail-hero__art" id="hero-art"></div>
           <div class="detail-hero__body">
-            <div class="artist-title">
-              <h1 id="artist-name"></h1>
-              <a
+            <h1><span id="artist-name"></span><a
                 id="artist-mb"
                 class="title-mb"
                 href="/"
                 hidden
                 aria-label="Open on MusicBrainz"
-              >
-                <img class="mb-logo" src="/musicbrainz.svg" alt="" aria-hidden="true" />
-              </a>
-            </div>
+              ><img class="mb-logo" src="/musicbrainz.svg" alt="" aria-hidden="true" /></a></h1>
             <p class="detail-hero__meta" id="artist-meta"></p>
             <p class="detail-hero__id mono" id="artist-id"></p>
             <div class="detail-hero__actions" id="artist-actions"></div>
@@ -115,6 +110,18 @@
             <p class="hero-facts">
               <span><strong id="track-total">—</strong> tracks linked</span>
             </p>
+            <div
+              class="linked-bar"
+              id="linked-bar"
+              role="progressbar"
+              aria-label="Tracks linked"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+              data-state="empty"
+            >
+              <span class="linked-bar__fill" id="linked-fill"></span>
+            </div>
           </div>
         </header>
 

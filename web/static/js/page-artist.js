@@ -80,6 +80,8 @@ function initArtistPage() {
   const artistActions = byId('artist-actions');
   const importStatusNode = byId('import-status');
   const trackTotal = byId('track-total');
+  const linkedBar = byId('linked-bar');
+  const linkedFill = byId('linked-fill');
   const groupStatus = byId('group-status');
   const legendComplete = byId('legend-complete');
   const legendPartial = byId('legend-partial');
@@ -168,6 +170,7 @@ function initArtistPage() {
 
     importStatusNode.hidden = true;
     trackTotal.textContent = '—';
+    setLinkedBar(0, 0);
     groupStatus.textContent = '';
     appearsSection.hidden = true;
     groupsEmpty.hidden = true;
@@ -388,12 +391,27 @@ function initArtistPage() {
     }
   }
 
+  function setLinkedBar(linkedCount, total) {
+    const percent =
+      total > 0 ? Math.round((linkedCount / total) * 100) : 0;
+    linkedFill.style.width = `${percent}%`;
+    linkedBar.dataset.state =
+      percent >= 100 ? 'complete' : percent > 0 ? 'partial' : 'empty';
+    linkedBar.setAttribute('aria-valuenow', String(percent));
+    linkedBar.title =
+      total > 0 ? `${linkedCount} of ${plural(total, 'track')} linked` : '';
+  }
+
   function setTrackStats(current) {
     if (!current.stats) {
       trackTotal.textContent = '—';
+      setLinkedBar(0, 0);
       return;
     }
-    trackTotal.textContent = `${current.stats.linked_track_count} / ${current.stats.track_count}`;
+    const total = current.stats.track_count;
+    const linkedCount = current.stats.linked_track_count;
+    trackTotal.textContent = `${linkedCount} / ${total}`;
+    setLinkedBar(linkedCount, total);
   }
 
   async function hydrateCards(entries, updateTotals = true) {

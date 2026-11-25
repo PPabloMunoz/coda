@@ -2764,17 +2764,12 @@ dialog[open] {
 	color: var(--faint);
 }
 
-.artist-title {
-	display: flex;
-	align-items: center;
-	gap: 0.65rem;
-	flex-wrap: wrap;
-}
-
 .title-mb {
-	display: inline-flex;
-	flex: none;
+	display: inline-block;
+	margin-left: 0.35em;
 	line-height: 0;
+	vertical-align: -0.08em;
+	white-space: nowrap;
 	opacity: 0.75;
 	transition: opacity 150ms var(--ease-out);
 }
@@ -2784,7 +2779,34 @@ dialog[open] {
 }
 
 .title-mb .mb-logo {
-	height: 24px;
+	height: 0.62em;
+	vertical-align: top;
+}
+
+.linked-bar {
+	height: 6px;
+	max-width: 320px;
+	margin-top: 0.7rem;
+	overflow: hidden;
+	border-radius: 999px;
+	background: var(--panel-2);
+}
+
+.linked-bar__fill {
+	display: block;
+	height: 100%;
+	width: 0;
+	border-radius: inherit;
+	background: var(--line-strong);
+	transition: width 240ms var(--ease-out);
+}
+
+.linked-bar[data-state='complete'] .linked-bar__fill {
+	background: var(--ok);
+}
+
+.linked-bar[data-state='partial'] .linked-bar__fill {
+	background: var(--warning);
 }
 
 /* ---------- buttons with icons ---------- */
