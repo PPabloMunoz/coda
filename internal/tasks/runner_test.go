@@ -49,13 +49,13 @@ func TestImportArtistMissingID(t *testing.T) {
 	}
 }
 
-func TestImportArtistNotFoundMarksDone(t *testing.T) {
+func TestImportArtistNotFoundForgetsStatus(t *testing.T) {
 	r, _, q := newTestRunner(t)
 	id := "00000000-0000-4000-8000-000000000001"
 	q.EnqueueRefreshArtist(id)
 	r.exec(context.Background(), Task{Key: TaskImportDiscography, ID: id})
-	if got := q.ArtistImportStatus(id); got.State != ArtistImportDone {
-		t.Errorf("state = %q, want done for removed artist", got.State)
+	if got := q.ArtistImportStatus(id); got.State != ArtistImportIdle {
+		t.Errorf("state = %q, want idle for removed artist (status forgotten, not stuck done)", got.State)
 	}
 }
 

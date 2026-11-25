@@ -52,12 +52,8 @@ func mountWeb(r *gin.Engine) {
 			return
 		}
 		clean := path.Clean("/" + p)
-		// UI page (trailing slash tolerated: /artist/ → artist.html).
+		// UI page (Clean already strips the trailing slash: /artist/ → artist.html).
 		if file, ok := pageRoutes[clean]; ok {
-			serveFSFile(c, sub, file)
-			return
-		}
-		if file, ok := pageRoutes[strings.TrimSuffix(clean, "/")]; ok {
 			serveFSFile(c, sub, file)
 			return
 		}

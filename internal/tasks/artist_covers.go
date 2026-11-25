@@ -64,7 +64,9 @@ func SaveArtistCover(ctx context.Context, st *store.Store, coverDir, artistID st
 			fmt.Errorf("artist cover mkdir: %w", err),
 		)
 	}
-	tmp, err := os.CreateTemp(coverDir, "artist-"+artistID+"-*.tmp")
+	// Hidden, glob-invisible temp name: removeArtistCoverFiles globs
+	// artist-<id>.* and must never see an in-flight temp file.
+	tmp, err := os.CreateTemp(coverDir, ".coda-artist-cover-"+artistID+"-*.tmp")
 	if err != nil {
 		return apperrors.Wrap(
 			apperrors.ErrInternal,

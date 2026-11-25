@@ -3,7 +3,6 @@ package musicbrainz
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -18,8 +17,6 @@ import (
 )
 
 const DefaultBaseURL = "https://musicbrainz.org/ws/2"
-
-var ErrNotFound = errors.New("musicbrainz: not found")
 
 type Config struct {
 	BaseURL    string

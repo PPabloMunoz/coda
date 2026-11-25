@@ -124,11 +124,13 @@ func openDB(dsn string, log *utils.Logger) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 
 	if err := db.Ping(); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("store: connect to db: %w", err)
 	}
 
 	log.Debug("db migration start")
 	if err := migration(db); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("store: migrate db: %w", err)
 	}
 	log.Debug("db migration done")

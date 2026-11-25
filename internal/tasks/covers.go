@@ -100,7 +100,9 @@ func SaveCover(ctx context.Context, st *store.Store, coverDir, releaseID string,
 			fmt.Errorf("cover mkdir: %w", err),
 		)
 	}
-	tmp, err := os.CreateTemp(coverDir, releaseID+"-*.tmp")
+	// Hidden, glob-invisible temp name: removeCoverFiles globs
+	// <releaseID>.* and must never see an in-flight temp file.
+	tmp, err := os.CreateTemp(coverDir, ".coda-cover-"+releaseID+"-*.tmp")
 	if err != nil {
 		return apperrors.Wrap(
 			apperrors.ErrInternal,

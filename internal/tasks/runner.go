@@ -120,7 +120,7 @@ func (r *Runner) importArtist(ctx context.Context, t Task) {
 	if err != nil {
 		if apperrors.Is(err, apperrors.ErrNotFound) {
 			r.log.Infof("skipping discography import for inactive artist %q", t.ID)
-			r.queue.markArtistImportDone(t.ID)
+			r.queue.ForgetArtistImport(t.ID)
 			return
 		}
 		r.queue.markArtistImportFailed(t.ID, err)
