@@ -23,14 +23,34 @@ file to a release track.
 
 ## Install
 
-Download the binary for your platform from
-[GitHub Releases](https://github.com/PPabloMunoz/coda/releases), or build
-from source (requires Go, developed with go1.27.3):
+Download the binary for your platform plus `checksums.txt` from
+[GitHub Releases](https://github.com/PPabloMunoz/coda/releases), verify it,
+and put `coda` on your `PATH` (requires Go only to build from source,
+developed with go1.27.3):
 
 ```sh
+sha256sum -c checksums.txt
+chmod +x coda-darwin-arm64
+sudo mv coda-darwin-arm64 /usr/local/bin/coda
 coda --version
+coda --help
 go run ./cmd/coda --version
 ```
+
+Or with Docker Compose (config via env, no YAML editing):
+
+```sh
+mkdir -p music data
+sudo chown -R 1000:1000 music data
+PUID=$(id -u) PGID=$(id -g) docker compose up -d
+curl localhost:8687/api/v1/health
+```
+
+The compose file uses `ghcr.io/ppablomunoz/coda:latest` and mounts
+`./music:/music:rw` plus `./data:/data:rw` (DB, covers, and generated
+`config.yaml` all live under `/data`). Ownership follows `PUID`/`PGID`
+like Lidarr: coda runs as that user, so the host dirs must be owned by
+the same ids or the scan fails and linking cannot move files.
 
 ## How to use
 
@@ -51,7 +71,8 @@ On first start Coda creates a config file if one doesn't exist:
 
 - macOS: `~/Library/Application Support/Coda/config.yaml`
 - Linux: `~/.config/coda/config.yaml`
-- Override with `CODA_CONFIG=/path/to/config.yaml`
+- Override with `CODA_CONFIG=/path/to/config.yaml` or `coda --config
+  /path/to/config.yaml`
 
 Edit it to point at your library:
 
@@ -62,7 +83,19 @@ roots:
 ```
 
 `roots` must be absolute paths to existing directories, with no duplicates
-or nesting.
+or nesting. For containers / one-off runs you can skip the file and use
+env instead (env wins over the file):
+
+```sh
+CODA_PORT=8687 CODA_ROOTS=/music:/other coda --check-config
+```
+
+`CODA_ROOTS` is an OS path list: `:`-separated on macOS/Linux,
+`;`-separated on Windows. Validate without starting the server:
+
+```sh
+coda --check-config
+```
 
 The SQLite database defaults to the platform data dir, not necessarily
 next to the config:

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v4"
@@ -25,7 +26,8 @@ const (
 var DefaultConfig = Config{Port: 8687, Roots: []string{}}
 
 // GetConfig loads config.yaml (creating it with defaults on first run),
-// validates roots and port, and returns the effective config.
+// applies CODA_PORT/CODA_ROOTS env overrides, validates roots and port,
+// and returns the effective config.
 func GetConfig(log *utils.Logger) (*Config, error) {
 	var conf Config
 
@@ -73,11 +75,38 @@ func GetConfig(log *utils.Logger) (*Config, error) {
 		return nil, fmt.Errorf("config: parse config file: %w", err)
 	}
 
+	if err := applyEnvOverrides(&conf); err != nil {
+		return nil, err
+	}
+
 	if err := validateConfig(&conf); err != nil {
 		return nil, fmt.Errorf("config: config file invalid: %w", err)
 	}
 
 	return &conf, nil
+}
+
+// applyEnvOverrides lets CODA_PORT and CODA_ROOTS override the file.
+// CODA_ROOTS uses the OS path list (filepath.SplitList): colon-separated
+// on macOS/Linux, semicolon-separated on Windows. Empty entries are dropped.
+func applyEnvOverrides(conf *Config) error {
+	if p := strings.TrimSpace(os.Getenv("CODA_PORT")); p != "" {
+		port, err := strconv.Atoi(p)
+		if err != nil {
+			return fmt.Errorf("config: invalid CODA_PORT %q: %w", p, err)
+		}
+		conf.Port = port
+	}
+	if r := strings.TrimSpace(os.Getenv("CODA_ROOTS")); r != "" {
+		var roots []string
+		for _, part := range filepath.SplitList(r) {
+			if part = strings.TrimSpace(part); part != "" {
+				roots = append(roots, part)
+			}
+		}
+		conf.Roots = roots
+	}
+	return nil
 }
 
 // validateConfig cleans root paths, resolves symlinks, and rejects empty,
