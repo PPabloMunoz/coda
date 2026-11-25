@@ -612,9 +612,14 @@ select {
 }
 
 .toolbar select {
-	padding-top: 0.45rem;
-	padding-bottom: 0.45rem;
+	padding-top: 0;
+	padding-bottom: 0;
 	font-size: 0.8rem;
+}
+
+.toolbar .search input,
+.toolbar select {
+	height: 2.25rem;
 }
 
 /* ---------- placeholder art (groups, releases, tracks) ---------- */
