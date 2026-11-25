@@ -23,8 +23,8 @@ file to a release track.
 
 ## How to use
 
-Requires Go (developed with go1.27.3). Any `just build`/`run`/`build-prod`
-also requires Node >=22 and pnpm for the Astro UI (`just web-build`).
+Requires Go (developed with go1.27.3). The UI is committed static files
+under `web/static/` — no build step, no Node, no package manager.
 
 ```sh
 go run ./cmd/coda
@@ -64,35 +64,41 @@ Once running, Coda scans `roots` on startup and serves the UI and API on
 `http://localhost:<port>`:
 
 ```sh
-curl localhost:8687/api/health
-curl "localhost:8687/api/files?limit=20&offset=0"
-curl localhost:8687/api/files/1
-curl localhost:8687/api/stats
-curl "localhost:8687/api/artists?limit=20&offset=0"
-curl "localhost:8687/api/musicbrainz/artists?q=portishead"
-curl "localhost:8687/api/release-groups?limit=20&offset=0"
-curl "localhost:8687/api/releases?group=<release-group-mbid>"
+curl localhost:8687/api/v1/health
+curl "localhost:8687/api/v1/files?limit=20&offset=0"
+curl localhost:8687/api/v1/files/1
+curl localhost:8687/api/v1/files/1/suggestions
+curl localhost:8687/api/v1/stats
+curl localhost:8687/api/v1/files/stats
+curl "localhost:8687/api/v1/artists?limit=20&offset=0"
+curl "localhost:8687/api/v1/musicbrainz/artists?q=portishead"
+curl "localhost:8687/api/v1/release-groups?limit=20&offset=0"
+curl "localhost:8687/api/v1/releases?group=<release-group-mbid>"
 ```
 
 Artists are added by MusicBrainz ID, which queues a background discography
 import (see `web/README.md` for the UI pages):
 
 ```sh
-curl -X POST localhost:8687/api/artists \
+curl -X POST localhost:8687/api/v1/artists \
   -H 'Content-Type: application/json' \
   -d '{"id":"<artist-mbid>"}'
-curl localhost:8687/api/artists/<artist-mbid>/import
-curl -X POST localhost:8687/api/artists/<artist-mbid>/refresh
+curl localhost:8687/api/v1/artists/<artist-mbid>/import
+curl -X POST localhost:8687/api/v1/artists/<artist-mbid>/refresh
 ```
 
 Linking a file writes standard tags (title/album/artists/track/disc/date/
-MBIDs) so Navidrome picks them up; unlinking clears those keys only:
+MBIDs) plus the release cover, and moves the file to its library path
+(`<root>/<artist>/<album>/…`; occupied destinations fail with 409 and leave
+the source untouched). Unlinking clears those keys only. Ranked link
+candidates are available per file, so linking rarely starts from a blank
+MBID:
 
 ```sh
-curl -X POST localhost:8687/api/files/1/link \
+curl -X POST localhost:8687/api/v1/files/1/link \
   -H 'Content-Type: application/json' \
   -d '{"track_id":"<track-mbid>"}'
-curl -X DELETE localhost:8687/api/files/1/link
+curl -X DELETE localhost:8687/api/v1/files/1/link
 ```
 
 ## Contributing
