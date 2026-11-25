@@ -31,28 +31,13 @@
           <span class="mast__tag">Local library</span>
         </a>
 
-        <nav class="mast__nav" aria-label="Main">
-          <a href="/" aria-current="page">
-            Artists<span class="mast__nav-count" data-stat="artists"></span>
-          </a>
-          <a href="/release-groups">
-            Releases<span class="mast__nav-count" data-stat="release_groups"></span>
-          </a>
-          <a href="/link">
-            Unlinked<span class="mast__nav-count" data-stat="unlinked_files"></span>
-          </a>
-          <a href="/files">
-            Files<span class="mast__nav-count" data-stat="total_files"></span>
-          </a>
-        </nav>
-
         <div class="mast__search" id="topbar-search">
           <label class="search">
             <input
               id="artist-search"
               name="artist-search"
               type="search"
-              placeholder="Search artists…"
+              placeholder="Search your library…"
               autocomplete="off"
               aria-label="Search artists in your library"
               role="combobox"
@@ -82,11 +67,35 @@
             class="btn btn--secondary btn--sm"
             id="rescan"
             type="button"
-            title="Rescan root folders for new or removed files"
+            title="Scan root folders for new or removed files"
           >
             Rescan
           </button>
         </div>
+      </div>
+      <div class="mast__tabs">
+        <nav class="mast__tabs-inner" aria-label="Library sections">
+          <a href="/" aria-current="page">
+            Artists<span class="mast__tabs-count" data-stat="artists"></span>
+          </a>
+          <a href="/release-groups">
+            Release groups<span class="mast__tabs-count" data-stat="release_groups"></span>
+          </a>
+          <a href="/link">
+            Unlinked<span class="mast__tabs-count" data-stat="unlinked_files"></span>
+          </a>
+          <a href="/files">
+            All files<span class="mast__tabs-count" data-stat="total_files"></span>
+          </a>
+          <a
+            class="mast__tabs-ext"
+            href="https://musicbrainz.org"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            MusicBrainz <span aria-hidden="true">↗</span>
+          </a>
+        </nav>
       </div>
     </header>
 
@@ -94,11 +103,11 @@
       <header class="lib-head">
         <div>
           <h1>Artists</h1>
-          <p class="lib-head__desc">The artists in your collection, with their MusicBrainz discographies and the release saved for each group.</p>
+          <p class="lib-head__desc">Everyone with files on disk. Open an artist to review releases and link what is missing.</p>
         </div>
         <div class="lib-head__actions">
           <button class="btn btn--secondary" id="refresh" type="button">
-            Refresh
+            Refresh list
           </button>
           <button class="btn btn--primary" id="add-open" type="button">
             Add artist
@@ -112,7 +121,7 @@
             id="filter"
             name="q"
             type="search"
-            placeholder="Filter artists by name…"
+            placeholder="Filter by name…"
             autocomplete="off"
             aria-label="Filter artists by name"
           />
@@ -143,8 +152,8 @@
           </div>
 
           <p class="dialog__copy">
-            Search MusicBrainz by name, or paste an artist MBID/URL below. Coda
-            fetches the artist and queues the discography import.
+            Find the artist on MusicBrainz, then Coda pulls the discography
+            and matches your files.
           </p>
 
           <div class="dialog__search">
@@ -174,11 +183,11 @@
           ></div>
 
           <p class="dialog__divider">
-            <span>or add by MBID</span>
+            <span>or paste an ID</span>
           </p>
 
           <label class="field">
-            <span>MBID or MusicBrainz URL</span>
+            <span>MusicBrainz ID or URL</span>
             <input
               id="mbid"
               name="mbid"
