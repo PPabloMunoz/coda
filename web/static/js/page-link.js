@@ -91,14 +91,6 @@ function initLinkPage() {
     main.append(meta);
 
     const actions = el('div', 'file-row__actions');
-    actions.append(
-      link(
-        `/file?id=${file.id}`,
-        'Details',
-        'btn btn--sm btn--icon btn--icon-info',
-      ),
-    );
-
     const linkButton = el(
       'button',
       'btn btn--sm btn--primary btn--icon btn--icon-link',
@@ -107,6 +99,13 @@ function initLinkPage() {
     linkButton.type = 'button';
     linkButton.addEventListener('click', () => openWizard(file));
     actions.append(linkButton);
+    actions.append(
+      link(
+        `/file?id=${file.id}`,
+        'Details',
+        'btn btn--sm btn--icon btn--icon-info',
+      ),
+    );
 
     row.append(format, main, actions);
     return row;
