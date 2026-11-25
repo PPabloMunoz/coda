@@ -15,6 +15,7 @@ import {
   el,
   externalLink,
   link,
+  mbLogoLink,
   setBusy,
   toast,
 } from './ui.js';
@@ -112,10 +113,10 @@ function initFilePage() {
       );
       const panelActions = el('div', 'link-panel__actions');
       panelActions.append(
-        externalLink(
+        mbLogoLink(
           mbUrl.track(file.track_id),
-          'Open track on MusicBrainz ↗',
           'btn btn--secondary',
+          'Open track on MusicBrainz',
         ),
       );
       const refresh = el('button', 'btn btn--secondary', 'Refresh tags');
@@ -279,10 +280,10 @@ function initFilePage() {
         actions.append(headerRefresh);
       } else if (file.track_id) {
         actions.append(
-          externalLink(
+          mbLogoLink(
             mbUrl.track(file.track_id),
-            'MusicBrainz ↗',
             'btn btn--secondary',
+            'Open track on MusicBrainz',
           ),
         );
         const headerRefresh = el(

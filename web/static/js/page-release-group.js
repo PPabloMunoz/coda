@@ -17,6 +17,7 @@ import {
   emptyState,
   externalLink,
   link,
+  mbLogoLink,
   setBusy,
   setFormStatus,
   setSharedArtName,
@@ -69,7 +70,11 @@ function renderTrack(track, options = {}) {
 
   const mbCell = el('td');
   mbCell.append(
-    externalLink(mbUrl.track(track.id), 'track ↗', 'track-link'),
+    mbLogoLink(
+      mbUrl.track(track.id),
+      'track-link',
+      `Open ${track.title} on MusicBrainz`,
+    ),
   );
 
   row.append(
@@ -378,10 +383,10 @@ function initReleaseGroupPage() {
       () => void refreshCover(release, refreshButton),
     );
     panelActions.append(
-      externalLink(
+      mbLogoLink(
         mbUrl.release(release.id),
-        'MusicBrainz ↗',
         'btn btn--secondary',
+        `Open ${release.title} on MusicBrainz`,
       ),
       refreshButton,
       switchButton,
@@ -478,10 +483,10 @@ function initReleaseGroupPage() {
       groupId.textContent = group.id;
       typeNode.textContent = typeLabel(group.type);
       actions.replaceChildren(
-        externalLink(
+        mbLogoLink(
           mbUrl.releaseGroup(group.id),
-          'MusicBrainz ↗',
           'btn btn--secondary',
+          `Open ${group.title} on MusicBrainz`,
         ),
       );
       const deleteButton = el('button', 'btn btn--danger', 'Remove group');

@@ -38,6 +38,24 @@ export function externalLink(href, text, className) {
   return anchor;
 }
 
+/**
+ * An outbound MusicBrainz link rendered as the MusicBrainz logo instead of
+ * text. Always pass an accessible `label` since the image is decorative.
+ */
+export function mbLogoLink(href, className, label = 'MusicBrainz') {
+  const anchor = link(href, '', className);
+  anchor.target = '_blank';
+  anchor.rel = 'noreferrer noopener';
+  anchor.setAttribute('aria-label', label);
+  const img = document.createElement('img');
+  img.src = '/musicbrainz.svg';
+  img.alt = '';
+  img.className = 'mb-logo';
+  img.setAttribute('aria-hidden', 'true');
+  anchor.append(img);
+  return anchor;
+}
+
 export function normalize(value) {
   return (value ?? '')
     .normalize('NFD')

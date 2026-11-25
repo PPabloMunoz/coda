@@ -13,8 +13,8 @@ import {
   clear,
   el,
   emptyState,
-  externalLink,
   mapLimit,
+  mbLogoLink,
   normalize,
   setBusy,
   setSharedArtName,
@@ -154,10 +154,10 @@ function initArtistPage() {
     artistId.textContent = collab.id;
 
     artistActions.replaceChildren(
-      externalLink(
+      mbLogoLink(
         mbUrl.artist(collab.id),
-        'MusicBrainz ↗',
         'btn btn--secondary',
+        `Open ${collab.name} on MusicBrainz`,
       ),
     );
     const addButton = el('button', 'btn btn--primary', 'Add to library');
@@ -675,10 +675,10 @@ function initArtistPage() {
       artistId.textContent = artist.id;
 
       artistActions.replaceChildren(
-        externalLink(
+        mbLogoLink(
           mbUrl.artist(artist.id),
-          'MusicBrainz ↗',
           'btn btn--secondary',
+          `Open ${artist.name} on MusicBrainz`,
         ),
       );
       const photoButton = el(
