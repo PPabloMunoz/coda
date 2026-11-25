@@ -70,7 +70,7 @@ func main() {
 	}
 
 	mb, err := musicbrainz.New(musicbrainz.Config{
-		UserAgent: "Coda/0.0.1 ( pablomunoz@pablomunoz.dev )",
+		UserAgent: "Coda/0.1.0 ( pablomunoz@pablomunoz.dev )",
 		Logger:    log,
 	})
 	if err != nil {
@@ -80,7 +80,7 @@ func main() {
 
 	coverDir := config.CoverDirFromDBPath(dsn)
 	art, err := artwork.New(artwork.Config{
-		UserAgent: "Coda/0.0.1 ( pablomunoz@pablomunoz.dev )",
+		UserAgent: "Coda/0.1.0 ( pablomunoz@pablomunoz.dev )",
 		Logger:    log,
 	})
 	if err != nil {
