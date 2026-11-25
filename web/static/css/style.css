@@ -2764,12 +2764,16 @@ dialog[open] {
 	color: var(--faint);
 }
 
+[data-page='artist'] h1 {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0 0.35em;
+}
+
 .title-mb {
-	display: inline-block;
-	margin-left: 0.35em;
+	display: inline-flex;
 	line-height: 0;
-	vertical-align: -0.08em;
-	white-space: nowrap;
 	opacity: 0.75;
 	transition: opacity 150ms var(--ease-out);
 }
@@ -2779,8 +2783,7 @@ dialog[open] {
 }
 
 .title-mb .mb-logo {
-	height: 0.62em;
-	vertical-align: top;
+	height: 0.55em;
 }
 
 .linked-bar {
