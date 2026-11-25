@@ -29,7 +29,7 @@ body:
       placeholder: |
         - Coda commit:
         - `go version`:
-        - Node/pnpm (if UI):
+        - Browser (if UI):
         - OS:
         - `CODA_CONFIG` / `CODA_DB_PATH` overrides (redact paths if needed):
     validations:
