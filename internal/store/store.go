@@ -35,7 +35,8 @@ func NewStore(dsn string, rootPaths []string, log *utils.Logger) (*Store, error)
 	return &Store{db: db, rootPaths: rootPaths, log: log}, nil
 }
 
-// AddRootDirs upserts configured roots as active and deletes rows for removed roots.
+// AddRootDirs upserts configured roots as active and soft-deactivates roots
+// removed from config (rows and links are kept for a future re-add).
 func (st *Store) AddRootDirs(ctx context.Context) error {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -76,7 +77,7 @@ func (st *Store) AddRootDirs(ctx context.Context) error {
 			args[i] = r
 		}
 		_, err := tx.ExecContext(ctx,
-			`DELETE FROM roots WHERE path NOT IN (`+ph+`)`,
+			`UPDATE roots SET active=0 WHERE path NOT IN (`+ph+`)`,
 			args...,
 		)
 		if err != nil {

@@ -28,12 +28,17 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &se) && se.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE
 }
 
+// activeRootCond hides files whose library root is not active. Removing a
+// root from config soft-deactivates it (rows and links are kept for a
+// future re-add), so every user-facing file query must filter it out.
+const activeRootCond = `root_id IN (SELECT id FROM roots WHERE active = 1)`
+
 // ListFiles returns a filtered page of local files plus the total count.
 func (st *Store) ListFiles(
 	ctx context.Context,
 	opts FileListOptions,
 ) ([]LocalFile, int, error) {
-	conditions := []string{}
+	conditions := []string{activeRootCond}
 	args := []any{}
 
 	if opts.Linked != nil {
@@ -138,7 +143,7 @@ func (st *Store) GetFile(ctx context.Context, id int64, includeTrack bool) (*Loc
 	if err := st.db.QueryRowContext(ctx, `
 		SELECT id, root_id, path, size_bytes, mtime_ns, format_hint, scanned_at, track_id
 		FROM local_files
-		WHERE id = ?`,
+		WHERE id = ? AND `+activeRootCond,
 		id,
 	).Scan(
 		&f.ID,
@@ -292,7 +297,7 @@ func (st *Store) GetLocalFilesStats(ctx context.Context) (*LocalFilesStats, erro
 	res := &LocalFilesStats{}
 
 	if err := st.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM local_files",
+		"SELECT COUNT(*) FROM local_files WHERE "+activeRootCond,
 	).Scan(&res.Total); err != nil {
 		return nil, apperrors.Wrap(
 			apperrors.ErrInternal,
@@ -301,7 +306,7 @@ func (st *Store) GetLocalFilesStats(ctx context.Context) (*LocalFilesStats, erro
 	}
 
 	if err := st.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM local_files WHERE track_id IS NOT NULL",
+		"SELECT COUNT(*) FROM local_files WHERE track_id IS NOT NULL AND "+activeRootCond,
 	).Scan(&res.Linked); err != nil {
 		return nil, apperrors.Wrap(
 			apperrors.ErrInternal,
@@ -310,7 +315,7 @@ func (st *Store) GetLocalFilesStats(ctx context.Context) (*LocalFilesStats, erro
 	}
 
 	if err := st.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM local_files WHERE track_id IS NULL",
+		"SELECT COUNT(*) FROM local_files WHERE track_id IS NULL AND "+activeRootCond,
 	).Scan(&res.Unlinked); err != nil {
 		return nil, apperrors.Wrap(
 			apperrors.ErrInternal,
@@ -321,6 +326,7 @@ func (st *Store) GetLocalFilesStats(ctx context.Context) (*LocalFilesStats, erro
 	rows, err := st.db.QueryContext(ctx, `
 		SELECT format_hint, COUNT(*)
 		FROM local_files
+		WHERE `+activeRootCond+`
 		GROUP BY format_hint`,
 	)
 	if err != nil {
@@ -687,7 +693,7 @@ func (st *Store) Link(ctx context.Context,
 
 	var oldPath string
 	if err := st.db.QueryRowContext(ctx,
-		"SELECT path FROM local_files WHERE id = ?",
+		"SELECT path FROM local_files WHERE id = ? AND "+activeRootCond,
 		fileID).Scan(&oldPath); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return apperrors.ErrNotFound
@@ -748,12 +754,13 @@ func (st *Store) Link(ctx context.Context,
 }
 
 // Unlink clears the track link for a local file, keeping the file row.
+// A missing or hidden (inactive root) file is ErrNotFound.
 func (st *Store) Unlink(ctx context.Context, localFileID int64) error {
 	// Update relation
-	_, err := st.db.ExecContext(ctx, `
+	res, err := st.db.ExecContext(ctx, `
 		UPDATE local_files
 		SET track_id = NULL
-		WHERE id = ?`,
+		WHERE id = ? AND `+activeRootCond,
 		localFileID,
 	)
 	if err != nil {
@@ -761,6 +768,9 @@ func (st *Store) Unlink(ctx context.Context, localFileID int64) error {
 			apperrors.ErrInternal,
 			fmt.Errorf("update local_file: %w", err),
 		)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return apperrors.ErrNotFound
 	}
 
 	return nil
