@@ -2882,8 +2882,8 @@ dialog[open] {
 
 .mast__brand img {
 	display: block;
-	width: 30px;
-	height: 30px;
+	width: 2.25rem;
+	height: 2.25rem;
 	border-radius: 8px;
 	border: 1px solid var(--line);
 }
@@ -2902,6 +2902,9 @@ dialog[open] {
 
 .mast__search input {
 	width: 100%;
+	height: 2.25rem;
+	padding-top: 0;
+	padding-bottom: 0;
 	padding-right: 2.6rem;
 }
 
@@ -2934,6 +2937,12 @@ dialog[open] {
 	border: 1px solid var(--line-strong);
 	border-radius: 8px;
 	background: var(--panel);
+}
+
+.mast__rescan {
+	height: 2.25rem;
+	padding-top: 0;
+	padding-bottom: 0;
 }
 
 .mast__rescan::before {
@@ -3066,14 +3075,15 @@ dialog[open] {
 }
 
 .lib-grid .artist-card {
-	padding: 0.6rem;
-	border: 1px solid transparent;
+	padding: 0.5rem;
+	border: 1px solid var(--line-soft);
 	border-radius: 10px;
+	background: var(--panel);
 }
 
 .lib-grid .artist-card:hover {
-	border-color: var(--line);
-	background: var(--panel);
+	border-color: var(--line-strong);
+	background: var(--panel-2);
 	transform: none;
 	box-shadow: none;
 }
@@ -3089,6 +3099,10 @@ dialog[open] {
 .lib-grid .cover-img {
 	border: 0;
 	border-radius: 0;
+}
+
+.lib-grid .avatar {
+	background: #1e3a5f;
 }
 
 .lib-grid .avatar {
