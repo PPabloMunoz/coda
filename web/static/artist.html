@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="viewport" content="width=device-width" />
-    <meta name="theme-color" content="#17181a" />
+    <meta name="theme-color" content="#14151a" />
     <meta
       name="description"
       content="Coda keeps a local music library linked to MusicBrainz, with tags Navidrome can read."
@@ -12,250 +12,190 @@
     <title>Artist · Coda</title>
     <link rel="stylesheet" href="/css/style.css" />
   </head>
-  <body>
+  <body data-page="artist">
     <a class="skip-link" href="#main">
       Skip to content
     </a>
 
-    <div class="shell">
-      <aside class="rail">
-        <a class="brand" href="/" aria-label="Coda home">
+    <header class="mast" aria-label="Site">
+      <div class="mast__inner">
+        <a class="mast__brand" href="/" aria-label="Coda home">
           <img
-            class="brand__logo"
             src="/logo.png"
             alt=""
             width="36"
             height="36"
             aria-hidden="true"
           />
-          <span class="brand__text">
-            <span class="brand__word" translate="no">
-              Coda
-            </span>
-            <span class="brand__tag">Local library</span>
-          </span>
+          <span class="mast__word" translate="no">Coda</span>
         </a>
 
-        <nav class="rail__nav" aria-label="Main">
-          <p class="rail__label">Library</p>
-          <a
-            class="rail__link"
-            href="/"
-            aria-current="page"
-           
-          >
-            <svg class="rail__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="8.25"></circle>
-              <circle cx="12" cy="12" r="2.1"></circle>
-            </svg>
-            <span>Artists</span>
-            <span class="rail__count" data-stat="artists"></span>
-          </a>
-          <a
-            class="rail__link"
-            href="/release-groups"
-          >
-            <svg class="rail__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m12 3 8.25 4.5L12 12 3.75 7.5 12 3Z"></path>
-              <path d="m4.4 12 7.6 4.15L19.6 12"></path>
-              <path d="m4.4 16.5 7.6 4.15 7.6-4.15"></path>
-            </svg>
-            <span>Release groups</span>
-            <span class="rail__count" data-stat="release_groups"></span>
-          </a>
+        <div class="mast__search" id="topbar-search">
+          <label class="search">
+            <input
+              id="artist-search"
+              name="artist-search"
+              type="search"
+              placeholder="Search your library…"
+              autocomplete="off"
+              aria-label="Search artists in your library"
+              role="combobox"
+              aria-expanded="false"
+              aria-controls="artist-search-results"
+              aria-autocomplete="list"
+            />
+          </label>
+          <div
+            class="mast__results topbar__results"
+            id="artist-search-results"
+            role="listbox"
+            aria-label="Matching artists in your library"
+            hidden
+          ></div>
+          <kbd class="mast__kbd topbar__kbd" aria-hidden="true">
+            ⌘K
+          </kbd>
+        </div>
 
-          <p class="rail__label">Manage</p>
-          <a
-            class="rail__link"
-            href="/link"
-          >
-            <svg class="rail__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M10.2 13.8a4.25 4.25 0 0 0 6 0l2.6-2.6a4.25 4.25 0 1 0-6-6l-1.2 1.2"></path>
-              <path d="M13.8 10.2a4.25 4.25 0 0 0-6 0l-2.6 2.6a4.25 4.25 0 1 0 6 6l1.2-1.2"></path>
-            </svg>
-            <span>Unlinked files</span>
-            <span class="rail__count" data-stat="unlinked_files"></span>
+        <button
+          class="btn btn--secondary btn--sm mast__rescan"
+          id="rescan"
+          type="button"
+          title="Scan root folders for new or removed files"
+        >
+          Rescan
+        </button>
+      </div>
+      <div class="mast__tabs">
+        <nav class="mast__tabs-inner" aria-label="Library sections">
+          <a href="/" aria-current="page">
+            Artists<span class="mast__tabs-count" data-stat="artists"></span>
+          </a>
+          <a href="/release-groups">
+            Release groups<span class="mast__tabs-count" data-stat="release_groups"></span>
+          </a>
+          <a href="/link">
+            Unlinked<span class="mast__tabs-count" data-stat="unlinked_files"></span>
+          </a>
+          <a href="/files">
+            All files<span class="mast__tabs-count" data-stat="total_files"></span>
           </a>
           <a
-            class="rail__link"
-            href="/files"
-          >
-            <svg class="rail__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M3.75 7.5A2.25 2.25 0 0 1 6 5.25h3l2.1 2.25H18A2.25 2.25 0 0 1 20.25 9.75v7.5A2.25 2.25 0 0 1 18 19.5H6a2.25 2.25 0 0 1-2.25-2.25v-9.75Z"></path>
-            </svg>
-            <span>All files</span>
-            <span class="rail__count" data-stat="total_files"></span>
-          </a>
-        </nav>
-
-        <div class="rail__foot">
-          <span class="health" id="health" aria-live="polite">
-            <span class="health__dot" aria-hidden="true"></span>
-            <span class="health__label">Checking library…</span>
-          </span>
-          <button
-            class="btn btn--secondary btn--sm"
-            id="rescan"
-            type="button"
-            title="Rescan root folders for new or removed files"
-          >
-            Rescan library
-          </button>
-          <a
-            class="rail__ext"
+            class="mast__tabs-ext"
             href="https://musicbrainz.org"
             target="_blank"
             rel="noreferrer noopener"
           >
             MusicBrainz <span aria-hidden="true">↗</span>
           </a>
-        </div>
-      </aside>
-
-      <div class="content">
-        <header class="topbar" aria-label="Site">
-          <div class="topbar__search" id="topbar-search">
-            <label class="search">
-              <input
-                id="artist-search"
-                name="artist-search"
-                type="search"
-                placeholder="Search artists…"
-                autocomplete="off"
-                aria-label="Search artists in your library"
-                role="combobox"
-                aria-expanded="false"
-                aria-controls="artist-search-results"
-                aria-autocomplete="list"
-              />
-            </label>
-            <div
-              class="topbar__results"
-              id="artist-search-results"
-              role="listbox"
-              aria-label="Matching artists in your library"
-              hidden
-            ></div>
-            <kbd class="topbar__kbd" aria-hidden="true">
-              ⌘K
-            </kbd>
-          </div>
-        </header>
-
-        <main class="page" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb">
-    <a href="/">Artists</a>
-    <span>/</span>
-    <span id="crumb">Artist</span>
-  </nav>
-
-  <div class="notice" id="status">
-    Loading artist…
-  </div>
-
-  <div id="content" hidden>
-    <header class="detail-hero">
-      <div class="detail-hero__art" id="hero-art"></div>
-      <div class="detail-hero__body">
-        <p class="eyebrow">Artist</p>
-        <h1 id="artist-name"></h1>
-        <p class="detail-hero__meta" id="artist-meta"></p>
-        <p class="detail-hero__id mono" id="artist-id"></p>
-        <div class="detail-hero__actions" id="artist-actions"></div>
-        <p class="import-status" id="import-status" role="status" hidden></p>
-        <dl class="stat-strip">
-          <div>
-            <dt>Release groups</dt>
-            <dd id="group-total">—</dd>
-          </div>
-          <div>
-            <dt>Saved releases</dt>
-            <dd id="release-total">—</dd>
-          </div>
-          <div>
-            <dt>Linked songs</dt>
-            <dd id="track-total">—</dd>
-          </div>
-        </dl>
+        </nav>
       </div>
     </header>
 
-    <section>
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">Discography</p>
-          <h2>Release groups</h2>
-        </div>
-        <span class="section-head__meta" id="group-status"></span>
+    <main class="page" id="main" tabindex="-1">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="/">Artists</a>
+        <span>/</span>
+        <span id="crumb">Artist</span>
+      </nav>
+
+      <div class="notice" id="status">
+        Loading artist…
       </div>
 
-      <div class="toolbar">
-        <label class="search">
-          <input
-            id="filter"
-            name="q"
-            type="search"
-            placeholder="Filter release groups…"
-            autocomplete="off"
-            aria-label="Filter release groups"
-          />
-        </label>
-        <div
-          class="legend"
-          style="margin-left: auto"
-          aria-label="Link completeness"
-        >
-          <span class="legend__item">
-            <span
-              class="legend__dot legend__dot--complete"
-              aria-hidden="true"
-            ></span>
-            Complete 
-            <span class="legend__count" id="legend-complete">
-              —
-            </span>
-          </span>
-          <span class="legend__item">
-            <span
-              class="legend__dot legend__dot--partial"
-              aria-hidden="true"
-            ></span>
-            Partial 
-            <span class="legend__count" id="legend-partial">
-              —
-            </span>
-          </span>
-          <span class="legend__item">
-            <span
-              class="legend__dot legend__dot--missing"
-              aria-hidden="true"
-            ></span>
-            Missing 
-            <span class="legend__count" id="legend-missing">
-              —
-            </span>
-          </span>
-        </div>
-      </div>
+      <div id="content" hidden>
+        <header class="detail-hero">
+          <div class="detail-hero__art" id="hero-art"></div>
+          <div class="detail-hero__body">
+            <h1 id="artist-name"></h1>
+            <p class="detail-hero__meta" id="artist-meta"></p>
+            <p class="detail-hero__id mono" id="artist-id"></p>
+            <div class="detail-hero__actions" id="artist-actions"></div>
+            <p class="import-status" id="import-status" role="status" hidden></p>
+            <p class="hero-facts">
+              <span><strong id="group-total">—</strong> release groups</span>
+              <span aria-hidden="true">·</span>
+              <span><strong id="release-total">—</strong> saved</span>
+              <span aria-hidden="true">·</span>
+              <span><strong id="track-total">—</strong> tracks linked</span>
+            </p>
+          </div>
+        </header>
 
-      <div class="rg-sections" id="groups" aria-live="polite"></div>
-      <div id="groups-empty" hidden></div>
-    </section>
+        <section>
+          <div class="section-head">
+            <div>
+              <h2>Release groups</h2>
+            </div>
+            <span class="section-head__meta" id="group-status"></span>
+          </div>
 
-    <section id="appears-section" hidden>
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">Guest appearances</p>
-          <h2>Appears In</h2>
-        </div>
-        <span class="section-head__meta" id="appears-status"></span>
-      </div>
+          <div class="toolbar">
+            <label class="search">
+              <input
+                id="filter"
+                name="q"
+                type="search"
+                placeholder="Filter by title…"
+                autocomplete="off"
+                aria-label="Filter release groups"
+              />
+            </label>
+            <div
+              class="legend"
+              style="margin-left: auto"
+              aria-label="Link completeness"
+            >
+              <span class="legend__item">
+                <span
+                  class="legend__dot legend__dot--complete"
+                  aria-hidden="true"
+                ></span>
+                Complete
+                <span class="legend__count" id="legend-complete">
+                  —
+                </span>
+              </span>
+              <span class="legend__item">
+                <span
+                  class="legend__dot legend__dot--partial"
+                  aria-hidden="true"
+                ></span>
+                Partial
+                <span class="legend__count" id="legend-partial">
+                  —
+                </span>
+              </span>
+              <span class="legend__item">
+                <span
+                  class="legend__dot legend__dot--missing"
+                  aria-hidden="true"
+                ></span>
+                Missing
+                <span class="legend__count" id="legend-missing">
+                  —
+                </span>
+              </span>
+            </div>
+          </div>
 
-      <div class="rg-sections" id="appears-groups" aria-live="polite"></div>
-      <div id="appears-empty" hidden></div>
-    </section>
-  </div></main>
+          <div class="rg-sections" id="groups" aria-live="polite"></div>
+          <div id="groups-empty" hidden></div>
+        </section>
+
+        <section id="appears-section" hidden>
+          <div class="section-head">
+            <div>
+              <h2>Appears in</h2>
+            </div>
+            <span class="section-head__meta" id="appears-status"></span>
+          </div>
+
+          <div class="rg-sections" id="appears-groups" aria-live="polite"></div>
+          <div id="appears-empty" hidden></div>
+        </section>
       </div>
-    </div>
+    </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 

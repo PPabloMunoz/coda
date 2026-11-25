@@ -100,7 +100,9 @@ function initArtistPage() {
   {
     const heroName = artistID ? sharedArtName('artist', artistID) : null;
     if (heroName) {
-      const placeholder = artistAvatar(artistID, '');
+      const placeholder = artistAvatar(artistID, '', {
+        variant: 'initials',
+      });
       for (const label of placeholder.querySelectorAll('span')) {
         label.remove();
       }
@@ -134,7 +136,9 @@ function initArtistPage() {
     document.title = `${collab.name} · Coda`;
     crumb.textContent = collab.name;
 
-    heroArt.replaceChildren(artistAvatar(collab.id, collab.name));
+    heroArt.replaceChildren(
+      artistAvatar(collab.id, collab.name, '', { variant: 'initials' }),
+    );
     setSharedArtName(
       heroArt.firstElementChild,
       sharedArtName('artist', collab.id),
@@ -650,7 +654,10 @@ function initArtistPage() {
       heroArt.replaceChildren(
         coverArt('artist', artist.id, '', {
           eager: true,
-          fallback: () => artistAvatar(artist.id, artist.name),
+          fallback: () =>
+            artistAvatar(artist.id, artist.name, '', {
+              variant: 'initials',
+            }),
         }),
       );
       setSharedArtName(
