@@ -2620,29 +2620,6 @@ dialog[open] {
 	color: var(--muted);
 }
 
-.mast__tabs-ext {
-	display: inline-flex;
-	align-items: center;
-	margin-left: auto;
-	padding: 0.35rem 0 0.35rem 1rem;
-	text-decoration: none;
-	white-space: nowrap;
-}
-
-.mast__tabs-ext:hover {
-	text-decoration: none;
-}
-
-.mast__tabs-ext .mb-logo {
-	height: 19px;
-	opacity: 0.7;
-	transition: opacity 150ms var(--ease-out);
-}
-
-.mast__tabs-ext:hover .mb-logo {
-	opacity: 1;
-}
-
 .mb-logo {
 	display: inline-block;
 	height: 1.1em;
@@ -2969,10 +2946,6 @@ dialog[open] {
 	}
 
 	.mast__tabs-inner::-webkit-scrollbar {
-		display: none;
-	}
-
-	.mast__tabs-ext {
 		display: none;
 	}
 
