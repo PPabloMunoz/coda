@@ -151,7 +151,6 @@ function initReleaseGroupPage() {
   const actions = byId('actions');
   const typeNode = byId('type');
   const savedStatus = byId('saved-status');
-  const releaseMeta = byId('release-meta');
   const releasePanel = byId('release-panel');
   const tracksSection = byId('tracks-section');
   const tracksMeta = byId('tracks-meta');
@@ -325,7 +324,6 @@ function initReleaseGroupPage() {
 
     if (!release) {
       savedStatus.textContent = 'None';
-      releaseMeta.textContent = '';
       trackTotal.textContent = '—';
       tracksSection.hidden = true;
       releasePanel.replaceChildren(
@@ -339,7 +337,6 @@ function initReleaseGroupPage() {
 
     const year = yearOf(release.date);
     savedStatus.textContent = year || 'Saved';
-    releaseMeta.textContent = plural(release.tracks?.length ?? 0, 'track');
 
     const panel = el('div', 'release-panel');
     const body = el('div', 'release-panel__body');
