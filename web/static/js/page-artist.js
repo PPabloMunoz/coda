@@ -75,6 +75,7 @@ function initArtistPage() {
   const heroArt = byId('hero-art');
   const artistName = byId('artist-name');
   const artistMb = byId('artist-mb');
+  const artistMbRow = byId('artist-mb-row');
   const artistMeta = byId('artist-meta');
   const artistId = byId('artist-id');
   const artistActions = byId('artist-actions');
@@ -149,7 +150,7 @@ function initArtistPage() {
       'aria-label',
       `Open ${collab.name} on MusicBrainz`,
     );
-    artistMb.hidden = false;
+    artistMbRow.hidden = false;
 
     const meta = ['Not in your library yet'];
     if (collab.disambiguation) meta.push(collab.disambiguation);
@@ -687,7 +688,7 @@ function initArtistPage() {
         'aria-label',
         `Open ${artist.name} on MusicBrainz`,
       );
-      artistMb.hidden = false;
+      artistMbRow.hidden = false;
       const photoButton = el(
         'button',
         'btn btn--secondary btn--icon btn--icon-photo',

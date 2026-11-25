@@ -2764,26 +2764,26 @@ dialog[open] {
 	color: var(--faint);
 }
 
-[data-page='artist'] h1 {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 0 0.35em;
+.ext-links {
+	margin-top: 0.9rem;
+	font-size: 0.8rem;
 }
 
-.title-mb {
+.ext-link {
 	display: inline-flex;
-	line-height: 0;
-	opacity: 0.75;
-	transition: opacity 150ms var(--ease-out);
+	align-items: center;
+	gap: 0.45rem;
+	color: var(--muted);
+	text-decoration: none;
 }
 
-.title-mb:hover {
-	opacity: 1;
+.ext-link:hover {
+	color: var(--text);
+	text-decoration: none;
 }
 
-.title-mb .mb-logo {
-	height: 0.55em;
+.ext-link .mb-logo {
+	height: 14px;
 }
 
 .linked-bar {
