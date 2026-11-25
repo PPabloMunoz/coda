@@ -83,15 +83,6 @@ function initFilesPage() {
 
     const actions = el('div', 'file-row__actions');
     if (file.track_id) {
-      const groupTitle =
-        (file.track.group && file.track.group.title) || 'Release group';
-      const groupButton = link(
-        `/release-group?id=${encodeURIComponent(file.track.group.id)}`,
-        groupTitle,
-        'btn btn--sm btn--secondary btn--icon btn--icon-disc',
-      );
-      groupButton.title = groupTitle;
-      actions.append(groupButton);
       const refresh = el(
         'button',
         'btn btn--sm btn--secondary btn--icon btn--icon-refresh',
