@@ -4,7 +4,6 @@
 import {
   api,
   creditName,
-  mbUrl,
   pageParams,
 } from './api.js';
 import {
@@ -20,7 +19,6 @@ import {
   clear,
   el,
   emptyState,
-  externalLink,
   link,
   toast,
 } from './ui.js';
@@ -45,8 +43,20 @@ function initFilesPage() {
   let searchTimer;
   limitSelect.value = String(limit);
 
+  // Deep-linkable view state: limit/offset come from pageParams, the rest
+  // is restored here so shared URLs reopen the same filtered view.
+  const initialParams = new URLSearchParams(location.search);
+  filter.value = initialParams.get('q') ?? '';
+  const initialSort = `${initialParams.get('sort') ?? 'path'}:${initialParams.get('order') ?? 'asc'}`;
+  if ([...sortSelect.options].some((option) => option.value === initialSort)) {
+    sortSelect.value = initialSort;
+  }
+
   function fileRow(file) {
-    const row = el('article', 'file-row');
+    const row = el(
+      'article',
+      `file-row ${file.track_id ? 'is-linked' : 'is-unlinked'}`,
+    );
 
     const format = el(
       'div',
@@ -63,7 +73,6 @@ function initFilesPage() {
     if (file.track) {
       const trackLine = el('p', 'file-row__track');
       trackLine.append(
-        document.createTextNode('Linked to '),
         link(
           `/release-group?id=${encodeURIComponent(file.track.group.id)}`,
           file.track.title,
@@ -79,30 +88,24 @@ function initFilesPage() {
       el('span', '', formatBytes(file.size_bytes)),
       el('span', '', `Scanned ${formatDate(file.scanned_at)}`),
     );
-    if (file.track_id) {
-      meta.append(el('span', 'chip chip--ok', 'Linked'));
-    } else {
-      meta.append(el('span', 'chip chip--warn', 'Unlinked'));
-    }
     main.append(meta);
 
     const actions = el('div', 'file-row__actions');
-    actions.append(link(`/file?id=${file.id}`, 'Details', 'btn btn--sm'));
-
     if (file.track_id) {
-      actions.append(
-        externalLink(
-          mbUrl.track(file.track_id),
-          'Track ↗',
-          'btn btn--sm btn--ghost',
-        ),
+      const refresh = el(
+        'button',
+        'btn btn--sm btn--secondary btn--icon btn--icon-refresh',
+        'Refresh',
       );
-      const refresh = el('button', 'btn btn--sm btn--secondary', 'Refresh');
       refresh.type = 'button';
       refresh.title = 'Rewrite tags from the linked track';
       refresh.addEventListener('click', () => refreshFile(file, refresh));
       actions.append(refresh);
-      const unlink = el('button', 'btn btn--sm btn--danger', 'Unlink');
+      const unlink = el(
+        'button',
+        'btn btn--sm btn--danger btn--icon btn--icon-trash',
+        'Unlink',
+      );
       unlink.type = 'button';
       unlink.addEventListener('click', () => unlinkFile(file, unlink));
       actions.append(unlink);
@@ -111,10 +114,17 @@ function initFilesPage() {
         link(
           `/link?file=${file.id}`,
           'Link to track',
-          'btn btn--sm btn--primary',
+          'btn btn--sm btn--primary btn--icon btn--icon-link',
         ),
       );
     }
+    actions.append(
+      link(
+        `/file?id=${file.id}`,
+        'Details',
+        'btn btn--sm btn--icon btn--icon-info',
+      ),
+    );
 
     row.append(format, main, actions);
     return row;
@@ -238,9 +248,10 @@ function initFilesPage() {
     status.textContent = 'Loading files…';
 
     try {
+      const query = filter.value.trim();
       const page = await api.listFiles(limit, offset, {
         includeTrack: true,
-        query: filter.value.trim(),
+        query,
         sort: sortField,
         order: sortOrder,
       });
@@ -256,11 +267,17 @@ function initFilesPage() {
       }
 
       render();
-      history.replaceState(
-        history.state,
-        '',
-        `?limit=${limit}&offset=${offset}`,
-      );
+
+      const urlParams = new URLSearchParams({
+        limit: String(limit),
+        offset: String(offset),
+      });
+      if (query) urlParams.set('q', query);
+      if (sortField !== 'path' || sortOrder !== 'asc') {
+        urlParams.set('sort', sortField);
+        urlParams.set('order', sortOrder);
+      }
+      history.replaceState(history.state, '', `?${urlParams.toString()}`);
     } catch (error) {
       if (token !== loadToken) return;
       clear(list);

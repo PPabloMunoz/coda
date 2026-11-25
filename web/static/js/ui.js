@@ -38,6 +38,29 @@ export function externalLink(href, text, className) {
   return anchor;
 }
 
+/**
+ * An outbound MusicBrainz link rendered as the MusicBrainz logo instead of
+ * text. Always pass an accessible `label` since the image is decorative.
+ * Pass `text` to render a labeled row link (logo + word) instead of an icon
+ * button.
+ */
+export function mbLogoLink(href, className, label = 'MusicBrainz', text) {
+  const anchor = link(href, '', className);
+  anchor.target = '_blank';
+  anchor.rel = 'noreferrer noopener';
+  anchor.setAttribute('aria-label', label);
+  const img = document.createElement('img');
+  img.src = '/musicbrainz.svg';
+  img.alt = '';
+  img.width = 26;
+  img.height = 26;
+  img.className = 'mb-logo';
+  img.setAttribute('aria-hidden', 'true');
+  anchor.append(img);
+  if (text) anchor.append(el('span', '', text));
+  return anchor;
+}
+
 export function normalize(value) {
   return (value ?? '')
     .normalize('NFD')
@@ -179,7 +202,8 @@ const TRACK_SVG =
  * A cover photo served by the API (`GET …/cover`), with the same footprint
  * as the deterministic tiles. When the item has no cached art (404) or the
  * image fails to load, it swaps itself for the fallback tile (disc by
- * default) — call sites never handle the fallback.
+ * default) — call sites never handle the fallback. No width/height: artwork
+ * dimensions vary per item and CSS (`aspect-ratio: 1`) reserves the space.
  */
 export function coverArt(kind, id, alt = '', options = {}) {
   const { eager, fallback } = options;
@@ -273,6 +297,12 @@ export function setFormStatus(node, message, tone = 'info') {
   if (!node) return;
   node.textContent = message;
   node.dataset.tone = tone;
+  if (tone === 'error' && message) {
+    // Move focus to the error so screen-reader and keyboard users land on
+    // it; the node is only ever focused programmatically.
+    if (!node.hasAttribute('tabindex')) node.setAttribute('tabindex', '-1');
+    node.focus({ preventScroll: true });
+  }
 }
 
 export function setBusy(button, busy, busyLabel = 'Working…') {

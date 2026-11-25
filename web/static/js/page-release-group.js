@@ -17,6 +17,7 @@ import {
   emptyState,
   externalLink,
   link,
+  mbLogoLink,
   setBusy,
   setFormStatus,
   setSharedArtName,
@@ -69,7 +70,11 @@ function renderTrack(track, options = {}) {
 
   const mbCell = el('td');
   mbCell.append(
-    externalLink(mbUrl.track(track.id), 'track ↗', 'track-link'),
+    mbLogoLink(
+      mbUrl.track(track.id),
+      'track-link',
+      `Open ${track.title} on MusicBrainz`,
+    ),
   );
 
   row.append(
@@ -137,14 +142,15 @@ function initReleaseGroupPage() {
   const status = byId('status');
   const content = byId('content');
   const crumb = byId('crumb');
+  const crumbArtist = byId('crumb-artist');
   const heroArt = byId('hero-art');
   const title = byId('title');
   const credit = byId('credit');
-  const groupId = byId('group-id');
+  const groupMb = byId('group-mb');
+  const groupMbRow = byId('group-mb-row');
   const actions = byId('actions');
   const typeNode = byId('type');
   const savedStatus = byId('saved-status');
-  const releaseMeta = byId('release-meta');
   const releasePanel = byId('release-panel');
   const tracksSection = byId('tracks-section');
   const tracksMeta = byId('tracks-meta');
@@ -170,16 +176,21 @@ function initReleaseGroupPage() {
   const switchSubmit = byId('switch-submit');
 
   let currentGroup = null;
+  let currentRelease = null;
+  let heroRefreshButton = null;
+  let heroSwitchButton = null;
   let switchInFlight = false;
   let coverInFlight = false;
 
   function openSwitch(release) {
-    if (!currentGroup) return;
+    if (!currentGroup || !release) return;
     form.reset();
     setFormStatus(switchStatus, '');
     switchCurrent.textContent = `Current: ${release.title} · ${release.id}`;
     dialog.showModal();
-    requestAnimationFrame(() => mbidInput.focus());
+    if (window.matchMedia('(pointer: fine)').matches) {
+      requestAnimationFrame(() => mbidInput.focus());
+    }
   }
 
   function closeSwitch() {
@@ -289,7 +300,7 @@ function initReleaseGroupPage() {
       window.location.assign(
         artistId
           ? `/artist?id=${encodeURIComponent(artistId)}`
-          : '/release-groups',
+          : '/',
       );
     } catch (error) {
       const message =
@@ -308,22 +319,19 @@ function initReleaseGroupPage() {
   }
 
   function renderRelease(release, group) {
+    currentRelease = release;
+    const hasRelease = Boolean(release);
+    if (heroRefreshButton) heroRefreshButton.hidden = !hasRelease;
+    if (heroSwitchButton) heroSwitchButton.hidden = !hasRelease;
+
     if (!release) {
       savedStatus.textContent = 'None';
-      releaseMeta.textContent = '';
       trackTotal.textContent = '—';
       tracksSection.hidden = true;
-      const firstArtist = group.credit?.[0]?.artist_id;
       releasePanel.replaceChildren(
         emptyState(
           'No release saved for this group',
-          'The release group is imported, but its release has not been saved yet. The discography import may still be running.',
-          firstArtist
-            ? {
-                href: `/artist?id=${encodeURIComponent(firstArtist)}`,
-                label: 'Back to artist',
-              }
-            : undefined,
+          'The discography import may still be running. Refresh in a moment.',
         ),
       );
       return;
@@ -331,12 +339,8 @@ function initReleaseGroupPage() {
 
     const year = yearOf(release.date);
     savedStatus.textContent = year || 'Saved';
-    releaseMeta.textContent = plural(release.tracks?.length ?? 0, 'track');
 
     const panel = el('div', 'release-panel');
-    const art = el('div', 'release-panel__art');
-    art.append(coverArt('release', release.id, release.title));
-
     const body = el('div', 'release-panel__body');
     body.append(
       el(
@@ -344,50 +348,22 @@ function initReleaseGroupPage() {
         'eyebrow',
         release.status ? typeLabel(release.status) : 'Release',
       ),
-      el('h3', 'release-panel__title', release.title),
     );
-
-    const meta = el('div', 'release-panel__meta');
-    if (release.date) meta.append(el('span', '', release.date));
-    meta.append(
-      el('span', 'chip chip--type', typeLabel(release.group.type)),
-      el('span', 'chip', plural(release.tracks?.length ?? 0, 'track')),
-      el('span', 'mono', release.id),
-    );
-    body.append(meta);
-
-    const panelActions = el('div', 'release-panel__actions');
-    const switchButton = el(
-      'button',
-      'btn btn--secondary',
-      'Switch release…',
-    );
-    switchButton.type = 'button';
-    switchButton.addEventListener('click', () => openSwitch(release));
-    const refreshButton = el(
-      'button',
-      'btn btn--secondary',
-      'Refresh cover',
-    );
-    refreshButton.type = 'button';
-    refreshButton.title =
-      'Fetch the cover art again (Cover Art Archive, then Deezer)';
-    refreshButton.addEventListener(
-      'click',
-      () => void refreshCover(release, refreshButton),
-    );
-    panelActions.append(
-      externalLink(
+    if (release.date) {
+      body.append(el('p', 'muted', `Released ${release.date}`));
+    }
+    const extRow = el('p', 'ext-links');
+    extRow.append(
+      mbLogoLink(
         mbUrl.release(release.id),
-        'MusicBrainz ↗',
-        'btn btn--secondary',
+        'ext-link',
+        `Open ${release.title} on MusicBrainz`,
+        'MusicBrainz',
       ),
-      refreshButton,
-      switchButton,
     );
-    body.append(panelActions);
+    body.append(extRow);
 
-    panel.append(art, body);
+    panel.append(body);
     releasePanel.replaceChildren(panel);
 
     const tracks = release.tracks ?? [];
@@ -460,26 +436,60 @@ function initReleaseGroupPage() {
 
       document.title = `${group.title} · Coda`;
       crumb.textContent = group.title;
+      const firstCredit = group.credit?.[0];
+      if (firstCredit?.artist_id) {
+        crumbArtist.textContent =
+          firstCredit.credited_name || firstCredit.name || 'Artist';
+        crumbArtist.href = `/artist?id=${encodeURIComponent(firstCredit.artist_id)}`;
+      } else {
+        crumbArtist.textContent = 'Artists';
+        crumbArtist.href = '/';
+      }
       const heroCover = coverArt('group', group.id, '', { eager: true });
       setSharedArtName(heroCover, sharedArtName('group', group.id));
       heroArt.replaceChildren(heroCover);
       title.textContent = group.title;
       credit.replaceChildren(creditFragment(group.credit));
-      groupId.textContent = group.id;
-      typeNode.textContent = typeLabel(group.type);
-      actions.replaceChildren(
-        externalLink(
-          mbUrl.releaseGroup(group.id),
-          'MusicBrainz ↗',
-          'btn btn--secondary',
-        ),
+      groupMb.href = mbUrl.releaseGroup(group.id);
+      groupMb.setAttribute(
+        'aria-label',
+        `Open ${group.title} on MusicBrainz`,
       );
-      const deleteButton = el('button', 'btn btn--danger', 'Remove group');
+      groupMbRow.hidden = false;
+      typeNode.textContent = typeLabel(group.type);
+      const switchButton = el(
+        'button',
+        'btn btn--secondary btn--icon btn--icon-repeat',
+        'Switch release…',
+      );
+      switchButton.type = 'button';
+      switchButton.addEventListener(
+        'click',
+        () => void openSwitch(currentRelease),
+      );
+      heroSwitchButton = switchButton;
+      const refreshButton = el(
+        'button',
+        'btn btn--secondary btn--icon btn--icon-refresh',
+        'Refresh cover',
+      );
+      refreshButton.type = 'button';
+      refreshButton.title =
+        'Fetch the cover art again (Cover Art Archive, then Deezer)';
+      refreshButton.addEventListener('click', () => {
+        if (currentRelease) void refreshCover(currentRelease, refreshButton);
+      });
+      heroRefreshButton = refreshButton;
+      const deleteButton = el(
+        'button',
+        'btn btn--danger btn--icon btn--icon-trash',
+        'Remove group',
+      );
       deleteButton.type = 'button';
       deleteButton.addEventListener('click', () =>
         deleteGroup(deleteButton),
       );
-      actions.append(deleteButton);
+      actions.replaceChildren(switchButton, refreshButton, deleteButton);
 
       renderRelease(release, group);
       status.hidden = true;

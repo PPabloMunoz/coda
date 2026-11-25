@@ -7,14 +7,12 @@ import {
   formatBytes,
   formatDate,
   formatDateTime,
-  typeLabel,
 } from './format.js';
 import {
   byId,
-  creditFragment,
   el,
-  externalLink,
   link,
+  mbLogoLink,
   setBusy,
   toast,
 } from './ui.js';
@@ -46,95 +44,9 @@ function initFilePage() {
     const panel = el('div', 'link-panel');
     const body = el('div', 'link-panel__body');
 
-    if (file.track) {
-      const track = file.track;
-      body.append(
+    body.append(
         el('p', 'eyebrow', 'MusicBrainz link'),
-        el('h3', '', track.title),
-      );
-
-      const creditLine = el('p', 'credit-line');
-      creditLine.append(creditFragment(track.credit));
-      body.append(creditLine);
-
-      const releaseMeta = el('div', 'link-panel__meta');
-      releaseMeta.append(
-        el('span', '', 'Release'),
-        el('span', '', track.release.title),
-      );
-      if (track.release.date) {
-        releaseMeta.append(el('span', 'mono', track.release.date));
-      }
-      body.append(releaseMeta);
-
-      const groupMeta = el('div', 'link-panel__meta');
-      groupMeta.append(
-        el('span', '', 'Release group'),
-        link(
-          `/release-group?id=${encodeURIComponent(track.group.id)}`,
-          track.group.title,
-        ),
-        el('span', 'chip chip--type', typeLabel(track.group.type)),
-      );
-      body.append(groupMeta);
-
-      const panelActions = el('div', 'link-panel__actions');
-      panelActions.append(
-        externalLink(
-          mbUrl.recording(track.recording_id),
-          'Recording ↗',
-          'btn btn--secondary',
-        ),
-        externalLink(
-          mbUrl.release(track.release.id),
-          'Release ↗',
-          'btn btn--secondary',
-        ),
-      );
-      const refresh = el('button', 'btn btn--secondary', 'Refresh tags');
-      refresh.type = 'button';
-      refresh.addEventListener('click', () => refreshFile(refresh));
-      panelActions.append(refresh);
-      const unlink = el(
-        'button',
-        'btn btn--danger',
-        'Unlink and clear tags',
-      );
-      unlink.type = 'button';
-      unlink.addEventListener('click', () => unlinkFile(unlink));
-      panelActions.append(unlink);
-      body.append(panelActions);
-    } else if (file.track_id) {
-      body.append(
-        el('p', 'eyebrow', 'MusicBrainz link'),
-        el('h3', '', 'Linked to a track'),
-        el('p', 'mono link-panel__id', file.track_id),
-      );
-      const panelActions = el('div', 'link-panel__actions');
-      panelActions.append(
-        externalLink(
-          mbUrl.track(file.track_id),
-          'Open track on MusicBrainz ↗',
-          'btn btn--secondary',
-        ),
-      );
-      const refresh = el('button', 'btn btn--secondary', 'Refresh tags');
-      refresh.type = 'button';
-      refresh.addEventListener('click', () => refreshFile(refresh));
-      panelActions.append(refresh);
-      const unlink = el(
-        'button',
-        'btn btn--danger',
-        'Unlink and clear tags',
-      );
-      unlink.type = 'button';
-      unlink.addEventListener('click', () => unlinkFile(unlink));
-      panelActions.append(unlink);
-      body.append(panelActions);
-    } else {
-      body.append(
-        el('p', 'eyebrow', 'MusicBrainz link'),
-        el('h3', '', 'This file isn’t linked yet'),
+        el('h2', 'link-panel__title', 'This file isn’t linked yet'),
         el(
           'p',
           'muted',
@@ -143,10 +55,13 @@ function initFilePage() {
       );
       const panelActions = el('div', 'link-panel__actions');
       panelActions.append(
-        link(`/link?file=${file.id}`, 'Link this file', 'btn btn--primary'),
+        link(
+          `/link?file=${file.id}`,
+          'Link this file',
+          'btn btn--primary btn--icon btn--icon-link',
+        ),
       );
       body.append(panelActions);
-    }
 
     panel.append(body);
     linkPanel.replaceChildren(panel);
@@ -241,6 +156,14 @@ function initFilePage() {
       setText('stat-size', formatBytes(file.size_bytes));
       setText('stat-scanned', formatDate(file.scanned_at));
       setText('stat-link', file.track_id ? 'Linked' : 'Unlinked');
+      byId('stat-link-card').classList.toggle(
+        'is-linked',
+        Boolean(file.track_id),
+      );
+      byId('stat-link-card').classList.toggle(
+        'is-unlinked',
+        !file.track_id,
+      );
 
       setText('detail-path', file.path);
       setText('detail-format', file.format_hint || '—');
@@ -261,51 +184,74 @@ function initFilePage() {
       );
       if (file.track) {
         actions.append(
-          externalLink(
+          mbLogoLink(
             mbUrl.recording(file.track.recording_id),
-            'Recording ↗',
             'btn btn--secondary',
+            `Open ${file.track.title} on MusicBrainz`,
           ),
         );
         const headerRefresh = el(
           'button',
-          'btn btn--secondary',
+          'btn btn--secondary btn--icon btn--icon-refresh',
           'Refresh tags',
         );
         headerRefresh.type = 'button';
         headerRefresh.addEventListener('click', () =>
           refreshFile(headerRefresh),
         );
-        actions.append(headerRefresh);
+        const headerUnlink = el(
+          'button',
+          'btn btn--danger btn--icon btn--icon-trash',
+          'Unlink',
+        );
+        headerUnlink.type = 'button';
+        headerUnlink.addEventListener('click', () =>
+          unlinkFile(headerUnlink),
+        );
+        actions.append(headerRefresh, headerUnlink);
       } else if (file.track_id) {
         actions.append(
-          externalLink(
+          mbLogoLink(
             mbUrl.track(file.track_id),
-            'MusicBrainz ↗',
             'btn btn--secondary',
+            'Open track on MusicBrainz',
           ),
         );
         const headerRefresh = el(
           'button',
-          'btn btn--secondary',
+          'btn btn--secondary btn--icon btn--icon-refresh',
           'Refresh tags',
         );
         headerRefresh.type = 'button';
         headerRefresh.addEventListener('click', () =>
           refreshFile(headerRefresh),
         );
-        actions.append(headerRefresh);
+        const headerUnlink = el(
+          'button',
+          'btn btn--danger btn--icon btn--icon-trash',
+          'Unlink',
+        );
+        headerUnlink.type = 'button';
+        headerUnlink.addEventListener('click', () =>
+          unlinkFile(headerUnlink),
+        );
+        actions.append(headerRefresh, headerUnlink);
       } else {
         actions.append(
           link(
             `/link?file=${file.id}`,
             'Link this file',
-            'btn btn--primary',
+            'btn btn--primary btn--icon btn--icon-link',
           ),
         );
       }
 
-      renderLinkPanel(file);
+      // Linked files show stats only; the detail table and link panel below
+      // repeat the same data, so they stay for unlinked files.
+      const linked = Boolean(file.track_id);
+      byId('detail-wrap').hidden = linked;
+      linkPanel.hidden = linked;
+      if (!linked) renderLinkPanel(file);
       status.hidden = true;
       content.hidden = false;
     } catch (error) {

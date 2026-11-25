@@ -15,14 +15,13 @@ import (
 // pageRoutes maps UI paths to their committed static files. Query strings
 // (e.g. /artist?id=…) don't affect file serving — only the path matters.
 var pageRoutes = map[string]string{
-	"/":               "index.html",
-	"/artists":        "artists.html",
-	"/artist":         "artist.html",
-	"/release-groups": "release-groups.html",
-	"/release-group":  "release-group.html",
-	"/link":           "link.html",
-	"/files":          "files.html",
-	"/file":           "file.html",
+	"/":              "index.html",
+	"/artists":       "artists.html",
+	"/artist":        "artist.html",
+	"/release-group": "release-group.html",
+	"/link":          "link.html",
+	"/files":         "files.html",
+	"/file":          "file.html",
 }
 
 // mountWeb serves the embedded vanilla UI (web/static).

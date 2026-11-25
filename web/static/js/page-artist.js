@@ -13,7 +13,6 @@ import {
   clear,
   el,
   emptyState,
-  externalLink,
   mapLimit,
   normalize,
   setBusy,
@@ -75,13 +74,14 @@ function initArtistPage() {
   const crumb = byId('crumb');
   const heroArt = byId('hero-art');
   const artistName = byId('artist-name');
+  const artistMb = byId('artist-mb');
+  const artistMbRow = byId('artist-mb-row');
   const artistMeta = byId('artist-meta');
-  const artistId = byId('artist-id');
   const artistActions = byId('artist-actions');
   const importStatusNode = byId('import-status');
-  const groupTotal = byId('group-total');
-  const releaseTotal = byId('release-total');
   const trackTotal = byId('track-total');
+  const linkedBar = byId('linked-bar');
+  const linkedFill = byId('linked-fill');
   const groupStatus = byId('group-status');
   const legendComplete = byId('legend-complete');
   const legendPartial = byId('legend-partial');
@@ -100,7 +100,9 @@ function initArtistPage() {
   {
     const heroName = artistID ? sharedArtName('artist', artistID) : null;
     if (heroName) {
-      const placeholder = artistAvatar(artistID, '');
+      const placeholder = artistAvatar(artistID, '', {
+        variant: 'initials',
+      });
       for (const label of placeholder.querySelectorAll('span')) {
         label.remove();
       }
@@ -134,12 +136,20 @@ function initArtistPage() {
     document.title = `${collab.name} · Coda`;
     crumb.textContent = collab.name;
 
-    heroArt.replaceChildren(artistAvatar(collab.id, collab.name));
+    heroArt.replaceChildren(
+      artistAvatar(collab.id, collab.name, '', { variant: 'initials' }),
+    );
     setSharedArtName(
       heroArt.firstElementChild,
       sharedArtName('artist', collab.id),
     );
     artistName.textContent = collab.name;
+    artistMb.href = mbUrl.artist(collab.id);
+    artistMb.setAttribute(
+      'aria-label',
+      `Open ${collab.name} on MusicBrainz`,
+    );
+    artistMbRow.hidden = false;
 
     const meta = ['Not in your library yet'];
     if (collab.disambiguation) meta.push(collab.disambiguation);
@@ -147,24 +157,19 @@ function initArtistPage() {
       meta.push(`Sort name: ${collab['sort-name']}`);
     }
     artistMeta.textContent = meta.join(' · ');
-    artistId.textContent = collab.id;
 
-    artistActions.replaceChildren(
-      externalLink(
-        mbUrl.artist(collab.id),
-        'MusicBrainz ↗',
-        'btn btn--secondary',
-      ),
+    const addButton = el(
+      'button',
+      'btn btn--primary btn--icon btn--icon-plus',
+      'Add to library',
     );
-    const addButton = el('button', 'btn btn--primary', 'Add to library');
     addButton.type = 'button';
     addButton.addEventListener('click', () => addToLibrary(addButton));
-    artistActions.append(addButton);
+    artistActions.replaceChildren(addButton);
 
     importStatusNode.hidden = true;
-    groupTotal.textContent = '—';
-    releaseTotal.textContent = '—';
     trackTotal.textContent = '—';
+    setLinkedBar(0, 0);
     groupStatus.textContent = '';
     appearsSection.hidden = true;
     groupsEmpty.hidden = true;
@@ -385,18 +390,27 @@ function initArtistPage() {
     }
   }
 
-  function savedReleaseCount() {
-    return groups.filter(
-      (group) => group.release || releaseCache.get(group.id),
-    ).length;
+  function setLinkedBar(linkedCount, total) {
+    const percent =
+      total > 0 ? Math.round((linkedCount / total) * 100) : 0;
+    linkedFill.style.width = `${percent}%`;
+    linkedBar.dataset.state =
+      percent >= 100 ? 'complete' : percent > 0 ? 'partial' : 'empty';
+    linkedBar.setAttribute('aria-valuenow', String(percent));
+    linkedBar.title =
+      total > 0 ? `${linkedCount} of ${plural(total, 'track')} linked` : '';
   }
 
   function setTrackStats(current) {
     if (!current.stats) {
       trackTotal.textContent = '—';
+      setLinkedBar(0, 0);
       return;
     }
-    trackTotal.textContent = `${current.stats.linked_track_count} / ${current.stats.track_count}`;
+    const total = current.stats.track_count;
+    const linkedCount = current.stats.linked_track_count;
+    trackTotal.textContent = `${linkedCount} / ${total}`;
+    setLinkedBar(linkedCount, total);
   }
 
   async function hydrateCards(entries, updateTotals = true) {
@@ -404,7 +418,6 @@ function initArtistPage() {
       hydrateReleaseLine(line, group, releaseCache),
     );
     if (!updateTotals) return;
-    releaseTotal.textContent = `${savedReleaseCount()} of ${plural(groups.length, 'release group')}`;
 
     let complete = 0;
     let partial = 0;
@@ -504,7 +517,7 @@ function initArtistPage() {
       if (!groups.length) {
         const button = el(
           'button',
-          'btn btn--primary',
+          'btn btn--primary btn--icon btn--icon-refresh',
           'Refresh discography',
         );
         button.type = 'button';
@@ -575,8 +588,6 @@ function initArtistPage() {
         setTrackStats(artist);
       }
       releaseCache.clear();
-      groupTotal.textContent = String(groups.length);
-      releaseTotal.textContent = '—';
       renderGroups();
     } catch (error) {
       const message =
@@ -650,7 +661,10 @@ function initArtistPage() {
       heroArt.replaceChildren(
         coverArt('artist', artist.id, '', {
           eager: true,
-          fallback: () => artistAvatar(artist.id, artist.name),
+          fallback: () =>
+            artistAvatar(artist.id, artist.name, '', {
+              variant: 'initials',
+            }),
         }),
       );
       setSharedArtName(
@@ -665,18 +679,16 @@ function initArtistPage() {
         meta.push(`Sort name: ${artist['sort-name']}`);
       }
       artistMeta.textContent = meta.join(' · ') || 'MusicBrainz artist';
-      artistId.textContent = artist.id;
 
-      artistActions.replaceChildren(
-        externalLink(
-          mbUrl.artist(artist.id),
-          'MusicBrainz ↗',
-          'btn btn--secondary',
-        ),
+      artistMb.href = mbUrl.artist(artist.id);
+      artistMb.setAttribute(
+        'aria-label',
+        `Open ${artist.name} on MusicBrainz`,
       );
+      artistMbRow.hidden = false;
       const photoButton = el(
         'button',
-        'btn btn--secondary',
+        'btn btn--secondary btn--icon btn--icon-photo',
         'Refresh photo',
       );
       photoButton.type = 'button';
@@ -689,22 +701,24 @@ function initArtistPage() {
       artistActions.append(photoButton);
       const refreshButton = el(
         'button',
-        'btn btn--ghost',
+        'btn btn--secondary btn--icon btn--icon-refresh',
         'Refresh discography',
       );
       refreshButton.type = 'button';
       refreshButton.addEventListener('click', () =>
         refreshDiscography(refreshButton),
       );
-      const deleteButton = el('button', 'btn btn--danger', 'Remove artist');
+      const deleteButton = el(
+        'button',
+        'btn btn--danger btn--icon btn--icon-trash',
+        'Remove artist',
+      );
       deleteButton.type = 'button';
       deleteButton.addEventListener('click', () =>
         deleteArtist(deleteButton),
       );
-      artistActions.append(refreshButton, deleteButton);
+      artistActions.replaceChildren(photoButton, refreshButton, deleteButton);
 
-      groupTotal.textContent = String(groups.length);
-      releaseTotal.textContent = '—';
       setTrackStats(artist);
 
       status.hidden = true;

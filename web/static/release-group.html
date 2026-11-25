@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="viewport" content="width=device-width" />
-    <meta name="theme-color" content="#17181a" />
+    <meta name="theme-color" content="#14151a" />
     <meta
       name="description"
       content="Coda keeps a local music library linked to MusicBrainz, with tags Navidrome can read."
@@ -12,248 +12,183 @@
     <title>Release group · Coda</title>
     <link rel="stylesheet" href="/css/style.css" />
   </head>
-  <body>
+  <body data-page="release-group">
     <a class="skip-link" href="#main">
       Skip to content
     </a>
 
-    <div class="shell">
-      <aside class="rail">
-        <a class="brand" href="/" aria-label="Coda home">
+    <header class="mast" aria-label="Site">
+      <div class="mast__inner">
+        <a class="mast__brand" href="/" aria-label="Coda home">
           <img
-            class="brand__logo"
             src="/logo.png"
             alt=""
             width="36"
             height="36"
             aria-hidden="true"
           />
-          <span class="brand__text">
-            <span class="brand__word" translate="no">
-              Coda
-            </span>
-            <span class="brand__tag">Local library</span>
-          </span>
+          <span class="mast__word" translate="no">Coda</span>
         </a>
 
-        <nav class="rail__nav" aria-label="Main">
-          <p class="rail__label">Library</p>
-          <a
-            class="rail__link"
-            href="/"
-           
-          >
-            <svg class="rail__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="8.25"></circle>
-              <circle cx="12" cy="12" r="2.1"></circle>
-            </svg>
-            <span>Artists</span>
-            <span class="rail__count" data-stat="artists"></span>
-          </a>
-          <a
-            class="rail__link"
-            href="/release-groups"
-            aria-current="page"
-          >
-            <svg class="rail__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m12 3 8.25 4.5L12 12 3.75 7.5 12 3Z"></path>
-              <path d="m4.4 12 7.6 4.15L19.6 12"></path>
-              <path d="m4.4 16.5 7.6 4.15 7.6-4.15"></path>
-            </svg>
-            <span>Release groups</span>
-            <span class="rail__count" data-stat="release_groups"></span>
-          </a>
+        <div class="mast__search" id="topbar-search">
+          <label class="search">
+            <input
+              id="artist-search"
+              name="artist-search"
+              type="search"
+              placeholder="Search your library…"
+              autocomplete="off"
+              aria-label="Search artists in your library"
+              role="combobox"
+              aria-expanded="false"
+              aria-controls="artist-search-results"
+              aria-autocomplete="list"
+            />
+          </label>
+          <div
+            class="mast__results topbar__results"
+            id="artist-search-results"
+            role="listbox"
+            aria-label="Matching artists in your library"
+            hidden
+          ></div>
+          <kbd class="mast__kbd topbar__kbd" aria-hidden="true">
+            ⌘&nbsp;K
+          </kbd>
+        </div>
 
-          <p class="rail__label">Manage</p>
-          <a
-            class="rail__link"
-            href="/link"
-          >
-            <svg class="rail__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M10.2 13.8a4.25 4.25 0 0 0 6 0l2.6-2.6a4.25 4.25 0 1 0-6-6l-1.2 1.2"></path>
-              <path d="M13.8 10.2a4.25 4.25 0 0 0-6 0l-2.6 2.6a4.25 4.25 0 1 0 6 6l1.2-1.2"></path>
-            </svg>
-            <span>Unlinked files</span>
-            <span class="rail__count" data-stat="unlinked_files"></span>
+        <button
+          class="btn btn--secondary btn--sm mast__rescan"
+          id="rescan"
+          type="button"
+          title="Scan root folders for new or removed files"
+        >
+          Rescan
+        </button>
+      </div>
+      <div class="mast__tabs">
+        <nav class="mast__tabs-inner" aria-label="Library sections">
+          <a href="/" aria-current="page">
+            Artists<span class="mast__tabs-count" data-stat="artists"></span>
           </a>
-          <a
-            class="rail__link"
-            href="/files"
-          >
-            <svg class="rail__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M3.75 7.5A2.25 2.25 0 0 1 6 5.25h3l2.1 2.25H18A2.25 2.25 0 0 1 20.25 9.75v7.5A2.25 2.25 0 0 1 18 19.5H6a2.25 2.25 0 0 1-2.25-2.25v-9.75Z"></path>
-            </svg>
-            <span>All files</span>
-            <span class="rail__count" data-stat="total_files"></span>
+          <a href="/link">
+            Unlinked<span class="mast__tabs-count" data-stat="unlinked_files"></span>
+          </a>
+          <a href="/files">
+            All files<span class="mast__tabs-count" data-stat="total_files"></span>
           </a>
         </nav>
-
-        <div class="rail__foot">
-          <span class="health" id="health" aria-live="polite">
-            <span class="health__dot" aria-hidden="true"></span>
-            <span class="health__label">Checking library…</span>
-          </span>
-          <button
-            class="btn btn--secondary btn--sm"
-            id="rescan"
-            type="button"
-            title="Rescan root folders for new or removed files"
-          >
-            Rescan library
-          </button>
-          <a
-            class="rail__ext"
-            href="https://musicbrainz.org"
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            MusicBrainz <span aria-hidden="true">↗</span>
-          </a>
-        </div>
-      </aside>
-
-      <div class="content">
-        <header class="topbar" aria-label="Site">
-          <div class="topbar__search" id="topbar-search">
-            <label class="search">
-              <input
-                id="artist-search"
-                name="artist-search"
-                type="search"
-                placeholder="Search artists…"
-                autocomplete="off"
-                aria-label="Search artists in your library"
-                role="combobox"
-                aria-expanded="false"
-                aria-controls="artist-search-results"
-                aria-autocomplete="list"
-              />
-            </label>
-            <div
-              class="topbar__results"
-              id="artist-search-results"
-              role="listbox"
-              aria-label="Matching artists in your library"
-              hidden
-            ></div>
-            <kbd class="topbar__kbd" aria-hidden="true">
-              ⌘K
-            </kbd>
-          </div>
-        </header>
-
-        <main class="page" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb">
-    <a href="/">Artists</a>
-    <span>/</span>
-    <a href="/release-groups">Release groups</a>
-    <span>/</span>
-    <span id="crumb">Release group</span>
-  </nav>
-
-  <div class="notice" id="status">
-    Loading release group…
-  </div>
-
-  <div id="content" hidden>
-    <header class="detail-hero">
-      <div class="detail-hero__art" id="hero-art"></div>
-      <div class="detail-hero__body">
-        <p class="eyebrow">Release group</p>
-        <h1 id="title"></h1>
-        <p class="credit-line" id="credit"></p>
-        <p class="detail-hero__id mono" id="group-id"></p>
-        <div class="detail-hero__actions" id="actions"></div>
-        <dl class="stat-strip">
-          <div>
-            <dt>Type</dt>
-            <dd id="type">—</dd>
-          </div>
-          <div>
-            <dt>Saved release</dt>
-            <dd id="saved-status">—</dd>
-          </div>
-          <div>
-            <dt>Tracks</dt>
-            <dd id="track-total">—</dd>
-          </div>
-        </dl>
       </div>
     </header>
 
-    <section>
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">Catalog</p>
-          <h2>Saved release</h2>
-        </div>
-        <span class="section-head__meta" id="release-meta"></span>
-      </div>
-      <div id="release-panel"></div>
-    </section>
+    <main class="page" id="main" tabindex="-1">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="/">Artists</a>
+        <span>/</span>
+        <a id="crumb-artist" href="/">Artists</a>
+        <span>/</span>
+        <span id="crumb">Release group</span>
+      </nav>
 
-    <section id="tracks-section" hidden>
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">Tracklist</p>
-          <h2>Tracks</h2>
-        </div>
-        <span class="section-head__meta" id="tracks-meta"></span>
-      </div>
-      <div id="tracks-wrap"></div>
-    </section>
-  </div>
-
-  <dialog id="switch-dialog" aria-labelledby="switch-title">
-    <form class="dialog__panel" id="switch-form">
-      <div class="dialog__head">
-        <div>
-          <p class="eyebrow">Saved release</p>
-          <h2 id="switch-title">Switch saved release</h2>
-        </div>
-        <button
-          class="icon-btn"
-          id="switch-close"
-          type="button"
-          aria-label="Close"
-        >
-          ×
-        </button>
+      <div class="notice" id="status">
+        Loading release group…
       </div>
 
-      <p class="dialog__copy">
-        Paste the MBID or MusicBrainz URL of another official release in this
-        group. The current release and its tracks are replaced; files linked to
-        the old tracks become unlinked.
-      </p>
+      <div id="content" hidden>
+        <header class="detail-hero">
+          <div class="detail-hero__art" id="hero-art"></div>
+          <div class="detail-hero__body">
+            <h1 id="title"></h1>
+            <p class="credit-line" id="credit"></p>
+            <div class="detail-hero__actions" id="actions"></div>
+            <p class="ext-links" id="group-mb-row" hidden>
+              <a
+                id="group-mb"
+                class="ext-link"
+                href="/"
+                target="_blank"
+                rel="noreferrer noopener"
+                aria-label="Open on MusicBrainz"
+              ><img class="mb-logo" src="/musicbrainz.svg" alt="" aria-hidden="true" /><span>MusicBrainz</span></a>
+            </p>
+            <p class="hero-facts">
+              <span><strong id="type">—</strong></span>
+              <span aria-hidden="true">·</span>
+              <span><strong id="saved-status">—</strong></span>
+              <span aria-hidden="true">·</span>
+              <span><strong id="track-total">—</strong> tracks</span>
+            </p>
+          </div>
+        </header>
 
-      <p class="dialog__copy mono" id="switch-current"></p>
+        <section>
+          <div class="section-head">
+            <h2>Release</h2>
+          </div>
+          <div id="release-panel"></div>
+        </section>
 
-      <label class="field">
-        <span>New release MBID or MusicBrainz URL</span>
-        <input
-          id="switch-mbid"
-          name="mbid"
-          placeholder="e.g. 6a4ebc0d-… or musicbrainz.org/release/…"
-          autocomplete="off"
-          spellcheck="false"
-          required
-        />
-      </label>
-
-      <p class="form-status" id="switch-status" role="status"></p>
-
-      <div class="dialog__actions">
-        <button class="btn btn--ghost" id="switch-cancel" type="button">
-          Cancel
-        </button>
-        <button class="btn btn--primary" id="switch-submit" type="submit">
-          Switch release
-        </button>
+        <section id="tracks-section" hidden>
+          <div class="section-head">
+            <div>
+              <h2>Tracks</h2>
+            </div>
+            <span class="section-head__meta" id="tracks-meta"></span>
+          </div>
+          <div id="tracks-wrap"></div>
+        </section>
       </div>
-    </form>
-  </dialog></main>
-      </div>
-    </div>
+
+      <dialog id="switch-dialog" aria-labelledby="switch-title">
+        <form class="dialog__panel" id="switch-form">
+          <div class="dialog__head">
+            <div>
+              <p class="eyebrow">Release</p>
+              <h2 id="switch-title">Switch release</h2>
+            </div>
+            <button
+              class="icon-btn"
+              id="switch-close"
+              type="button"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+
+          <p class="dialog__copy">
+            Paste the MBID or MusicBrainz URL of another official release in this
+            group. The current release and its tracks are replaced; files linked to
+            the old tracks become unlinked.
+          </p>
+
+          <p class="dialog__copy mono" id="switch-current" translate="no"></p>
+
+          <label class="field">
+            <span>New release MBID or MusicBrainz URL</span>
+            <input
+              id="switch-mbid"
+              name="mbid"
+              placeholder="e.g. 6a4ebc0d-… or musicbrainz.org/release/…"
+              autocomplete="off"
+              spellcheck="false"
+              required
+            />
+          </label>
+
+          <p class="form-status" id="switch-status" role="status"></p>
+
+          <div class="dialog__actions">
+            <button class="btn btn--ghost" id="switch-cancel" type="button">
+              Cancel
+            </button>
+            <button class="btn btn--primary" id="switch-submit" type="submit">
+              Switch release
+            </button>
+          </div>
+        </form>
+      </dialog>
+    </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 

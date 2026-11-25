@@ -73,7 +73,7 @@ function initLinkPage() {
   let scopedArtistID = null;
 
   function fileRow(file) {
-    const row = el('article', 'file-row');
+    const row = el('article', 'file-row is-unlinked');
 
     const format = el('div', 'file-row__format', formatKey(file));
 
@@ -87,23 +87,25 @@ function initLinkPage() {
     meta.append(
       el('span', '', formatBytes(file.size_bytes)),
       el('span', '', `Scanned ${formatDate(file.scanned_at)}`),
-      el('span', 'chip chip--warn', 'Unlinked'),
     );
     main.append(meta);
 
     const actions = el('div', 'file-row__actions');
-    actions.append(
-      link(`/file?id=${file.id}`, 'Details', 'btn btn--sm btn--ghost'),
-    );
-
     const linkButton = el(
       'button',
-      'btn btn--sm btn--primary',
+      'btn btn--sm btn--primary btn--icon btn--icon-link',
       'Link to track',
     );
     linkButton.type = 'button';
     linkButton.addEventListener('click', () => openWizard(file));
     actions.append(linkButton);
+    actions.append(
+      link(
+        `/file?id=${file.id}`,
+        'Details',
+        'btn btn--sm btn--icon btn--icon-info',
+      ),
+    );
 
     row.append(format, main, actions);
     return row;
@@ -314,7 +316,7 @@ function initLinkPage() {
 
     wrap.append(listNode);
 
-    if (options.autoFocus !== false) {
+    if (options.autoFocus !== false && window.matchMedia('(pointer: fine)').matches) {
       requestAnimationFrame(() => input.focus());
     }
 
@@ -331,10 +333,13 @@ function initLinkPage() {
     return Boolean(state.track);
   }
 
+  const NEXT_LABELS = ['Choose release group', 'Choose track', 'Link file'];
+  const BACK_LABELS = ['Back', 'Back to artists', 'Back to release groups'];
+
   function updateFooter() {
     if (!wizardState) return;
-    wizardNext.textContent =
-      wizardState.step === 2 ? 'Link file' : 'Continue';
+    wizardNext.textContent = NEXT_LABELS[wizardState.step] ?? 'Continue';
+    wizardBack.textContent = BACK_LABELS[wizardState.step] ?? 'Back';
     wizardNext.disabled = !canContinue();
     wizardBack.disabled = wizardState.step === 0;
   }
