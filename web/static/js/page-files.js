@@ -4,7 +4,6 @@
 import {
   api,
   creditName,
-  mbUrl,
   pageParams,
 } from './api.js';
 import {
@@ -21,7 +20,6 @@ import {
   el,
   emptyState,
   link,
-  mbLogoLink,
   toast,
 } from './ui.js';
 
@@ -63,7 +61,6 @@ function initFilesPage() {
     if (file.track) {
       const trackLine = el('p', 'file-row__track');
       trackLine.append(
-        document.createTextNode('Linked to '),
         link(
           `/release-group?id=${encodeURIComponent(file.track.group.id)}`,
           file.track.title,
@@ -87,22 +84,16 @@ function initFilesPage() {
     main.append(meta);
 
     const actions = el('div', 'file-row__actions');
-    actions.append(
-      link(
-        `/file?id=${file.id}`,
-        'Details',
-        'btn btn--sm btn--icon btn--icon-info',
-      ),
-    );
-
     if (file.track_id) {
-      actions.append(
-        mbLogoLink(
-          mbUrl.track(file.track_id),
-          'btn btn--sm',
-          'Open track on MusicBrainz',
-        ),
+      const groupTitle =
+        (file.track.group && file.track.group.title) || 'Release group';
+      const groupButton = link(
+        `/release-group?id=${encodeURIComponent(file.track.group.id)}`,
+        groupTitle,
+        'btn btn--sm btn--secondary btn--icon btn--icon-disc',
       );
+      groupButton.title = groupTitle;
+      actions.append(groupButton);
       const refresh = el(
         'button',
         'btn btn--sm btn--secondary btn--icon btn--icon-refresh',
@@ -129,6 +120,13 @@ function initFilesPage() {
         ),
       );
     }
+    actions.append(
+      link(
+        `/file?id=${file.id}`,
+        'Details',
+        'btn btn--sm btn--icon btn--icon-info',
+      ),
+    );
 
     row.append(format, main, actions);
     return row;
