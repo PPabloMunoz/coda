@@ -19,7 +19,6 @@ the previous design; don't add frontend infrastructure without asking.
 - `/` — artist grid and add-artist dialog
 - `/artist?id=<mbid>` — artist, release groups, and saved release status
 - `/artists` — legacy redirect to `/`
-- `/release-groups` — all imported release groups
 - `/release-group?id=<mbid>` — saved release for a group
 - `/link` — unlinked files and the artist → group → track wizard
 - `/files`, `/file?id=<id>` — scanned files and file details
@@ -29,5 +28,6 @@ lives in `js/layout.js` and is loaded by every page. Page logic lives in
 `js/page-*.js`; API helpers in `js/api.js`; DOM/art helpers in `js/ui.js`;
 card builders in `js/cards.js`; formatting in `js/format.js`.
 
-Placeholder artwork is generated in the browser from each artist or release
-name (a deterministic record sleeve); no cover images are fetched.
+Cover artwork is served by the API (`GET /api/v1/.../cover`, fetched and
+cached); when an item has no cached art, the browser falls back to a
+deterministic placeholder sleeve generated from the name.
