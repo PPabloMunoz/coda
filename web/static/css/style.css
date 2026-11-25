@@ -1211,6 +1211,16 @@ select {
 	white-space: nowrap;
 }
 
+.chip--ok::before,
+.chip--warn::before {
+	content: '';
+	width: 0.45em;
+	height: 0.45em;
+	flex: none;
+	border-radius: 50%;
+	background: currentColor;
+}
+
 .chip--type {
 	border-color: var(--line-strong);
 	background: var(--panel-2);
