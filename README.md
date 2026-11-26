@@ -31,6 +31,14 @@ the file moved to its canonical library path. Everything ambiguous waits
 for review in the link wizard — nothing is guessed. The full read/write
 contract is in [docs/library.md](docs/library.md).
 
+<p align="center">
+  <img src="docs/assets/screenshot-artists.png" alt="Coda artist grid" width="800" />
+</p>
+<p align="center">
+  <img src="docs/assets/screenshot-artist.png" alt="Artist page with release groups" width="49%" />
+  <img src="docs/assets/screenshot-link.png" alt="Link wizard with a suggested match" width="49%" />
+</p>
+
 ## Features
 
 - Files-only by design: one static Go binary, one SQLite file, no
