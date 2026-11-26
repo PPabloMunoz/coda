@@ -9,6 +9,7 @@ const (
 	TaskDeleteInactiveArtists TaskKey = "delete-inactive-artists"
 	TaskEmbedReleaseCover     TaskKey = "embed-release-cover"
 	TaskClearReleaseCover     TaskKey = "clear-release-cover"
+	TaskRelinkRelease         TaskKey = "relink-release"
 )
 
 type Task struct {

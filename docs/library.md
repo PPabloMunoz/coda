@@ -116,6 +116,12 @@ destination cannot overwrite each other. A failed move leaves tags and the
 database untouched; a failed tag, cover, or database step moves the file
 back without replacing anything.
 
+Switching the saved release for a release group preserves links by
+recording MBID plus disc/position: matching files stay linked (remapped
+synchronously) and a background task rewrites their tags, cover, and paths;
+non-matching files unlink. Discography refreshes keep a switched release
+and reconcile changed tracklists instead of aborting the import.
+
 ## Custom covers
 
 Hover the hero image on the artist page or the release-group page for the
