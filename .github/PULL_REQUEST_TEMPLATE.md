@@ -14,7 +14,7 @@ just check
 
 ## Checklist
 
-- [ ] `just check` passes (Go fmt/vet/lint/tests/build + web lint/format).
+- [ ] `just check` passes (Go fmt/vet/lint/tests/build).
 - [ ] Change is small and files-only (no downloads, download clients, or automation).
 - [ ] No schema change, or migration added as new `000N_*.sql` (never edited `0001_init.sql`).
 - [ ] Tags stay Navidrome-compatible (standard frames only, `LinkKeys` only on link/unlink).
