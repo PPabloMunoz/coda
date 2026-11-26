@@ -94,18 +94,23 @@ serialized between the scan and the API.
 
 ## Custom covers
 
-The artist page ("Upload photo") and the release-group page ("Upload
-cover") replace Coda's cached image with a JPEG, PNG, or WebP file up to
-15MB. No schema or library rescan is needed: the next cover GET serves the
-upload, with `"source": "upload"` in the metadata row.
+Hover the hero image on the artist page or the release-group page for the
+upload and remove actions (icon-only; always visible on touch screens).
+They replace Coda's cached image with a JPEG, PNG, or WebP file up to
+15MB. No library rescan is needed: the next cover GET serves the upload,
+with `"source": "upload"` in the metadata row.
 
 - Release covers propagate to audio files: the upload queues a background
   task that re-embeds the new art as the front cover picture of every file
   already linked to the release. Per-file failures only log; the upload
   itself already succeeded.
+- Removing a cover deletes the cached file and keeps it gone: later cover
+  requests stay empty instead of fetching provider art again. Removing a
+  release cover also queues a background task that clears the embedded
+  front cover from its linked files.
 - Artist photos are display-only and are never written into audio files.
 - Fetching provider art again ("Refresh cover"/"Refresh photo") replaces an
-  upload.
+  upload or a removal.
 
 ## What Coda never does
 

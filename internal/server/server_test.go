@@ -21,11 +21,12 @@ import (
 func init() { gin.SetMode(gin.TestMode) }
 
 type testEnv struct {
-	router *gin.Engine
-	st     *store.Store
-	queue  *tasks.Queue
-	mbSrv  *httptest.Server
-	mbMux  *http.ServeMux
+	router   *gin.Engine
+	st       *store.Store
+	queue    *tasks.Queue
+	mbSrv    *httptest.Server
+	mbMux    *http.ServeMux
+	coverDir string
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -49,8 +50,9 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("mb New = %v", err)
 	}
-	router := NewHandler(log, st, mb, q, nil, t.TempDir())
-	return &testEnv{router: router, st: st, queue: q, mbSrv: srv, mbMux: mux}
+	coverDir := t.TempDir()
+	router := NewHandler(log, st, mb, q, nil, coverDir)
+	return &testEnv{router: router, st: st, queue: q, mbSrv: srv, mbMux: mux, coverDir: coverDir}
 }
 
 func doRequest(t *testing.T, router *gin.Engine, method, path string, body any) *httptest.ResponseRecorder {

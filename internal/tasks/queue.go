@@ -163,6 +163,26 @@ func (q *Queue) EnqueueEmbedReleaseCover(releaseID string) {
 	q.signal()
 }
 
+// EnqueueClearReleaseCover queues a background wipe of the embedded front
+// cover from the release's linked files after a cover removal. Dedupes per
+// release while queued: the task re-checks the tombstone at run time, so
+// one run covers repeated removals and an intervening upload wins.
+func (q *Queue) EnqueueClearReleaseCover(releaseID string) {
+	q.mu.Lock()
+	for _, t := range q.items {
+		if t.Key == TaskClearReleaseCover && t.ID == releaseID {
+			q.mu.Unlock()
+			q.debugf("task %s already queued %q", TaskClearReleaseCover, releaseID)
+			return
+		}
+	}
+	q.items = append(q.items, Task{Key: TaskClearReleaseCover, ID: releaseID})
+	depth := len(q.items)
+	q.mu.Unlock()
+	q.debugf("task %s queued %q (depth=%d)", TaskClearReleaseCover, releaseID, depth)
+	q.signal()
+}
+
 // ArtistImportStatus returns the current import state for id, or idle when unknown.
 func (q *Queue) ArtistImportStatus(id string) ArtistImportStatus {
 	q.mu.Lock()

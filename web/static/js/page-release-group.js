@@ -12,11 +12,11 @@ import { baseName, plural, typeLabel, yearOf } from './format.js';
 import {
   byId,
   clear,
+  coverTools,
   creditFragment,
   el,
   emptyState,
   externalLink,
-  imageUploadButton,
   link,
   mbLogoLink,
   setBusy,
@@ -179,9 +179,8 @@ function initReleaseGroupPage() {
   let currentGroup = null;
   let currentRelease = null;
   let heroRefreshButton = null;
-  let heroUploadButton = null;
-  let heroUploadInput = null;
   let heroSwitchButton = null;
+  let heroTools = null;
   let switchInFlight = false;
   let coverInFlight = false;
 
@@ -256,6 +255,9 @@ function initReleaseGroupPage() {
         toast('No cover art found.', 'info');
         return;
       }
+      // Rebuild the hero: the page may be showing the disc fallback
+      // (no <img> to bust) when there was no cached cover before.
+      renderHeroCover();
       bustCoverImgs();
       toast(`Cover refreshed (${row.source}).`, 'ok');
     } catch (error) {
@@ -268,25 +270,42 @@ function initReleaseGroupPage() {
     }
   }
 
-  function rebuildHeroCover() {
-    if (!currentGroup) return;
-    const heroCover = coverArt('group', currentGroup.id, '', { eager: true });
-    setSharedArtName(heroCover, sharedArtName('group', currentGroup.id));
-    heroArt.replaceChildren(heroCover);
-    bustCoverImgs();
+  // Renders the hero art with the upload/remove overlay. Remove only shows
+  // once the <img> proves itself; the disc fallback keeps it hidden.
+  function renderHeroCover() {
+    if (!currentGroup || !heroTools) return;
+    const art = coverArt('group', currentGroup.id, '', { eager: true });
+    setSharedArtName(art, sharedArtName('group', currentGroup.id));
+    heroArt.replaceChildren(art, heroTools.tools);
+    syncCoverRemove(art);
+    if (heroTools) {
+      heroTools.tools.hidden = !currentRelease;
+    }
   }
 
-  async function uploadCover(file, button) {
+  function syncCoverRemove(art) {
+    heroTools.setHasArt(false);
+    if (art.tagName !== 'IMG') return;
+    if (art.complete && art.naturalWidth > 0) {
+      heroTools.setHasArt(true);
+      return;
+    }
+    art.addEventListener('load', () => heroTools.setHasArt(true));
+    art.addEventListener('error', () => heroTools.setHasArt(false));
+  }
+
+  async function uploadCover(file) {
     if (!currentRelease || coverInFlight) return;
     coverInFlight = true;
-    setBusy(button, true, 'Uploading…');
+    heroTools.setBusy(true);
     try {
       const row = await api.uploadReleaseCover(currentRelease.id, file);
       if (!row) {
         toast('Upload finished with no cover.', 'info');
         return;
       }
-      rebuildHeroCover();
+      renderHeroCover();
+      bustCoverImgs();
       toast(
         'Cover uploaded. Linked files are updating in the background.',
         'ok',
@@ -297,7 +316,53 @@ function initReleaseGroupPage() {
       toast(`Could not upload cover: ${message}`, 'error');
     } finally {
       coverInFlight = false;
-      setBusy(button, false);
+      heroTools.setBusy(false);
+    }
+  }
+
+  async function removeCover() {
+    if (!currentGroup || !currentRelease || coverInFlight) return;
+    if (
+      !window.confirm(
+        `Remove the cached cover for "${currentGroup.title}"? The cached file is deleted and linked files lose their embedded cover in the background. Upload a new cover or refresh to fetch one again.`,
+      )
+    ) {
+      return;
+    }
+    coverInFlight = true;
+    heroTools.setBusy(true);
+    try {
+      const response = await api.deleteReleaseCover(currentRelease.id);
+      if (response.status === 404) {
+        toast('Release not found.', 'error');
+        return;
+      }
+      if (!response.ok) {
+        let message = response.statusText;
+        try {
+          const body = await response.json();
+          if (typeof body?.error === 'string' && body.error) {
+            message = body.error;
+          }
+        } catch {
+          /* keep status text */
+        }
+        toast(`Could not remove cover: ${message}`, 'error');
+        return;
+      }
+      renderHeroCover();
+      bustCoverImgs();
+      toast(
+        'Cover removed. Linked files are updating in the background.',
+        'ok',
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      toast(`Could not remove cover: ${message}`, 'error');
+    } finally {
+      coverInFlight = false;
+      heroTools.setBusy(false);
     }
   }
 
@@ -358,7 +423,7 @@ function initReleaseGroupPage() {
     currentRelease = release;
     const hasRelease = Boolean(release);
     if (heroRefreshButton) heroRefreshButton.hidden = !hasRelease;
-    if (heroUploadButton) heroUploadButton.hidden = !hasRelease;
+    if (heroTools) heroTools.tools.hidden = !hasRelease;
     if (heroSwitchButton) heroSwitchButton.hidden = !hasRelease;
 
     if (!release) {
@@ -482,9 +547,15 @@ function initReleaseGroupPage() {
         crumbArtist.textContent = 'Artists';
         crumbArtist.href = '/';
       }
-      const heroCover = coverArt('group', group.id, '', { eager: true });
-      setSharedArtName(heroCover, sharedArtName('group', group.id));
-      heroArt.replaceChildren(heroCover);
+      heroTools = coverTools({
+        uploadLabel: 'Upload cover',
+        uploadTitle: 'Upload a JPEG, PNG, or WebP cover (max 15MB)',
+        removeLabel: 'Remove cover',
+        removeTitle: 'Remove the cached cover',
+        onUpload: (file) => void uploadCover(file),
+        onRemove: () => void removeCover(),
+      });
+      renderHeroCover();
       title.textContent = group.title;
       credit.replaceChildren(creditFragment(group.credit));
       groupMb.href = mbUrl.releaseGroup(group.id);
@@ -517,17 +588,6 @@ function initReleaseGroupPage() {
         if (currentRelease) void refreshCover(currentRelease, refreshButton);
       });
       heroRefreshButton = refreshButton;
-      const { button: uploadButton, input: uploadInput } =
-        imageUploadButton(
-          'Upload cover',
-          'btn btn--secondary btn--icon btn--icon-upload',
-          {
-            title: 'Upload a JPEG, PNG, or WebP cover (max 15MB)',
-            onFile: (file) => void uploadCover(file, uploadButton),
-          },
-        );
-      heroUploadButton = uploadButton;
-      heroUploadInput = uploadInput;
       const deleteButton = el(
         'button',
         'btn btn--danger btn--icon btn--icon-trash',
@@ -537,13 +597,7 @@ function initReleaseGroupPage() {
       deleteButton.addEventListener('click', () =>
         deleteGroup(deleteButton),
       );
-      actions.replaceChildren(
-        switchButton,
-        refreshButton,
-        uploadButton,
-        uploadInput,
-        deleteButton,
-      );
+      actions.replaceChildren(switchButton, refreshButton, deleteButton);
 
       renderRelease(release, group);
       status.hidden = true;

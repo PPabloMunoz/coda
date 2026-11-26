@@ -51,7 +51,8 @@ contract is in [docs/library.md](docs/library.md).
   ([docs/navidrome.md](docs/navidrome.md)).
 - Cover art from Cover Art Archive, Deezer and iTunes; artist photos from
   Deezer and Wikimedia Commons. Custom JPEG/PNG/WebP uploads replace the
-  cached art (release uploads re-embed into linked files).
+  cached art (release uploads re-embed into linked files); covers can also
+  be removed entirely from the hero image overlay.
 - Embedded web UI: plain HTML/CSS/JS, no build step, no Node.
 
 ## Install

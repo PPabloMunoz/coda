@@ -13,6 +13,7 @@ import (
 	"go.senan.xyz/taglib"
 
 	"github.com/ppablomunoz/coda/internal/artwork"
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/store"
 	"github.com/ppablomunoz/coda/internal/utils"
 )
@@ -226,4 +227,138 @@ func TestEmbedReleaseCoverStaleRowDropped(t *testing.T) {
 func TestExecEmbedReleaseCoverNoPanic(t *testing.T) {
 	r, _, _ := newTestRunner(t)
 	r.exec(context.Background(), Task{Key: TaskEmbedReleaseCover, ID: embedRelID})
+}
+
+func TestEnqueueClearReleaseCoverDedup(t *testing.T) {
+	q := NewQueue(nil)
+	q.EnqueueClearReleaseCover("rel-1")
+	q.EnqueueClearReleaseCover("rel-1")
+	q.EnqueueClearReleaseCover("rel-2")
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := 0
+	for _, item := range q.items {
+		if item.Key == TaskClearReleaseCover && item.ID == "rel-1" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("clear tasks for rel-1 = %d, want 1 (dedup)", n)
+	}
+	if len(q.items) != 2 {
+		t.Errorf("queued = %d, want 2 (rel-1 + rel-2)", len(q.items))
+	}
+}
+
+func TestEnsureCoverRemovedNeverFetches(t *testing.T) {
+	root := t.TempDir()
+	r, st := newEmbedRunner(t, root)
+	seedEmbedRelease(t, st)
+	if err := SaveCover(context.Background(), st, r.coverDir, embedRelID, &artwork.Result{
+		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+	}); err != nil {
+		t.Fatalf("SaveCover = %v", err)
+	}
+	if err := st.MarkCoverRemoved(context.Background(), embedRelID); err != nil {
+		t.Fatalf("MarkCoverRemoved = %v", err)
+	}
+
+	// The cached row exists but must not be served, and no fetch happens
+	// (nil fetcher would answer NotFound for a plain miss too — the point
+	// is the live row is suppressed).
+	if _, err := EnsureCover(context.Background(), st, nil, r.coverDir, embedRelID, "", ""); !apperrors.Is(err, apperrors.ErrNotFound) {
+		t.Errorf("EnsureCover removed = %v, want NOT_FOUND", err)
+	}
+}
+
+func TestEmbedCoverLeavesTombstone(t *testing.T) {
+	root := t.TempDir()
+	r, st := newEmbedRunner(t, root)
+	seedEmbedRelease(t, st)
+	path := syncAndLinkWav(t, st, root, "song.wav")
+	if err := st.MarkCoverRemoved(context.Background(), embedRelID); err != nil {
+		t.Fatalf("MarkCoverRemoved = %v", err)
+	}
+
+	if err := EmbedCover(context.Background(), st, r.coverDir, path, embedRelID); err != nil {
+		t.Fatalf("EmbedCover removed = %v, want nil no-op", err)
+	}
+	row, err := st.GetCover(context.Background(), embedRelID)
+	if err != nil {
+		t.Fatalf("GetCover = %v", err)
+	}
+	if !row.Removed {
+		t.Error("tombstone dropped by EmbedCover, want it kept")
+	}
+	// embedReleaseCover also no-ops on the tombstone.
+	r.embedReleaseCover(context.Background(), embedRelID)
+	if row, err := st.GetCover(context.Background(), embedRelID); err != nil || !row.Removed {
+		t.Errorf("tombstone after embed task = %+v, %v; want kept", row, err)
+	}
+}
+
+func TestClearReleaseCoverRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	r, st := newEmbedRunner(t, root)
+	seedEmbedRelease(t, st)
+	path := syncAndLinkWav(t, st, root, "song.wav")
+	if err := SaveCover(context.Background(), st, r.coverDir, embedRelID, &artwork.Result{
+		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+	}); err != nil {
+		t.Fatalf("SaveCover = %v", err)
+	}
+	r.embedReleaseCover(context.Background(), embedRelID)
+	if got, err := taglib.ReadImage(path); err != nil || !bytes.Equal(got, embedPNG) {
+		t.Fatalf("embedded setup = %d bytes, %v; want uploaded art", len(got), err)
+	}
+
+	if err := st.MarkCoverRemoved(context.Background(), embedRelID); err != nil {
+		t.Fatalf("MarkCoverRemoved = %v", err)
+	}
+	r.clearReleaseCover(context.Background(), embedRelID)
+
+	if got, err := taglib.ReadImage(path); err != nil {
+		t.Fatalf("ReadImage = %v", err)
+	} else if len(got) != 0 {
+		t.Errorf("embedded bytes after clear = %d, want 0", len(got))
+	}
+	// The tombstone survives the file wipe so GETs stay 404.
+	if row, err := st.GetCover(context.Background(), embedRelID); err != nil || !row.Removed {
+		t.Errorf("tombstone after clear = %+v, %v; want kept", row, err)
+	}
+}
+
+func TestClearReleaseCoverSkipsLiveCover(t *testing.T) {
+	root := t.TempDir()
+	r, st := newEmbedRunner(t, root)
+	seedEmbedRelease(t, st)
+	path := syncAndLinkWav(t, st, root, "song.wav")
+	if err := SaveCover(context.Background(), st, r.coverDir, embedRelID, &artwork.Result{
+		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+	}); err != nil {
+		t.Fatalf("SaveCover = %v", err)
+	}
+	r.embedReleaseCover(context.Background(), embedRelID)
+
+	// A removal followed by a new upload clears the tombstone; the queued
+	// clear must not wipe the fresh art.
+	if err := st.MarkCoverRemoved(context.Background(), embedRelID); err != nil {
+		t.Fatalf("MarkCoverRemoved = %v", err)
+	}
+	if err := SaveCover(context.Background(), st, r.coverDir, embedRelID, &artwork.Result{
+		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+	}); err != nil {
+		t.Fatalf("re-SaveCover = %v", err)
+	}
+	r.clearReleaseCover(context.Background(), embedRelID)
+
+	if got, err := taglib.ReadImage(path); err != nil || !bytes.Equal(got, embedPNG) {
+		t.Errorf("embedded bytes after skipped clear differ, err=%v", err)
+	}
+}
+
+func TestExecClearReleaseCoverNoPanic(t *testing.T) {
+	r, _, _ := newTestRunner(t)
+	r.exec(context.Background(), Task{Key: TaskClearReleaseCover, ID: embedRelID})
 }

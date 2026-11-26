@@ -19,9 +19,15 @@ before upgrading and back up your database (see
 ### Added
 
 - Cover and artist-photo uploads (`PUT /releases/:id/cover`,
-  `PUT /artists/:id/cover`, plus "Upload cover"/"Upload photo" actions in
-  the web UI). Release uploads replace the cached art immediately and queue
-  a background task that re-embeds it into the release's linked files.
+  `PUT /artists/:id/cover`, plus hover-overlay "Upload cover"/"Upload
+  photo" actions on the hero image in the web UI). Release uploads replace
+  the cached art immediately and queue a background task that re-embeds it
+  into the release's linked files.
+- Cover and artist-photo removal (`DELETE /releases/:id/cover`,
+  `DELETE /artists/:id/cover`, plus a hover-overlay remove action). The
+  cached file is deleted and stays deleted until the next upload or
+  refresh; removing a release cover also queues a background task that
+  clears the embedded art from its linked files.
 - User and contributor documentation under `docs/` (install,
   configuration, library, navidrome, api, operations, architecture), a
   CONTRIBUTING guide, a security policy, a code of conduct, and this

@@ -64,6 +64,10 @@ func (r *Runner) exec(ctx context.Context, t Task) {
 		sctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
 		r.embedReleaseCover(sctx, t.ID)
+	case TaskClearReleaseCover:
+		sctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancel()
+		r.clearReleaseCover(sctx, t.ID)
 	default:
 		r.log.Warnf("task unknown key %q, skipping", t.Key)
 	}

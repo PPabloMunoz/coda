@@ -346,6 +346,8 @@ like:
 | GET    | `/artists/:id/cover`         | Artist photo image                |
 | PUT    | `/releases/:id/cover`        | Upload a release cover            |
 | PUT    | `/artists/:id/cover`         | Upload an artist photo            |
+| DELETE | `/releases/:id/cover`        | Remove the release cover          |
+| DELETE | `/artists/:id/cover`         | Remove the artist photo           |
 | POST   | `/releases/:id/cover/refresh`| Re-fetch release cover            |
 | POST   | `/artists/:id/cover/refresh` | Re-fetch artist photo             |
 
@@ -392,6 +394,20 @@ Uploading a release cover also queues a background task that re-embeds the
 new art into every file already linked to the release. The upload itself
 succeeds first; embedding failures only log (check the server logs), so a
 file that can't be rewritten doesn't fail the upload.
+
+### Removing covers
+
+`DELETE /releases/:id/cover` and `DELETE /artists/:id/cover` delete the
+cached image file and answer `204` with no body. Unknown ids answer `404`;
+removing an already-removed or never-cached cover still answers `204`.
+
+A removal is sticky: it records a tombstone so later `GET …/cover` calls
+stay `404` instead of lazy-fetching provider art again. Only a new upload
+or a refresh clears it (refresh fetches provider art again as usual).
+
+Removing a release cover also queues a background task that clears the
+embedded front cover from every file already linked to the release. Like
+the embed task, the removal succeeds first and per-file failures only log.
 
 ## Async operations
 

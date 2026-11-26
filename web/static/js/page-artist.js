@@ -11,9 +11,9 @@ import { formatDateTime, plural } from './format.js';
 import {
   byId,
   clear,
+  coverTools,
   el,
   emptyState,
-  imageUploadButton,
   mapLimit,
   normalize,
   setBusy,
@@ -115,6 +115,7 @@ function initArtistPage() {
   let appearsGroups = [];
   let artist = null;
   let coverInFlight = false;
+  let heroTools = null;
   let importPollTimer;
   let importPollToken = 0;
   let lastImportState = 'idle';
@@ -295,6 +296,9 @@ function initArtistPage() {
         toast('No photo found for this artist.', 'info');
         return;
       }
+      // Rebuild the hero: the page may be showing the avatar fallback
+      // (no <img> to bust) when there was no cached photo before.
+      renderHeroPhoto();
       bustCoverImgs();
       toast(`Artist photo refreshed (${row.source}).`, 'ok');
     } catch (error) {
@@ -307,36 +311,44 @@ function initArtistPage() {
     }
   }
 
-  function rebuildHeroPhoto() {
-    heroArt.replaceChildren(
-      coverArt('artist', artist.id, '', {
-        eager: true,
-        fallback: () =>
-          artistAvatar(artist.id, artist.name, '', {
-            variant: 'initials',
-          }),
-      }),
-    );
-    setSharedArtName(
-      heroArt.firstElementChild,
-      sharedArtName('artist', artist.id),
-    );
-    bustCoverImgs();
+  // Renders the hero art with the upload/remove overlay. Remove only shows
+  // once the <img> proves itself; fallback tiles keep it hidden.
+  function renderHeroPhoto() {
+    const art = coverArt('artist', artist.id, '', {
+      eager: true,
+      fallback: () =>
+        artistAvatar(artist.id, artist.name, '', {
+          variant: 'initials',
+        }),
+    });
+    setSharedArtName(art, sharedArtName('artist', artist.id));
+    heroArt.replaceChildren(art, heroTools.tools);
+    syncPhotoRemove(art);
   }
 
-  async function uploadArtistPhoto(file, button) {
+  function syncPhotoRemove(art) {
+    heroTools.setHasArt(false);
+    if (art.tagName !== 'IMG') return;
+    if (art.complete && art.naturalWidth > 0) {
+      heroTools.setHasArt(true);
+      return;
+    }
+    art.addEventListener('load', () => heroTools.setHasArt(true));
+    art.addEventListener('error', () => heroTools.setHasArt(false));
+  }
+
+  async function uploadArtistPhoto(file) {
     if (!artist || coverInFlight) return;
     coverInFlight = true;
-    setBusy(button, true, 'Uploading…');
+    heroTools.setBusy(true);
     try {
       const row = await api.uploadArtistCover(artist.id, file);
       if (!row) {
         toast('Upload finished with no photo.', 'info');
         return;
       }
-      // Rebuild the hero: the page may be showing the avatar fallback
-      // (no <img> to bust) when there was no cached photo before.
-      rebuildHeroPhoto();
+      renderHeroPhoto();
+      bustCoverImgs();
       toast('Artist photo uploaded.', 'ok');
     } catch (error) {
       const message =
@@ -344,7 +356,50 @@ function initArtistPage() {
       toast(`Could not upload photo: ${message}`, 'error');
     } finally {
       coverInFlight = false;
-      setBusy(button, false);
+      heroTools.setBusy(false);
+    }
+  }
+
+  async function removeArtistPhoto() {
+    if (!artist || coverInFlight) return;
+    if (
+      !window.confirm(
+        `Remove the artist photo for ${artist.name}? The cached file is deleted. Upload a new photo or refresh to fetch one again.`,
+      )
+    ) {
+      return;
+    }
+    coverInFlight = true;
+    heroTools.setBusy(true);
+    try {
+      const response = await api.deleteArtistCover(artist.id);
+      if (response.status === 404) {
+        toast('Artist not found.', 'error');
+        return;
+      }
+      if (!response.ok) {
+        let message = response.statusText;
+        try {
+          const body = await response.json();
+          if (typeof body?.error === 'string' && body.error) {
+            message = body.error;
+          }
+        } catch {
+          /* keep status text */
+        }
+        toast(`Could not remove photo: ${message}`, 'error');
+        return;
+      }
+      renderHeroPhoto();
+      bustCoverImgs();
+      toast('Artist photo removed.', 'ok');
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      toast(`Could not remove photo: ${message}`, 'error');
+    } finally {
+      coverInFlight = false;
+      heroTools.setBusy(false);
     }
   }
 
@@ -700,19 +755,15 @@ function initArtistPage() {
       document.title = `${artist.name} · Coda`;
       crumb.textContent = artist.name;
 
-      heroArt.replaceChildren(
-        coverArt('artist', artist.id, '', {
-          eager: true,
-          fallback: () =>
-            artistAvatar(artist.id, artist.name, '', {
-              variant: 'initials',
-            }),
-        }),
-      );
-      setSharedArtName(
-        heroArt.firstElementChild,
-        sharedArtName('artist', artist.id),
-      );
+      heroTools = coverTools({
+        uploadLabel: 'Upload photo',
+        uploadTitle: 'Upload a JPEG, PNG, or WebP photo (max 15MB)',
+        removeLabel: 'Remove photo',
+        removeTitle: 'Remove the cached photo',
+        onUpload: (file) => void uploadArtistPhoto(file),
+        onRemove: () => void removeArtistPhoto(),
+      });
+      renderHeroPhoto();
       artistName.textContent = artist.name;
 
       const meta = [];
@@ -741,16 +792,6 @@ function initArtistPage() {
         () => void refreshArtistCover(photoButton),
       );
       artistActions.append(photoButton);
-      const { button: uploadPhotoButton, input: uploadPhotoInput } =
-        imageUploadButton(
-          'Upload photo',
-          'btn btn--secondary btn--icon btn--icon-upload',
-          {
-            title: 'Upload a JPEG, PNG, or WebP photo (max 15MB)',
-            onFile: (file) => void uploadArtistPhoto(file, uploadPhotoButton),
-          },
-        );
-      artistActions.append(uploadPhotoButton, uploadPhotoInput);
       const refreshButton = el(
         'button',
         'btn btn--secondary btn--icon btn--icon-refresh',
@@ -771,8 +812,6 @@ function initArtistPage() {
       );
       artistActions.replaceChildren(
         photoButton,
-        uploadPhotoButton,
-        uploadPhotoInput,
         refreshButton,
         deleteButton,
       );

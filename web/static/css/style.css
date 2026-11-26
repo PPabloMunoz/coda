@@ -2800,6 +2800,73 @@ dialog[open] {
 	background: var(--warning);
 }
 
+/* ---------- hero media overlay (upload/remove on hover) ---------- */
+
+.hero-media {
+  position: relative;
+}
+
+.hero-media__tools {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  display: flex;
+  gap: 0.45rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms var(--ease-out);
+}
+
+.hero-media:hover .hero-media__tools,
+.hero-media:focus-within .hero-media__tools {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .hero-media__tools {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.hero-media__btn {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  font-size: 1rem;
+  color: #fff;
+  background: rgb(10 10 12 / 0.72);
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-radius: 8px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.hero-media__btn:hover {
+  background: rgb(10 10 12 / 0.88);
+}
+
+.hero-media__btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.hero-media__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.hero-media__btn[hidden] {
+  display: none;
+}
+
+.hero-media__tools[hidden] {
+  display: none;
+}
+
 /* ---------- buttons with icons ---------- */
 
 .btn--icon::before {

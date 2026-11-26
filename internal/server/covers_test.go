@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/ppablomunoz/coda/internal/artwork"
@@ -187,5 +188,101 @@ func TestUploadArtistCoverUnknownArtist(t *testing.T) {
 	w := doRawRequest(t, env, "PUT", "/api/v1/artists/00000000-0000-4000-8000-000000000000/cover", tinyPNG, "image/png")
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("unknown = %d, want 404", w.Code)
+	}
+}
+
+func TestDeleteReleaseCoverRoundTrip(t *testing.T) {
+	env := newTestEnv(t)
+	seedUploadRelease(t, env)
+
+	w := doRawRequest(t, env, "PUT", "/api/v1/releases/"+uploadRelID+"/cover", tinyPNG, "image/png")
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload = %d, want 200", w.Code)
+	}
+
+	w = doRawRequest(t, env, "DELETE", "/api/v1/releases/"+uploadRelID+"/cover", nil, "")
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d %q, want 204", w.Code, w.Body.String())
+	}
+
+	// The cached file is gone and the GET stays 404 (no lazy refetch).
+	entries, err := os.ReadDir(env.coverDir)
+	if err != nil {
+		t.Fatalf("read cover dir = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("cover dir holds %d files, want 0", len(entries))
+	}
+	w = doRequest(t, env.router, "GET", "/api/v1/releases/"+uploadRelID+"/cover", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("get after delete = %d, want 404", w.Code)
+	}
+	row, err := env.st.GetCover(context.Background(), uploadRelID)
+	if err != nil {
+		t.Fatalf("GetCover = %v", err)
+	}
+	if !row.Removed {
+		t.Error("Removed = false, want tombstone kept")
+	}
+
+	// Idempotent: a second delete still answers 204.
+	w = doRawRequest(t, env, "DELETE", "/api/v1/releases/"+uploadRelID+"/cover", nil, "")
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("second delete = %d, want 204", w.Code)
+	}
+
+	// A new upload clears the removal and serves again.
+	w = doRawRequest(t, env, "PUT", "/api/v1/releases/"+uploadRelID+"/cover", tinyPNG, "image/png")
+	if w.Code != http.StatusOK {
+		t.Fatalf("re-upload = %d, want 200", w.Code)
+	}
+	w = doRequest(t, env.router, "GET", "/api/v1/releases/"+uploadRelID+"/cover", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get after re-upload = %d, want 200", w.Code)
+	}
+}
+
+func TestDeleteReleaseCoverErrors(t *testing.T) {
+	env := newTestEnv(t)
+
+	w := doRawRequest(t, env, "DELETE", "/api/v1/releases/not-a-uuid/cover", nil, "")
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("bad id = %d, want 400", w.Code)
+	}
+	w = doRawRequest(t, env, "DELETE", "/api/v1/releases/00000000-0000-4000-8000-000000000000/cover", nil, "")
+	if w.Code != http.StatusNotFound {
+		t.Errorf("unknown = %d, want 404", w.Code)
+	}
+}
+
+func TestDeleteArtistCoverRoundTrip(t *testing.T) {
+	env := newTestEnv(t)
+	seedUploadRelease(t, env)
+
+	w := doRawRequest(t, env, "PUT", "/api/v1/artists/"+uploadArtistID+"/cover", tinyPNG, "image/png")
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload = %d, want 200", w.Code)
+	}
+
+	w = doRawRequest(t, env, "DELETE", "/api/v1/artists/"+uploadArtistID+"/cover", nil, "")
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d %q, want 204", w.Code, w.Body.String())
+	}
+
+	entries, err := os.ReadDir(env.coverDir)
+	if err != nil {
+		t.Fatalf("read cover dir = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("cover dir holds %d files, want 0", len(entries))
+	}
+	w = doRequest(t, env.router, "GET", "/api/v1/artists/"+uploadArtistID+"/cover", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("get after delete = %d, want 404", w.Code)
+	}
+
+	w = doRawRequest(t, env, "DELETE", "/api/v1/artists/00000000-0000-4000-8000-000000000000/cover", nil, "")
+	if w.Code != http.StatusNotFound {
+		t.Errorf("unknown = %d, want 404", w.Code)
 	}
 }

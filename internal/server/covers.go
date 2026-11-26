@@ -226,6 +226,61 @@ func (h *Handler) uploadArtistCover(c *gin.Context) {
 	c.JSON(http.StatusOK, row)
 }
 
+// deleteReleaseCover removes the cached cover file for a release and records
+// a tombstone so later GETs stay 404 instead of lazy-fetching provider art
+// again. Idempotent: removing an already-removed or never-cached cover
+// still answers 204. A background task clears the embedded front cover
+// from the release's linked files. Refresh fetches provider art again and
+// clears the removal, as does a new upload.
+func (h *Handler) deleteReleaseCover(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	releaseID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetRelease(ctx, releaseID, false); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	if err := h.st.MarkCoverRemoved(ctx, releaseID); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	removeCoverFiles(h.coverDir, releaseID)
+	h.queue.EnqueueClearReleaseCover(releaseID)
+	c.Status(http.StatusNoContent)
+}
+
+// deleteArtistCover removes the cached artist photo and records a tombstone
+// so later GETs stay 404 instead of lazy-fetching a provider photo again.
+// Idempotent: removing an already-removed or never-cached photo still
+// answers 204. Artist photos are display-only, so no background work is
+// queued. Refresh fetches a provider photo again and clears the removal,
+// as does a new upload.
+func (h *Handler) deleteArtistCover(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	artistID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetArtistByID(ctx, artistID); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	if err := h.st.MarkArtistCoverRemoved(ctx, artistID); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	removeArtistCoverFiles(h.coverDir, artistID)
+	c.Status(http.StatusNoContent)
+}
+
 // readCoverUpload reads a raw image upload body with the same size cap as
 // the provider fetcher and sniffs the real content type from magic bytes.
 // Only JPEG, PNG, and WebP are accepted.

@@ -328,33 +328,73 @@ export const COVER_UPLOAD_MAX_BYTES = 15 * 1024 * 1024;
 export const COVER_UPLOAD_ACCEPT = 'image/jpeg,image/png,image/webp';
 
 /**
- * An upload action: a button that opens a hidden file picker and calls
- * `onFile` with the picked image. Callers append both nodes (the input is
- * hidden) and drive their own busy state inside `onFile`.
+ * Hover overlay for the detail hero art: icon-only upload + remove buttons
+ * over the image, revealed on hover/focus (always visible on touch).
+ * Callers render the art node, append `tools` to the same hero container,
+ * and drive `setHasArt` as the image proves itself so Remove only shows
+ * for real art. Busy state is the caller's (disable both buttons).
  */
-export function imageUploadButton(label, className, options = {}) {
-  const { title, accept = COVER_UPLOAD_ACCEPT, onFile } = options;
-  const button = el('button', className, label);
-  button.type = 'button';
-  if (title) button.title = title;
+export function coverTools(options = {}) {
+  const {
+    uploadLabel = 'Upload',
+    uploadTitle,
+    removeLabel = 'Remove',
+    removeTitle,
+    onUpload,
+    onRemove,
+  } = options;
+  const tools = el('div', 'hero-media__tools');
+  tools.setAttribute('role', 'group');
+  tools.setAttribute('aria-label', 'Artwork actions');
+  const uploadButton = el(
+    'button',
+    'hero-media__btn btn--icon btn--icon-upload',
+  );
+  uploadButton.type = 'button';
+  uploadButton.setAttribute('aria-label', uploadLabel);
+  if (uploadTitle) uploadButton.title = uploadTitle;
+  const removeButton = el(
+    'button',
+    'hero-media__btn btn--icon btn--icon-trash',
+  );
+  removeButton.type = 'button';
+  removeButton.setAttribute('aria-label', removeLabel);
+  if (removeTitle) removeButton.title = removeTitle;
+  removeButton.hidden = true;
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = accept;
+  input.accept = COVER_UPLOAD_ACCEPT;
   input.hidden = true;
   input.tabIndex = -1;
   input.setAttribute('aria-hidden', 'true');
-  button.addEventListener('click', () => input.click());
+  uploadButton.addEventListener('click', () => input.click());
   input.addEventListener('change', () => {
     const file = input.files?.[0];
     input.value = '';
-    if (!file || typeof onFile !== 'function') return;
+    if (!file || typeof onUpload !== 'function') return;
     if (file.size > COVER_UPLOAD_MAX_BYTES) {
       toast('That image is over the 15MB limit.', 'error');
       return;
     }
-    void onFile(file);
+    void onUpload(file);
   });
-  return { button, input };
+  removeButton.addEventListener('click', () => {
+    if (typeof onRemove === 'function') void onRemove();
+  });
+  tools.append(uploadButton, removeButton, input);
+  return {
+    tools,
+    uploadButton,
+    uploadInput: input,
+    removeButton,
+    setHasArt(has) {
+      removeButton.hidden = !has;
+    },
+    setBusy(busy) {
+      uploadButton.disabled = busy;
+      removeButton.disabled = busy;
+    },
+  };
 }
 
 export async function mapLimit(items, limit, fn) {

@@ -8,6 +8,7 @@ const (
 	TaskPruneArtists          TaskKey = "prune-artists"
 	TaskDeleteInactiveArtists TaskKey = "delete-inactive-artists"
 	TaskEmbedReleaseCover     TaskKey = "embed-release-cover"
+	TaskClearReleaseCover     TaskKey = "clear-release-cover"
 )
 
 type Task struct {
