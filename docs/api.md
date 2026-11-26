@@ -71,11 +71,16 @@ integers; other values are `INVALID_ID` (400).
 `GET /health` returns `200` with the plain text `ok` (not JSON).
 
 `POST /scan` always returns `202` with an empty body; the scan runs
-asynchronously. A pending scan is not enqueued twice, but a new scan queues
-behind one that is already running.
+asynchronously. A pending scan is not enqueued twice (a force request
+upgrades the pending scan), but a new scan queues behind one that is
+already running. `?force_prune=true` allows pruning a root whose complete
+walk yields zero files; without it the empty root keeps its rows, and
+incomplete walks never prune even with force. An invalid `force_prune`
+value is `400 INVALID_INPUT`.
 
 ```sh
 curl -X POST http://localhost:8687/api/v1/scan
+curl -X POST 'http://localhost:8687/api/v1/scan?force_prune=true'
 ```
 
 ## Stats

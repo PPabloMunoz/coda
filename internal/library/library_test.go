@@ -20,7 +20,7 @@ func writeFile(t *testing.T, path string) {
 func collectScan(t *testing.T, roots []string) []File {
 	t.Helper()
 	var got []File
-	if err := Scan(context.Background(), roots, func(f File) error {
+	if _, err := Scan(context.Background(), roots, func(f File) error {
 		got = append(got, f)
 		return nil
 	}); err != nil {
@@ -73,7 +73,7 @@ func TestScanSkipsSymlinks(t *testing.T) {
 
 func TestScanEmptyRoots(t *testing.T) {
 	called := false
-	if err := Scan(context.Background(), nil, func(File) error {
+	if _, err := Scan(context.Background(), nil, func(File) error {
 		called = true
 		return nil
 	}); err != nil {
@@ -89,9 +89,96 @@ func TestScanContextCancel(t *testing.T) {
 	writeFile(t, filepath.Join(root, "a.mp3"))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := Scan(ctx, []string{root}, func(File) error { return nil })
+	_, err := Scan(ctx, []string{root}, func(File) error { return nil })
 	if err == nil {
 		t.Error("Scan(cancelled) = nil, want context error")
+	}
+}
+
+func TestScanReportsCompleteRoot(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "a.mp3"))
+	writeFile(t, filepath.Join(root, "sub", "b.flac"))
+
+	statuses, err := Scan(context.Background(), []string{root}, func(File) error { return nil })
+	if err != nil {
+		t.Fatalf("Scan = %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("statuses = %v, want 1 entry", statuses)
+	}
+	if !statuses[0].Walked {
+		t.Errorf("Walked = false, want true")
+	}
+	if statuses[0].WalkErr != nil {
+		t.Errorf("WalkErr = %v, want nil", statuses[0].WalkErr)
+	}
+	if statuses[0].Files != 2 {
+		t.Errorf("Files = %d, want 2", statuses[0].Files)
+	}
+}
+
+func TestScanMissingRootIncomplete(t *testing.T) {
+	good := t.TempDir()
+	writeFile(t, filepath.Join(good, "a.mp3"))
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+
+	var got []File
+	statuses, err := Scan(context.Background(), []string{missing, good}, func(f File) error {
+		got = append(got, f)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Scan = %v, want nil (missing root must not abort)", err)
+	}
+	if len(statuses) != 2 {
+		t.Fatalf("statuses = %v, want 2 entries", statuses)
+	}
+	if statuses[0].Walked {
+		t.Error("missing root Walked = true, want false")
+	}
+	if statuses[0].WalkErr == nil {
+		t.Error("missing root WalkErr = nil, want an error")
+	}
+	if statuses[0].Files != 0 {
+		t.Errorf("missing root Files = %d, want 0", statuses[0].Files)
+	}
+	if !statuses[1].Walked || statuses[1].Files != 1 {
+		t.Errorf("good root status = %+v, want Walked with 1 file", statuses[1])
+	}
+	if len(got) != 1 {
+		t.Errorf("files = %d, want 1 (good root still scanned)", len(got))
+	}
+}
+
+func TestScanUnreadableSubdirIncomplete(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "top.mp3"))
+	sub := filepath.Join(root, "locked")
+	writeFile(t, filepath.Join(sub, "hidden.mp3"))
+	if err := os.Chmod(sub, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(sub, 0o755) }()
+
+	// Root running with elevated privileges can still read through
+	// 0o000; skip rather than assert a platform-dependent failure.
+	if _, err := os.ReadDir(sub); err == nil {
+		t.Skip("unreadable dir still readable (likely running as root), skipping")
+	}
+
+	statuses, err := Scan(context.Background(), []string{root}, func(File) error { return nil })
+	if err != nil {
+		t.Fatalf("Scan = %v, want nil", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("statuses = %v, want 1 entry", statuses)
+	}
+	if statuses[0].Walked {
+		t.Error("Walked = true, want false for unreadable subdir")
+	}
+	if statuses[0].WalkErr == nil {
+		t.Error("WalkErr = nil, want an error for unreadable subdir")
 	}
 }
 

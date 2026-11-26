@@ -46,7 +46,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 			if s.log != nil {
 				s.log.Debug("scheduler tick: enqueuing scan")
 			}
-			s.queue.EnqueueScan()
+			s.queue.EnqueueScan(false)
 		case <-pruneTicker.C:
 			if s.log != nil {
 				s.log.Debug("scheduler tick: enqueuing prune")

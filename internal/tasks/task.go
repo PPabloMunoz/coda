@@ -14,4 +14,7 @@ const (
 type Task struct {
 	Key TaskKey
 	ID  string // Data for the task if needed (e.g. artist id for refresh-artist)
+	// ForcePrune allows a scan to prune roots whose complete walk yields
+	// zero files. Incomplete walks never prune, even when set.
+	ForcePrune bool
 }

@@ -94,6 +94,16 @@ func TestPostScan(t *testing.T) {
 	if w.Code != http.StatusAccepted {
 		t.Errorf("scan = %d, want 202", w.Code)
 	}
+
+	w = doRequest(t, env.router, "POST", "/api/v1/scan?force_prune=true", nil)
+	if w.Code != http.StatusAccepted {
+		t.Errorf("force scan = %d, want 202", w.Code)
+	}
+
+	w = doRequest(t, env.router, "POST", "/api/v1/scan?force_prune=maybe", nil)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("bad force_prune = %d, want 400", w.Code)
+	}
 }
 
 func TestParseLimitAndOffset(t *testing.T) {

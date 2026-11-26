@@ -25,7 +25,7 @@ func syncWavFile(t *testing.T, st *store.Store, root, name string) (int64, strin
 	if _, err := st.SyncLocalFiles(context.Background(), []store.ScannedFile{{
 		LibraryRoot: root, Path: path,
 		SizeBytes: fi.Size(), MtimeNs: fi.ModTime().UnixNano(), FormatHint: "wav",
-	}}, "2024-01-01 00:00:00"); err != nil {
+	}}, "2024-01-01 00:00:00", store.SyncOptions{}); err != nil {
 		t.Fatalf("SyncLocalFiles = %v", err)
 	}
 	files, _, err := st.ListFiles(context.Background(), store.FileListOptions{PageOptions: store.PageOptions{Limit: 100}})

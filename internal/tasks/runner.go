@@ -51,7 +51,7 @@ func (r *Runner) exec(ctx context.Context, t Task) {
 	case TaskScanRoots:
 		sctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
-		r.scanRoots(sctx)
+		r.scanRoots(sctx, t.ForcePrune)
 	case TaskImportDiscography:
 		sctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 		defer cancel()
@@ -75,8 +75,10 @@ func (r *Runner) exec(ctx context.Context, t Task) {
 
 // scanRoots walks configured roots, syncs DB rows by path, auto-links
 // exact-MBID files (tag rewrite + move), prunes missing files, and sweeps
-// orphan credits/collaborators.
-func (r *Runner) scanRoots(ctx context.Context) {
+// orphan credits/collaborators. Roots whose walk is incomplete never prune;
+// roots whose complete walk yields zero files keep their rows unless
+// forcePrune is set.
+func (r *Runner) scanRoots(ctx context.Context, forcePrune bool) {
 	r.log.Info("scanning root folders...")
 
 	start := time.Now()
@@ -84,8 +86,9 @@ func (r *Runner) scanRoots(ctx context.Context) {
 
 	roots := r.st.RootPaths()
 	files := []store.ScannedFile{}
+	incomplete := []string{}
 	if len(roots) > 0 {
-		if err := library.Scan(ctx, roots, func(f library.File) error {
+		statuses, err := library.Scan(ctx, roots, func(f library.File) error {
 			files = append(files, store.ScannedFile{
 				LibraryRoot: f.LibraryRoot,
 				Path:        f.Path,
@@ -94,13 +97,23 @@ func (r *Runner) scanRoots(ctx context.Context) {
 				FormatHint:  f.FormatHint,
 			})
 			return nil
-		}); err != nil {
+		})
+		if err != nil {
 			r.log.Errorf("scan failed in %s: %v", time.Since(start), err)
 			return
 		}
+		for _, s := range statuses {
+			if !s.Walked {
+				r.log.Warnf("scan root=%q walk incomplete, skipping prune for its rows: %v", s.Root, s.WalkErr)
+				incomplete = append(incomplete, s.Root)
+			}
+		}
 	}
 
-	stats, err := r.st.SyncLocalFiles(ctx, files, scanStart)
+	stats, err := r.st.SyncLocalFiles(ctx, files, scanStart, store.SyncOptions{
+		IncompleteRoots: incomplete,
+		ForcePrune:      forcePrune,
+	})
 	if err != nil {
 		r.log.Errorf("scan failed in %s: %v", time.Since(start), err)
 		return
@@ -108,8 +121,8 @@ func (r *Runner) scanRoots(ctx context.Context) {
 	auto := r.autoLinkMoves(ctx)
 	r.cleanupCredits(ctx)
 	r.pruneArtists(ctx)
-	r.log.Infof("scan done: found=%d upserted=%d pruned=%d failed=%d autolinked=%d moved=%d skipped=%d in %s",
-		stats.Found, stats.Upserted, stats.Pruned, len(stats.Failed), auto.Linked, auto.Moved, auto.SkippedConflict, time.Since(start))
+	r.log.Infof("scan done: found=%d upserted=%d pruned=%d failed=%d kept_roots=%d autolinked=%d moved=%d skipped=%d in %s",
+		stats.Found, stats.Upserted, stats.Pruned, len(stats.Failed), len(stats.KeptRoots), auto.Linked, auto.Moved, auto.SkippedConflict, time.Since(start))
 }
 
 // importArtist imports an artist's discography, then prefetches covers in the

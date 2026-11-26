@@ -38,21 +38,21 @@ func testRootID(t *testing.T, st *Store) int64 {
 
 func TestSyncLocalFilesValidation(t *testing.T) {
 	st := newTestStore(t) // no roots
-	stats, err := st.SyncLocalFiles(ctx(), nil, "2024-01-01 00:00:00")
+	stats, err := st.SyncLocalFiles(ctx(), nil, "2024-01-01 00:00:00", SyncOptions{})
 	if err != nil || stats.Found != 0 {
 		t.Errorf("no-roots sync = %+v, %v; want empty", stats, err)
 	}
 
 	root := t.TempDir()
 	st2 := newTestStore(t, root)
-	if _, err := st2.SyncLocalFiles(ctx(), nil, "  "); err == nil {
+	if _, err := st2.SyncLocalFiles(ctx(), nil, "  ", SyncOptions{}); err == nil {
 		t.Error("blank scanStart = nil, want error")
 	}
 
 	if _, err := st2.SyncLocalFiles(ctx(), []ScannedFile{{
 		LibraryRoot: "/unknown", Path: "/unknown/a.mp3",
 		SizeBytes: 1, MtimeNs: 1, FormatHint: "mp3",
-	}}, "2024-01-01 00:00:00"); !apperrors.Is(err, apperrors.ErrNotFound) {
+	}}, "2024-01-01 00:00:00", SyncOptions{}); !apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Errorf("unknown root err = %v, want NOT_FOUND", err)
 	}
 }
@@ -62,8 +62,14 @@ func TestSyncLocalFilesPrunesStale(t *testing.T) {
 	st := newTestStore(t, root)
 	rootID := testRootID(t, st)
 	insertFile(t, st, rootID, root+"/old.mp3", nil)
+	keep := root + "/keep.mp3"
+	insertFile(t, st, rootID, keep, nil)
 
-	stats, err := st.SyncLocalFiles(ctx(), nil, "2024-06-01 00:00:00")
+	// Partial deletion still prunes: one file vanished, one survived.
+	stats, err := st.SyncLocalFiles(ctx(), []ScannedFile{{
+		LibraryRoot: root, Path: keep,
+		SizeBytes: 100, MtimeNs: 123, FormatHint: "mp3",
+	}}, "2024-06-01 00:00:00", SyncOptions{})
 	if err != nil {
 		t.Fatalf("SyncLocalFiles = %v", err)
 	}
@@ -74,8 +80,127 @@ func TestSyncLocalFilesPrunesStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListFiles = %v", err)
 	}
-	if total != 0 || len(files) != 0 {
-		t.Errorf("after prune total = %d, want 0", total)
+	if total != 1 || len(files) != 1 || files[0].Path != keep {
+		t.Errorf("after prune total = %d files=%v, want 1 kept %q", total, files, keep)
+	}
+}
+
+func TestSyncLocalFilesKeepsUnexpectedEmptyRoot(t *testing.T) {
+	root := t.TempDir()
+	st := newTestStore(t, root)
+	rootID := testRootID(t, st)
+	insertFile(t, st, rootID, root+"/old.mp3", nil)
+
+	// A complete walk that suddenly yields zero files keeps rows by default.
+	stats, err := st.SyncLocalFiles(ctx(), nil, "2024-06-01 00:00:00", SyncOptions{})
+	if err != nil {
+		t.Fatalf("SyncLocalFiles = %v", err)
+	}
+	if stats.Pruned != 0 {
+		t.Errorf("pruned = %d, want 0 (empty root must not prune)", stats.Pruned)
+	}
+	if len(stats.KeptRoots) != 1 || stats.KeptRoots[0] != root {
+		t.Errorf("KeptRoots = %v, want [%q]", stats.KeptRoots, root)
+	}
+	_, total, err := st.ListFiles(ctx(), FileListOptions{PageOptions: PageOptions{Limit: 20}})
+	if err != nil {
+		t.Fatalf("ListFiles = %v", err)
+	}
+	if total != 1 {
+		t.Errorf("after empty sync total = %d, want 1 (rows kept)", total)
+	}
+}
+
+func TestSyncLocalFilesForcePrunesEmptyRoot(t *testing.T) {
+	root := t.TempDir()
+	st := newTestStore(t, root)
+	rootID := testRootID(t, st)
+	insertFile(t, st, rootID, root+"/old.mp3", nil)
+
+	stats, err := st.SyncLocalFiles(ctx(), nil, "2024-06-01 00:00:00", SyncOptions{ForcePrune: true})
+	if err != nil {
+		t.Fatalf("SyncLocalFiles = %v", err)
+	}
+	if stats.Pruned != 1 {
+		t.Errorf("pruned = %d, want 1 (force prune clears empty root)", stats.Pruned)
+	}
+	if len(stats.KeptRoots) != 0 {
+		t.Errorf("KeptRoots = %v, want empty on force prune", stats.KeptRoots)
+	}
+	_, total, err := st.ListFiles(ctx(), FileListOptions{PageOptions: PageOptions{Limit: 20}})
+	if err != nil {
+		t.Fatalf("ListFiles = %v", err)
+	}
+	if total != 0 {
+		t.Errorf("after force prune total = %d, want 0", total)
+	}
+}
+
+func TestSyncLocalFilesSkipsIncompleteRoot(t *testing.T) {
+	root := t.TempDir()
+	st := newTestStore(t, root)
+	rootID := testRootID(t, st)
+	insertFile(t, st, rootID, root+"/old.mp3", nil)
+
+	for _, opts := range []SyncOptions{
+		{IncompleteRoots: []string{root}},
+		{IncompleteRoots: []string{root}, ForcePrune: true},
+	} {
+		stats, err := st.SyncLocalFiles(ctx(), nil, "2024-06-01 00:00:00", opts)
+		if err != nil {
+			t.Fatalf("SyncLocalFiles(%+v) = %v", opts, err)
+		}
+		if stats.Pruned != 0 {
+			t.Errorf("SyncLocalFiles(%+v) pruned = %d, want 0 (incomplete never prunes)", opts, stats.Pruned)
+		}
+		if len(stats.KeptRoots) != 1 || stats.KeptRoots[0] != root {
+			t.Errorf("SyncLocalFiles(%+v) KeptRoots = %v, want [%q]", opts, stats.KeptRoots, root)
+		}
+	}
+	_, total, err := st.ListFiles(ctx(), FileListOptions{PageOptions: PageOptions{Limit: 20}})
+	if err != nil {
+		t.Fatalf("ListFiles = %v", err)
+	}
+	if total != 1 {
+		t.Errorf("after incomplete sync total = %d, want 1 (rows kept)", total)
+	}
+}
+
+func TestSyncLocalFilesPrunesPerRoot(t *testing.T) {
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	st := newTestStore(t, rootA, rootB)
+	var idA, idB int64
+	if err := st.db.QueryRow(`SELECT id FROM roots WHERE path = ?`, rootA).Scan(&idA); err != nil {
+		t.Fatalf("rootA id: %v", err)
+	}
+	if err := st.db.QueryRow(`SELECT id FROM roots WHERE path = ?`, rootB).Scan(&idB); err != nil {
+		t.Fatalf("rootB id: %v", err)
+	}
+	keepA := rootA + "/keep.mp3"
+	insertFile(t, st, idA, keepA, nil)
+	insertFile(t, st, idB, rootB+"/gone.mp3", nil)
+
+	// rootB walk incomplete: only rootA prunes (nothing stale there).
+	stats, err := st.SyncLocalFiles(ctx(), []ScannedFile{{
+		LibraryRoot: rootA, Path: keepA,
+		SizeBytes: 100, MtimeNs: 123, FormatHint: "mp3",
+	}}, "2024-06-01 00:00:00", SyncOptions{IncompleteRoots: []string{rootB}})
+	if err != nil {
+		t.Fatalf("SyncLocalFiles = %v", err)
+	}
+	if stats.Pruned != 0 {
+		t.Errorf("pruned = %d, want 0 (rootB incomplete, rootA has no stale rows)", stats.Pruned)
+	}
+	if len(stats.KeptRoots) != 1 || stats.KeptRoots[0] != rootB {
+		t.Errorf("KeptRoots = %v, want [%q]", stats.KeptRoots, rootB)
+	}
+	_, total, err := st.ListFiles(ctx(), FileListOptions{PageOptions: PageOptions{Limit: 20}})
+	if err != nil {
+		t.Fatalf("ListFiles = %v", err)
+	}
+	if total != 2 {
+		t.Errorf("total = %d, want 2 (both roots kept)", total)
 	}
 }
 
@@ -115,7 +240,7 @@ func TestSyncLocalFilesToleratesUnreadableFile(t *testing.T) {
 	stats, err := st.SyncLocalFiles(ctx(), []ScannedFile{
 		{LibraryRoot: root, Path: good, SizeBytes: fi.Size(), MtimeNs: fi.ModTime().UnixNano(), FormatHint: "mp3"},
 		{LibraryRoot: root, Path: bad, SizeBytes: 17, MtimeNs: 1, FormatHint: "mp3"},
-	}, "2024-06-01 00:00:00")
+	}, "2024-06-01 00:00:00", SyncOptions{})
 	if err != nil {
 		t.Fatalf("SyncLocalFiles = %v", err)
 	}
@@ -173,7 +298,7 @@ func TestSyncLocalFilesSkipsUnchangedFiles(t *testing.T) {
 		LibraryRoot: root, Path: path,
 		SizeBytes: fi.Size(), MtimeNs: mtime.UnixNano(), FormatHint: "mp3",
 	}
-	stats, err := st.SyncLocalFiles(ctx(), []ScannedFile{scanned}, "2024-06-01 00:00:00")
+	stats, err := st.SyncLocalFiles(ctx(), []ScannedFile{scanned}, "2024-06-01 00:00:00", SyncOptions{})
 	if err != nil {
 		t.Fatalf("SyncLocalFiles = %v", err)
 	}
@@ -191,7 +316,7 @@ func TestSyncLocalFilesSkipsUnchangedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	scanned.MtimeNs = later.UnixNano()
-	stats, err = st.SyncLocalFiles(ctx(), []ScannedFile{scanned}, "2024-06-02 00:00:00")
+	stats, err = st.SyncLocalFiles(ctx(), []ScannedFile{scanned}, "2024-06-02 00:00:00", SyncOptions{})
 	if err != nil {
 		t.Fatalf("SyncLocalFiles control = %v", err)
 	}

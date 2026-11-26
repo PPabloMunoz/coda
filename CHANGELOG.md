@@ -20,6 +20,10 @@ before upgrading and back up your database (see
   occupied destination answers `409` with the source untouched; concurrent
   links to the same destination resolve to one success and one `409` with
   no lost file.
+- Scan pruning no longer wipes links when a root is unreadable or suddenly
+  empty: the walk reports per-root completeness, incomplete roots never
+  prune, and empty-but-previously-populated roots keep their rows unless
+  the scan is forced (`POST /api/v1/scan?force_prune=true`).
 
 ### Changed
 

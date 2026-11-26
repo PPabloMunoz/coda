@@ -82,14 +82,17 @@ off by default; enable with `CODA_DEBUG=1` (or `CODA_LOG_LEVEL=debug`).
 
 **Scan finds 0 files.** Check `coda --check-config`: roots empty or wrong?
 Symlinks inside a root are skipped (never followed) — point roots at real
-directories. Unreadable directories are skipped silently; unsupported
-extensions are ignored (see the list in
-[library.md](library.md#supported-formats)).
+directories. Unreadable directories mark that root's walk incomplete and
+skip pruning for it (see the logs); unsupported extensions are ignored
+(see the list in [library.md](library.md#supported-formats)).
 
 **Files vanished from the UI.** They were pruned: gone from disk, or
 under a root you removed. Re-adding the root brings rows and links back.
-Files moved outside Coda re-appear at the new path and auto-link again if
-their tags still identify the track.
+A missing/unreadable root never prunes, and a root that suddenly yields
+zero files keeps its rows unless you forced the prune
+(`POST /api/v1/scan?force_prune=true`). Files moved outside Coda
+re-appear at the new path and auto-link again if their tags still identify
+the track.
 
 **Link fails with 409.** The destination path is already occupied. Coda
 never overwrites; resolve the duplicate by hand and retry.

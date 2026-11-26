@@ -63,20 +63,26 @@ func (q *Queue) run(ctx context.Context, exec func(context.Context, Task)) {
 	}
 }
 
-// EnqueueScan queues a library scan unless one is already pending.
-func (q *Queue) EnqueueScan() {
+// EnqueueScan queues a library scan unless one is already pending. A pending
+// scan is upgraded to a force prune when force is requested.
+// ForcePrune allows pruning roots whose complete walk yields zero files;
+// incomplete walks never prune.
+func (q *Queue) EnqueueScan(force bool) {
 	q.mu.Lock()
-	for _, t := range q.items {
+	for i, t := range q.items {
 		if t.Key == TaskScanRoots {
+			if force && !q.items[i].ForcePrune {
+				q.items[i].ForcePrune = true
+			}
 			q.mu.Unlock()
 			q.debug("task scan-roots already queued")
 			return
 		}
 	}
-	q.items = append(q.items, Task{Key: TaskScanRoots})
+	q.items = append(q.items, Task{Key: TaskScanRoots, ForcePrune: force})
 	depth := len(q.items)
 	q.mu.Unlock()
-	q.debugf("task scan-roots queued (depth=%d)", depth)
+	q.debugf("task scan-roots queued (depth=%d force=%v)", depth, force)
 	q.signal()
 }
 
