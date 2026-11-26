@@ -147,6 +147,34 @@ func (h *Handler) doRefreshReleaseCover(ctx context.Context, releaseID string) (
 	return tasks.EnsureCover(ctx, h.st, h.art, h.coverDir, releaseID, artist, rel.Title)
 }
 
+// getReleaseCoverMeta returns the cached cover metadata row for a release
+// (source, mime, size, fetched_at) without fetching anything. Unknown
+// releases, missing art, and user-removed covers answer 404 null — the web
+// client treats 404 as null, same as other entities.
+func (h *Handler) getReleaseCoverMeta(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	releaseID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetRelease(ctx, releaseID, false); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	row, err := h.st.GetCover(ctx, releaseID)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if row.Removed {
+		h.writeAppError(c, apperrors.ErrNotFound)
+		return
+	}
+	c.JSON(http.StatusOK, row)
+}
+
 // uploadReleaseCover replaces the cached cover for a release with
 // caller-supplied image bytes and queues a background re-embed into the
 // release's linked files. The body is the raw image (Content-Type is only
@@ -185,6 +213,33 @@ func (h *Handler) uploadReleaseCover(c *gin.Context) {
 		return
 	}
 	h.queue.EnqueueEmbedReleaseCover(releaseID)
+	c.JSON(http.StatusOK, row)
+}
+
+// getArtistCoverMeta returns the cached artist photo metadata row without
+// fetching anything. Unknown artists, missing photos, and user-removed
+// photos answer 404 null — the web client treats 404 as null.
+func (h *Handler) getArtistCoverMeta(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	artistID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetArtistByID(ctx, artistID); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	row, err := h.st.GetArtistCover(ctx, artistID)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if row.Removed {
+		h.writeAppError(c, apperrors.ErrNotFound)
+		return
+	}
 	c.JSON(http.StatusOK, row)
 }
 

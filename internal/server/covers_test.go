@@ -255,6 +255,92 @@ func TestDeleteReleaseCoverErrors(t *testing.T) {
 	}
 }
 
+func TestReleaseCoverMeta(t *testing.T) {
+	env := newTestEnv(t)
+	seedUploadRelease(t, env)
+
+	// No cached cover yet: 404 without fetching.
+	w := doRequest(t, env.router, "GET", "/api/v1/releases/"+uploadRelID+"/cover/meta", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("missing = %d, want 404", w.Code)
+	}
+
+	w = doRawRequest(t, env, "PUT", "/api/v1/releases/"+uploadRelID+"/cover", tinyPNG, "image/png")
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload = %d, want 200", w.Code)
+	}
+	w = doRequest(t, env.router, "GET", "/api/v1/releases/"+uploadRelID+"/cover/meta", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("meta = %d, want 200", w.Code)
+	}
+	row := decodeCoverRow(t, w.Body.Bytes())
+	if row["source"] != "upload" {
+		t.Errorf("source = %v, want upload", row["source"])
+	}
+	if row["release_id"] != uploadRelID {
+		t.Errorf("release_id = %v, want %q", row["release_id"], uploadRelID)
+	}
+
+	// Removal tombstone: meta stays 404.
+	w = doRawRequest(t, env, "DELETE", "/api/v1/releases/"+uploadRelID+"/cover", nil, "")
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d, want 204", w.Code)
+	}
+	w = doRequest(t, env.router, "GET", "/api/v1/releases/"+uploadRelID+"/cover/meta", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("meta after delete = %d, want 404", w.Code)
+	}
+
+	w = doRequest(t, env.router, "GET", "/api/v1/releases/not-a-uuid/cover/meta", nil)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("bad id = %d, want 400", w.Code)
+	}
+	w = doRequest(t, env.router, "GET", "/api/v1/releases/00000000-0000-4000-8000-000000000000/cover/meta", nil)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("unknown = %d, want 404", w.Code)
+	}
+}
+
+func TestArtistCoverMeta(t *testing.T) {
+	env := newTestEnv(t)
+	seedUploadRelease(t, env)
+
+	w := doRequest(t, env.router, "GET", "/api/v1/artists/"+uploadArtistID+"/cover/meta", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("missing = %d, want 404", w.Code)
+	}
+
+	w = doRawRequest(t, env, "PUT", "/api/v1/artists/"+uploadArtistID+"/cover", tinyPNG, "image/png")
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload = %d, want 200", w.Code)
+	}
+	w = doRequest(t, env.router, "GET", "/api/v1/artists/"+uploadArtistID+"/cover/meta", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("meta = %d, want 200", w.Code)
+	}
+	row := decodeCoverRow(t, w.Body.Bytes())
+	if row["source"] != "upload" {
+		t.Errorf("source = %v, want upload", row["source"])
+	}
+	if row["artist_id"] != uploadArtistID {
+		t.Errorf("artist_id = %v, want %q", row["artist_id"], uploadArtistID)
+	}
+
+	w = doRawRequest(t, env, "DELETE", "/api/v1/artists/"+uploadArtistID+"/cover", nil, "")
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d, want 204", w.Code)
+	}
+	w = doRequest(t, env.router, "GET", "/api/v1/artists/"+uploadArtistID+"/cover/meta", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("meta after delete = %d, want 404", w.Code)
+	}
+
+	w = doRequest(t, env.router, "GET", "/api/v1/artists/00000000-0000-4000-8000-000000000000/cover/meta", nil)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("unknown = %d, want 404", w.Code)
+	}
+}
+
 func TestDeleteArtistCoverRoundTrip(t *testing.T) {
 	env := newTestEnv(t)
 	seedUploadRelease(t, env)

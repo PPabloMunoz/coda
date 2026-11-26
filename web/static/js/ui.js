@@ -395,14 +395,22 @@ export function coverTools(options = {}) {
     if (typeof onRemove === 'function') void onRemove();
   });
   tools.append(refreshButton, uploadButton, removeButton, input);
+  const source = el('span', 'hero-media__source');
+  source.hidden = true;
+  source.setAttribute('aria-hidden', 'true');
   return {
     tools,
     refreshButton,
     uploadButton,
     uploadInput: input,
     removeButton,
+    source,
     setHasArt(has) {
       removeButton.hidden = !has;
+      if (!has) setSourceText('');
+    },
+    setSource(text) {
+      setSourceText(text);
     },
     setBusy(busy) {
       refreshButton.disabled = busy;
@@ -410,6 +418,11 @@ export function coverTools(options = {}) {
       removeButton.disabled = busy;
     },
   };
+
+  function setSourceText(text) {
+    source.textContent = text || '';
+    source.hidden = !text;
+  }
 }
 
 export async function mapLimit(items, limit, fn) {

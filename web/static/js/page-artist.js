@@ -7,7 +7,12 @@ import {
   mbUrl,
 } from './api.js';
 import { hydrateReleaseLine, releaseGroupCard } from './cards.js';
-import { formatDateTime, plural } from './format.js';
+import {
+  coverSourceBadge,
+  coverSourceText,
+  formatDateTime,
+  plural,
+} from './format.js';
 import {
   byId,
   clear,
@@ -116,6 +121,7 @@ function initArtistPage() {
   let artist = null;
   let coverInFlight = false;
   let heroTools = null;
+  let coverMetaToken = 0;
   let importPollTimer;
   let importPollToken = 0;
   let lastImportState = 'idle';
@@ -300,7 +306,10 @@ function initArtistPage() {
       // (no <img> to bust) when there was no cached photo before.
       renderHeroPhoto();
       bustCoverImgs();
-      toast(`Artist photo refreshed (${row.source}).`, 'ok');
+      toast(
+        `Artist photo refreshed (${coverSourceText(row.source)}).`,
+        'ok',
+      );
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error);
@@ -311,8 +320,9 @@ function initArtistPage() {
     }
   }
 
-  // Renders the hero art with the upload/remove overlay. Remove only shows
-  // once the <img> proves itself; fallback tiles keep it hidden.
+  // Renders the hero art with the overlay tools and source badge. Remove
+  // and the badge only show once the <img> proves itself; fallback tiles
+  // keep them hidden.
   function renderHeroPhoto() {
     const art = coverArt('artist', artist.id, '', {
       eager: true,
@@ -322,19 +332,35 @@ function initArtistPage() {
         }),
     });
     setSharedArtName(art, sharedArtName('artist', artist.id));
-    heroArt.replaceChildren(art, heroTools.tools);
-    syncPhotoRemove(art);
+    heroArt.replaceChildren(art, heroTools.tools, heroTools.source);
+    syncPhotoSource(art);
   }
 
-  function syncPhotoRemove(art) {
+  function syncPhotoSource(art) {
+    const token = ++coverMetaToken;
     heroTools.setHasArt(false);
     if (art.tagName !== 'IMG') return;
-    if (art.complete && art.naturalWidth > 0) {
+    const onLoad = () => {
       heroTools.setHasArt(true);
+      void loadPhotoSource(token);
+    };
+    if (art.complete && art.naturalWidth > 0) {
+      onLoad();
       return;
     }
-    art.addEventListener('load', () => heroTools.setHasArt(true));
+    art.addEventListener('load', onLoad);
     art.addEventListener('error', () => heroTools.setHasArt(false));
+  }
+
+  async function loadPhotoSource(token) {
+    if (!artist || token !== coverMetaToken) return;
+    try {
+      const row = await api.getArtistCoverMeta(artist.id);
+      if (token !== coverMetaToken || !artist) return;
+      heroTools.setSource(row ? coverSourceBadge(row.source) : '');
+    } catch {
+      if (token === coverMetaToken) heroTools.setSource('');
+    }
   }
 
   async function uploadArtistPhoto(file) {

@@ -279,6 +279,10 @@ export const api = {
       `/api/v1/artists/${encodeURIComponent(id)}/cover/refresh`,
       { method: 'POST' },
     ),
+  getReleaseCoverMeta: (id) =>
+    request(`/api/v1/releases/${encodeURIComponent(id)}/cover/meta`),
+  getArtistCoverMeta: (id) =>
+    request(`/api/v1/artists/${encodeURIComponent(id)}/cover/meta`),
   deleteReleaseCover: (id) =>
     fetch(`/api/v1/releases/${encodeURIComponent(id)}/cover`, {
       method: 'DELETE',

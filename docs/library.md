@@ -96,9 +96,11 @@ serialized between the scan and the API.
 
 Hover the hero image on the artist page or the release-group page for the
 refresh, upload and remove actions (icon-only; always visible on touch
-screens). Upload replaces Coda's cached image with a JPEG, PNG, or WebP
-file up to 15MB. No library rescan is needed: the next cover GET serves the
-upload, with `"source": "upload"` in the metadata row.
+screens). A small badge over the image shows where the cached art came
+from ("From Cover Art Archive", "Uploaded", …). Upload replaces Coda's
+cached image with a JPEG, PNG, or WebP file up to 15MB. No library rescan
+is needed: the next cover GET serves the upload, with `"source": "upload"`
+in the metadata row.
 
 - Release covers propagate to audio files: the upload queues a background
   task that re-embeds the new art as the front cover picture of every file

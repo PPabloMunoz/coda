@@ -342,8 +342,10 @@ like:
 | Method | Path                         | Result                            |
 |--------|------------------------------|-----------------------------------|
 | GET    | `/releases/:id/cover`        | Release front cover image         |
+| GET    | `/releases/:id/cover/meta`   | Release cover metadata (below)    |
 | GET    | `/release-groups/:id/cover`  | Cover of the group's kept release |
 | GET    | `/artists/:id/cover`         | Artist photo image                |
+| GET    | `/artists/:id/cover/meta`    | Artist photo metadata (below)     |
 | PUT    | `/releases/:id/cover`        | Upload a release cover            |
 | PUT    | `/artists/:id/cover`         | Upload an artist photo            |
 | DELETE | `/releases/:id/cover`        | Remove the release cover          |
@@ -371,6 +373,11 @@ the cached image and fetch again, returning `200` with the cover metadata row:
 Artist refreshes use `artist_id` instead of `release_id`. Refresh endpoints
 return `404` for unknown ids and `500` when cover fetching is disabled.
 Artist photos are display-only; they are never embedded into audio files.
+
+`GET …/cover/meta` returns the cached metadata row without fetching
+anything (same shape as the refresh response). It answers `404` when the
+entity is unknown, no art is cached, or the art was removed — the web UI
+uses it for the hero "From …" source badge.
 
 ### Uploading covers
 

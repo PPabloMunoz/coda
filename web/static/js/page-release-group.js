@@ -8,7 +8,14 @@ import {
   MBID_RE,
   mbUrl,
 } from './api.js';
-import { baseName, plural, typeLabel, yearOf } from './format.js';
+import {
+  baseName,
+  coverSourceBadge,
+  coverSourceText,
+  plural,
+  typeLabel,
+  yearOf,
+} from './format.js';
 import {
   byId,
   clear,
@@ -180,6 +187,7 @@ function initReleaseGroupPage() {
   let currentRelease = null;
   let heroSwitchButton = null;
   let heroTools = null;
+  let coverMetaToken = 0;
   let switchInFlight = false;
   let coverInFlight = false;
 
@@ -259,7 +267,7 @@ function initReleaseGroupPage() {
       // (no <img> to bust) when there was no cached cover before.
       renderHeroCover();
       bustCoverImgs();
-      toast(`Cover refreshed (${row.source}).`, 'ok');
+      toast(`Cover refreshed (${coverSourceText(row.source)}).`, 'ok');
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error);
@@ -270,28 +278,47 @@ function initReleaseGroupPage() {
     }
   }
 
-  // Renders the hero art with the upload/remove overlay. Remove only shows
-  // once the <img> proves itself; the disc fallback keeps it hidden.
+  // Renders the hero art with the overlay tools and source badge. Remove
+  // and the badge only show once the <img> proves itself; the disc
+  // fallback keeps them hidden.
   function renderHeroCover() {
     if (!currentGroup || !heroTools) return;
     const art = coverArt('group', currentGroup.id, '', { eager: true });
     setSharedArtName(art, sharedArtName('group', currentGroup.id));
-    heroArt.replaceChildren(art, heroTools.tools);
-    syncCoverRemove(art);
+    heroArt.replaceChildren(art, heroTools.tools, heroTools.source);
+    syncCoverSource(art);
     if (heroTools) {
       heroTools.tools.hidden = !currentRelease;
+      heroTools.source.hidden = heroTools.source.hidden || !currentRelease;
     }
   }
 
-  function syncCoverRemove(art) {
+  function syncCoverSource(art) {
+    const token = ++coverMetaToken;
     heroTools.setHasArt(false);
-    if (art.tagName !== 'IMG') return;
-    if (art.complete && art.naturalWidth > 0) {
+    if (art.tagName !== 'IMG' || !currentRelease) return;
+    const releaseID = currentRelease.id;
+    const onLoad = () => {
       heroTools.setHasArt(true);
+      void loadCoverSource(token, releaseID);
+    };
+    if (art.complete && art.naturalWidth > 0) {
+      onLoad();
       return;
     }
-    art.addEventListener('load', () => heroTools.setHasArt(true));
+    art.addEventListener('load', onLoad);
     art.addEventListener('error', () => heroTools.setHasArt(false));
+  }
+
+  async function loadCoverSource(token, releaseID) {
+    if (token !== coverMetaToken) return;
+    try {
+      const row = await api.getReleaseCoverMeta(releaseID);
+      if (token !== coverMetaToken) return;
+      heroTools.setSource(row ? coverSourceBadge(row.source) : '');
+    } catch {
+      if (token === coverMetaToken) heroTools.setSource('');
+    }
   }
 
   async function uploadCover(file) {
@@ -534,6 +561,9 @@ function initReleaseGroupPage() {
       currentGroup = group;
 
       const release = await api.getReleaseByGroup(group.id, true);
+      // Set before the hero renders so the source badge can load; the
+      // release panel re-affirms it below.
+      currentRelease = release;
 
       document.title = `${group.title} · Coda`;
       crumb.textContent = group.title;

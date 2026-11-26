@@ -64,6 +64,37 @@ export function typeLabel(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+/**
+ * Friendly name for a cover/photo source key from the cover metadata row.
+ * Unknown keys pass through unchanged so new providers degrade gracefully.
+ */
+export function coverSourceText(source) {
+  switch (source) {
+    case 'coverartarchive':
+      return 'Cover Art Archive';
+    case 'deezer':
+      return 'Deezer';
+    case 'itunes':
+      return 'iTunes';
+    case 'wikimedia':
+      return 'Wikimedia Commons';
+    case 'upload':
+      return 'Uploaded';
+    default:
+      return source || '';
+  }
+}
+
+/**
+ * Hero badge text for a cover source: "Uploaded" for manual uploads,
+ * "From <provider>" otherwise. Empty source means no badge.
+ */
+export function coverSourceBadge(source) {
+  if (!source) return '';
+  if (source === 'upload') return 'Uploaded';
+  return `From ${coverSourceText(source)}`;
+}
+
 export function plural(count, singular, pluralForm) {
   return `${count} ${count === 1 ? singular : (pluralForm ?? `${singular}s`)}`;
 }
