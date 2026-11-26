@@ -2806,10 +2806,26 @@ dialog[open] {
   position: relative;
 }
 
+/* Subtle scrim so the overlay icons read well over bright art. */
+.hero-media::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 0);
+  pointer-events: none;
+  transition: background-color 160ms var(--ease-out);
+}
+
+.hero-media:hover::after,
+.hero-media:focus-within::after {
+  background: rgb(0 0 0 / 0.28);
+}
+
 .hero-media__tools {
   position: absolute;
   top: 0.55rem;
   right: 0.55rem;
+  z-index: 1;
   display: flex;
   gap: 0.45rem;
   opacity: 0;
