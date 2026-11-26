@@ -15,7 +15,9 @@
 # service definition (systemd unit, or OpenRC script + conf.d; env-only
 # config, no YAML editing), and starts the service. On hosts with neither
 # init system it installs the binary and prints how to run it by hand.
-# Re-running upgrades the binary in place and restarts the service.
+# Re-running upgrades the binary in place, keeps the previous port, roots,
+# data dir and service user (a passed flag overrides them), and restarts
+# the service.
 # No pipefail: not POSIX. Pipes below either use fetch helpers (fatal via
 # set -e) or treat grep's exit status as the signal, so nothing is masked.
 set -eu
@@ -25,15 +27,20 @@ BIN_NAME="coda"
 INSTALL_PATH="/usr/local/bin/coda"
 
 VERSION="latest"
-PORT="8687"
-ROOTS="/mnt/music"
-DATA_DIR="/var/lib/coda"
-SERVICE_USER="coda"
+# Empty means "not passed": on re-run the value is kept from the previously
+# installed service definition, falling back to the built-in defaults.
+PORT=""
+ROOTS=""
+DATA_DIR=""
+SERVICE_USER=""
 WITH_SERVICE=1
 
 usage() {
   cat <<'EOF'
 Usage: install.sh [options]
+
+Re-running upgrades in place and keeps the previous port, roots, data dir
+and service user; a flag you pass overrides it.
 
 Options:
   --version X.Y.Z   release to install (default: latest stable)
@@ -119,6 +126,52 @@ else
   INIT="none"
   WITH_SERVICE=0
 fi
+
+# Keep existing settings on re-run: a flag you omit falls back to the value
+# in the installed service definition (systemd unit or OpenRC conf.d), then
+# to the built-in default. A passed flag always wins, and a first install
+# has no service file to read, so it gets the defaults.
+resolve_settings() {
+  UNIT_FILE="/etc/systemd/system/${BIN_NAME}.service"
+  CONFD_FILE="/etc/conf.d/${BIN_NAME}"
+  INITD_FILE="/etc/init.d/${BIN_NAME}"
+  EXISTING_PORT=""
+  EXISTING_ROOTS=""
+  EXISTING_CONFIG=""
+  EXISTING_USER=""
+
+  if [ "$INIT" = "systemd" ] && [ -f "$UNIT_FILE" ]; then
+    EXISTING_PORT="$(sed -n 's/^Environment="CODA_PORT=\(.*\)"/\1/p' "$UNIT_FILE" | head -n 1)"
+    EXISTING_ROOTS="$(sed -n 's/^Environment="CODA_ROOTS=\(.*\)"/\1/p' "$UNIT_FILE" | head -n 1)"
+    EXISTING_CONFIG="$(sed -n 's/^Environment="CODA_CONFIG=\(.*\)"/\1/p' "$UNIT_FILE" | head -n 1)"
+    EXISTING_USER="$(sed -n 's/^User=\(.*\)$/\1/p' "$UNIT_FILE" | head -n 1)"
+  elif [ "$INIT" = "openrc" ] && [ -f "$CONFD_FILE" ]; then
+    EXISTING_PORT="$(sed -n 's/^export CODA_PORT="\(.*\)"$/\1/p' "$CONFD_FILE" | head -n 1)"
+    EXISTING_ROOTS="$(sed -n 's/^export CODA_ROOTS="\(.*\)"$/\1/p' "$CONFD_FILE" | head -n 1)"
+    EXISTING_CONFIG="$(sed -n 's/^export CODA_CONFIG="\(.*\)"$/\1/p' "$CONFD_FILE" | head -n 1)"
+    if [ -f "$INITD_FILE" ]; then
+      EXISTING_USER="$(sed -n 's/^command_user="\([^":]*\).*/\1/p' "$INITD_FILE" | head -n 1)"
+    fi
+  fi
+
+  if [ -z "$PORT" ]; then
+    if [ -n "$EXISTING_PORT" ]; then PORT="$EXISTING_PORT"; else PORT="8687"; fi
+  fi
+  if [ -z "$ROOTS" ]; then
+    if [ -n "$EXISTING_ROOTS" ]; then ROOTS="$EXISTING_ROOTS"; else ROOTS="/mnt/music"; fi
+  fi
+  if [ -z "$DATA_DIR" ]; then
+    if [ -n "$EXISTING_CONFIG" ]; then
+      DATA_DIR="$(dirname "$EXISTING_CONFIG")"
+    else
+      DATA_DIR="/var/lib/coda"
+    fi
+  fi
+  if [ -z "$SERVICE_USER" ]; then
+    if [ -n "$EXISTING_USER" ]; then SERVICE_USER="$EXISTING_USER"; else SERVICE_USER="coda"; fi
+  fi
+}
+resolve_settings
 
 # Install a downloader if the host has neither curl nor wget.
 install_pkgs() {
