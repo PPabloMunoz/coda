@@ -285,6 +285,57 @@ func (st *Store) attachFileTracks(ctx context.Context, files []LocalFile) error 
 	return nil
 }
 
+// ListFilesByRelease returns every tracked file in an active root whose
+// linked track belongs to the release. The embed task uses it to re-stamp
+// uploaded art; ordering by id keeps retries deterministic.
+func (st *Store) ListFilesByRelease(ctx context.Context, releaseID string) ([]LocalFile, error) {
+	files := []LocalFile{}
+	rows, err := st.db.QueryContext(ctx, `
+		SELECT lf.id, lf.root_id, lf.path, lf.size_bytes, lf.mtime_ns,
+			lf.format_hint, lf.scanned_at, lf.track_id
+		FROM local_files lf
+		JOIN tracks t ON t.id = lf.track_id
+		WHERE t.release_id = ?
+		  AND lf.root_id IN (SELECT id FROM roots WHERE active = 1)
+		ORDER BY lf.id`,
+		releaseID,
+	)
+	if err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query files by release: %w", err),
+		)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var f LocalFile
+		if err := rows.Scan(
+			&f.ID,
+			&f.RootID,
+			&f.Path,
+			&f.SizeBytes,
+			&f.MtimeNs,
+			&f.FormatHint,
+			&f.ScannedAt,
+			&f.TrackID,
+		); err != nil {
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan file by release: %w", err),
+			)
+		}
+		files = append(files, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading files by release: %w", err),
+		)
+	}
+	return files, nil
+}
+
 type LocalFilesStats struct {
 	Total    int64            `json:"total"`
 	Linked   int64            `json:"linked"`

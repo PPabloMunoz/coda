@@ -342,18 +342,28 @@ like:
 | Method | Path                         | Result                            |
 |--------|------------------------------|-----------------------------------|
 | GET    | `/releases/:id/cover`        | Release front cover image         |
+| GET    | `/releases/:id/cover/meta`   | Release cover metadata (below)    |
 | GET    | `/release-groups/:id/cover`  | Cover of the group's kept release |
 | GET    | `/artists/:id/cover`         | Artist photo image                |
+| GET    | `/artists/:id/cover/meta`    | Artist photo metadata (below)     |
+| PUT    | `/releases/:id/cover`        | Upload a release cover            |
+| PUT    | `/artists/:id/cover`         | Upload an artist photo            |
+| DELETE | `/releases/:id/cover`        | Remove the release cover          |
+| DELETE | `/artists/:id/cover`         | Remove the artist photo           |
 | POST   | `/releases/:id/cover/refresh`| Re-fetch release cover            |
 | POST   | `/artists/:id/cover/refresh` | Re-fetch artist photo             |
 
 GET responses are raw image bytes with an `image/*` Content-Type, an `ETag`
-of `"<size>-<fetched_at>"`, and `Cache-Control: public, max-age=86400`. Send
-`If-None-Match` with that ETag to get `304` when the image is unchanged. On a
-cache miss the cover is fetched (release covers from Cover Art Archive, then
-Deezer and iTunes; artist photos from Deezer, then Wikimedia) and cached.
-When no provider yields usable art the answer is `404`; an upstream failure
-returns an error instead of a cached miss, so retries are possible.
+of `"<size>-<fetched_at>"`, and `Cache-Control: no-cache`. The browser
+stores the image but revalidates it on every use: send `If-None-Match` with
+that ETag to get `304` when the image is unchanged, or `200` with the new
+bytes after an upload or refresh. Misses (unknown id, no art, removed art)
+also answer `no-cache` so a deleted cover never sticks in the browser. On
+a cache miss the cover is fetched (release covers from Cover Art Archive,
+then Deezer and iTunes; artist photos from Deezer, then Wikimedia) and
+cached. When no provider yields usable art the answer is `404`; an
+upstream failure returns an error instead of a cached miss, so retries are
+possible.
 
 `POST /releases/:id/cover/refresh` and `POST /artists/:id/cover/refresh` drop
 the cached image and fetch again, returning `200` with the cover metadata row:
@@ -367,6 +377,48 @@ the cached image and fetch again, returning `200` with the cover metadata row:
 Artist refreshes use `artist_id` instead of `release_id`. Refresh endpoints
 return `404` for unknown ids and `500` when cover fetching is disabled.
 Artist photos are display-only; they are never embedded into audio files.
+
+`GET …/cover/meta` returns the cached metadata row without fetching
+anything (same shape as the refresh response). It answers `404` when the
+entity is unknown, no art is cached, or the art was removed — the web UI
+uses it for the hero "From …" source badge.
+
+### Uploading covers
+
+`PUT /releases/:id/cover` and `PUT /artists/:id/cover` replace the cached
+image with caller-supplied bytes. The body is the raw image (no multipart),
+up to 15MB; the real type is sniffed from magic bytes and must be JPEG,
+PNG, or WebP, otherwise the answer is `400 INVALID_INPUT`. Unknown ids
+answer `404`, like the refresh endpoints.
+
+```sh
+curl -X PUT localhost:8687/api/v1/releases/<mbid>/cover \
+  --data-binary @cover.png -H 'Content-Type: image/png'
+```
+
+A successful upload returns `200` with the same metadata row shape as a
+refresh, with `"source": "upload"` and `"source_url": null`. Uploads work
+even when provider fetching is disabled. A later refresh discards the
+upload and fetches provider art again.
+
+Uploading a release cover also queues a background task that re-embeds the
+new art into every file already linked to the release. The upload itself
+succeeds first; embedding failures only log (check the server logs), so a
+file that can't be rewritten doesn't fail the upload.
+
+### Removing covers
+
+`DELETE /releases/:id/cover` and `DELETE /artists/:id/cover` delete the
+cached image file and answer `204` with no body. Unknown ids answer `404`;
+removing an already-removed or never-cached cover still answers `204`.
+
+A removal is sticky: it records a tombstone so later `GET …/cover` calls
+stay `404` instead of lazy-fetching provider art again. Only a new upload
+or a refresh clears it (refresh fetches provider art again as usual).
+
+Removing a release cover also queues a background task that clears the
+embedded front cover from every file already linked to the release. Like
+the embed task, the removal succeeds first and per-file failures only log.
 
 ## Async operations
 

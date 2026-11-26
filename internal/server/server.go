@@ -71,6 +71,9 @@ func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tas
 	v1.POST("/artists", handler.postArtist)
 	v1.POST("/artists/:id/refresh", handler.refreshArtist)
 	v1.GET("/artists/:id/cover", handler.getArtistCover)
+	v1.GET("/artists/:id/cover/meta", handler.getArtistCoverMeta)
+	v1.PUT("/artists/:id/cover", handler.uploadArtistCover)
+	v1.DELETE("/artists/:id/cover", handler.deleteArtistCover)
 	v1.POST("/artists/:id/cover/refresh", handler.refreshArtistCover)
 
 	// MusicBrainz
@@ -87,6 +90,9 @@ func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tas
 	v1.GET("/releases", handler.getReleases)
 	v1.GET("/releases/:id", handler.getRelease)
 	v1.GET("/releases/:id/cover", handler.getReleaseCover)
+	v1.GET("/releases/:id/cover/meta", handler.getReleaseCoverMeta)
+	v1.PUT("/releases/:id/cover", handler.uploadReleaseCover)
+	v1.DELETE("/releases/:id/cover", handler.deleteReleaseCover)
 	v1.POST("/releases/:id/cover/refresh", handler.refreshReleaseCover)
 
 	// Embedded vanilla static UI (web/static). Catch-all, registered last.

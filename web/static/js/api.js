@@ -42,11 +42,15 @@ export const mbUrl = {
 };
 
 /** Cover photo URLs served by the API (404 when there is no art). */
+const COVER_URL_VERSION = '2';
+
 export const coverUrl = {
-  release: (id) => `/api/v1/releases/${encodeURIComponent(id)}/cover`,
+  release: (id) =>
+    `/api/v1/releases/${encodeURIComponent(id)}/cover?v=${COVER_URL_VERSION}`,
   releaseGroup: (id) =>
-    `/api/v1/release-groups/${encodeURIComponent(id)}/cover`,
-  artist: (id) => `/api/v1/artists/${encodeURIComponent(id)}/cover`,
+    `/api/v1/release-groups/${encodeURIComponent(id)}/cover?v=${COVER_URL_VERSION}`,
+  artist: (id) =>
+    `/api/v1/artists/${encodeURIComponent(id)}/cover?v=${COVER_URL_VERSION}`,
 };
 
 export class ApiError extends Error {
@@ -278,6 +282,36 @@ export const api = {
     request(
       `/api/v1/artists/${encodeURIComponent(id)}/cover/refresh`,
       { method: 'POST' },
+    ),
+  getReleaseCoverMeta: (id) =>
+    request(`/api/v1/releases/${encodeURIComponent(id)}/cover/meta`),
+  getArtistCoverMeta: (id) =>
+    request(`/api/v1/artists/${encodeURIComponent(id)}/cover/meta`),
+  deleteReleaseCover: (id) =>
+    fetch(`/api/v1/releases/${encodeURIComponent(id)}/cover`, {
+      method: 'DELETE',
+    }),
+  deleteArtistCover: (id) =>
+    fetch(`/api/v1/artists/${encodeURIComponent(id)}/cover`, {
+      method: 'DELETE',
+    }),
+  uploadReleaseCover: (id, file) =>
+    request(
+      `/api/v1/releases/${encodeURIComponent(id)}/cover`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': file?.type || 'application/octet-stream' },
+        body: file,
+      },
+    ),
+  uploadArtistCover: (id, file) =>
+    request(
+      `/api/v1/artists/${encodeURIComponent(id)}/cover`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': file?.type || 'application/octet-stream' },
+        body: file,
+      },
     ),
 
   link: (fileID, trackID) =>

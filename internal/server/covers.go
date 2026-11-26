@@ -1,15 +1,19 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/ppablomunoz/coda/internal/artwork"
 	"github.com/ppablomunoz/coda/internal/config"
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/store"
@@ -48,8 +52,13 @@ func (h *Handler) getReleaseGroupCover(c *gin.Context) {
 	h.serveCover(c, release.ID)
 }
 
-// serveCover ensures and serves the cached cover bytes for a release with ETag caching.
+// serveCover ensures and serves the cached cover bytes for a release with
+// ETag revalidation. The endpoint answers no-cache (store, but revalidate
+// every use) so uploads and refreshes show up without a hard reload; the
+// ETag validator rides on 200 and 304 alike, and even misses carry
+// no-cache so a removed cover never sticks in the browser.
 func (h *Handler) serveCover(c *gin.Context, releaseID string) {
+	c.Header("Cache-Control", "no-cache")
 	ctx := c.Request.Context()
 
 	rel, err := h.st.GetRelease(ctx, releaseID, false)
@@ -65,6 +74,13 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 	row, err := tasks.EnsureCover(ctx, h.st, h.art, h.coverDir, releaseID, artist, rel.Title)
 	if err != nil {
 		h.writeAppError(c, err)
+		return
+	}
+
+	etag := `"` + strconv.FormatInt(row.SizeBytes, 10) + "-" + row.FetchedAt + `"`
+	c.Header("ETag", etag)
+	if c.GetHeader("If-None-Match") == etag {
+		c.Status(http.StatusNotModified)
 		return
 	}
 
@@ -88,13 +104,6 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 		return
 	}
 
-	etag := `"` + strconv.FormatInt(row.SizeBytes, 10) + "-" + row.FetchedAt + `"`
-	if c.GetHeader("If-None-Match") == etag {
-		c.Status(http.StatusNotModified)
-		return
-	}
-	c.Header("ETag", etag)
-	c.Header("Cache-Control", "public, max-age=86400")
 	c.Data(http.StatusOK, row.MIME, data)
 }
 
@@ -143,6 +152,243 @@ func (h *Handler) doRefreshReleaseCover(ctx context.Context, releaseID string) (
 	return tasks.EnsureCover(ctx, h.st, h.art, h.coverDir, releaseID, artist, rel.Title)
 }
 
+// getReleaseCoverMeta returns the cached cover metadata row for a release
+// (source, mime, size, fetched_at) without fetching anything. Unknown
+// releases, missing art, and user-removed covers answer 404 null — the web
+// client treats 404 as null, same as other entities.
+func (h *Handler) getReleaseCoverMeta(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	releaseID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetRelease(ctx, releaseID, false); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	row, err := h.st.GetCover(ctx, releaseID)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if row.Removed {
+		h.writeAppError(c, apperrors.ErrNotFound)
+		return
+	}
+	// Never store the metadata row: upload/refresh responses must not feed
+	// a stale badge on the next read.
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, row)
+}
+
+// uploadReleaseCover replaces the cached cover for a release with
+// caller-supplied image bytes and queues a background re-embed into the
+// release's linked files. The body is the raw image (Content-Type is only
+// a hint); the real type is sniffed from magic bytes. Refresh keeps its
+// meaning (fetch provider art) and replaces an upload.
+func (h *Handler) uploadReleaseCover(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	releaseID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetRelease(ctx, releaseID, false); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	img, mime, err := readCoverUpload(c)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if err := tasks.SaveCover(ctx, h.st, h.coverDir, releaseID, &artwork.Result{
+		Bytes:  img,
+		MIME:   mime,
+		Source: artwork.SourceUpload,
+	}); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	row, err := h.st.GetCover(ctx, releaseID)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	h.queue.EnqueueEmbedReleaseCover(releaseID)
+	c.JSON(http.StatusOK, row)
+}
+
+// getArtistCoverMeta returns the cached artist photo metadata row without
+// fetching anything. Unknown artists, missing photos, and user-removed
+// photos answer 404 null — the web client treats 404 as null.
+func (h *Handler) getArtistCoverMeta(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	artistID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetArtistByID(ctx, artistID); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	row, err := h.st.GetArtistCover(ctx, artistID)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if row.Removed {
+		h.writeAppError(c, apperrors.ErrNotFound)
+		return
+	}
+	// Never store the metadata row: upload/refresh responses must not feed
+	// a stale badge on the next read.
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, row)
+}
+
+// uploadArtistCover replaces the cached artist photo with caller-supplied
+// image bytes. Artist photos are display-only: they are never embedded
+// into audio files, so no background work is queued.
+func (h *Handler) uploadArtistCover(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	artistID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetArtistByID(ctx, artistID); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	img, mime, err := readCoverUpload(c)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if err := tasks.SaveArtistCover(ctx, h.st, h.coverDir, artistID, &artwork.Result{
+		Bytes:  img,
+		MIME:   mime,
+		Source: artwork.SourceUpload,
+	}); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	row, err := h.st.GetArtistCover(ctx, artistID)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, row)
+}
+
+// deleteReleaseCover removes the cached cover file for a release and records
+// a tombstone so later GETs stay 404 instead of lazy-fetching provider art
+// again. Idempotent: removing an already-removed or never-cached cover
+// still answers 204. A background task clears the embedded front cover
+// from the release's linked files. Refresh fetches provider art again and
+// clears the removal, as does a new upload.
+func (h *Handler) deleteReleaseCover(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	releaseID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetRelease(ctx, releaseID, false); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	if err := h.st.MarkCoverRemoved(ctx, releaseID); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	removeCoverFiles(h.coverDir, releaseID)
+	h.queue.EnqueueClearReleaseCover(releaseID)
+	c.Status(http.StatusNoContent)
+}
+
+// deleteArtistCover removes the cached artist photo and records a tombstone
+// so later GETs stay 404 instead of lazy-fetching a provider photo again.
+// Idempotent: removing an already-removed or never-cached photo still
+// answers 204. Artist photos are display-only, so no background work is
+// queued. Refresh fetches a provider photo again and clears the removal,
+// as does a new upload.
+func (h *Handler) deleteArtistCover(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	artistID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetArtistByID(ctx, artistID); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	if err := h.st.MarkArtistCoverRemoved(ctx, artistID); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	removeArtistCoverFiles(h.coverDir, artistID)
+	c.Status(http.StatusNoContent)
+}
+
+// readCoverUpload reads a raw image upload body with the same size cap as
+// the provider fetcher and sniffs the real content type from magic bytes.
+// Only JPEG, PNG, and WebP are accepted.
+func readCoverUpload(c *gin.Context) ([]byte, string, error) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, artwork.DefaultMaxBytes+1)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		if strings.Contains(err.Error(), "request body too large") {
+			return nil, "", apperrors.Wrap(
+				apperrors.ErrInvalidInput,
+				fmt.Errorf("cover image exceeds %dMB limit", artwork.DefaultMaxBytes>>20),
+			)
+		}
+		return nil, "", apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("read cover image: %w", err),
+		)
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil, "", apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("cover image is empty"),
+		)
+	}
+	if int64(len(body)) > artwork.DefaultMaxBytes {
+		return nil, "", apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("cover image exceeds %dMB limit", artwork.DefaultMaxBytes>>20),
+		)
+	}
+	mime := http.DetectContentType(body)
+	switch mime {
+	case "image/jpeg", "image/png", "image/webp":
+		return body, mime, nil
+	default:
+		return nil, "", apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("unsupported cover image type %q (want JPEG, PNG, or WebP)", mime),
+		)
+	}
+}
+
 // embedCover stamps the cached release art into the audio file as its front
 // cover. Single owner is tasks.EmbedCover (reused by the scan auto-link).
 func (h *Handler) embedCover(ctx context.Context, filePath, releaseID string) error {
@@ -171,8 +417,13 @@ func (h *Handler) getArtistCover(c *gin.Context) {
 	h.serveArtistCover(c, artistID)
 }
 
-// serveArtistCover ensures and serves the cached photo bytes for an artist with ETag caching.
+// serveArtistCover ensures and serves the cached photo bytes for an artist
+// with ETag revalidation. The endpoint answers no-cache (store, but
+// revalidate every use) so uploads and refreshes show up without a hard
+// reload; the ETag validator rides on 200 and 304 alike, and even misses
+// carry no-cache so a removed photo never sticks in the browser.
 func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
+	c.Header("Cache-Control", "no-cache")
 	ctx := c.Request.Context()
 
 	artist, err := h.st.GetArtistByID(ctx, artistID)
@@ -184,6 +435,13 @@ func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 	row, err := tasks.EnsureArtistCover(ctx, h.st, h.art, h.coverDir, artistID, artist.Name)
 	if err != nil {
 		h.writeAppError(c, err)
+		return
+	}
+
+	etag := `"` + strconv.FormatInt(row.SizeBytes, 10) + "-" + row.FetchedAt + `"`
+	c.Header("ETag", etag)
+	if c.GetHeader("If-None-Match") == etag {
+		c.Status(http.StatusNotModified)
 		return
 	}
 
@@ -207,13 +465,6 @@ func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 		return
 	}
 
-	etag := `"` + strconv.FormatInt(row.SizeBytes, 10) + "-" + row.FetchedAt + `"`
-	if c.GetHeader("If-None-Match") == etag {
-		c.Status(http.StatusNotModified)
-		return
-	}
-	c.Header("ETag", etag)
-	c.Header("Cache-Control", "public, max-age=86400")
 	c.Data(http.StatusOK, row.MIME, data)
 }
 

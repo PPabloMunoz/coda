@@ -16,13 +16,18 @@ import (
 )
 
 // EnsureArtistCover returns the cached photo row for an artist, fetching it
-// first when missing. A nil fetcher disables fetching: the existing cache
-// still serves, a miss answers ErrNotFound. Display-only: artist photos are
-// never embedded into audio files.
+// first when missing. A user-removed photo (tombstone) answers ErrNotFound
+// without fetching, so a deletion is never undone by a later GET. A nil
+// fetcher disables fetching: the existing cache still serves, a miss
+// answers ErrNotFound. Display-only: artist photos are never embedded into
+// audio files.
 func EnsureArtistCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 	coverDir, artistID, artistName string,
 ) (*store.ArtistCoverParams, error) {
 	if row, err := st.GetArtistCover(ctx, artistID); err == nil {
+		if row.Removed {
+			return nil, apperrors.ErrNotFound
+		}
 		return row, nil
 	} else if !apperrors.Is(err, apperrors.ErrNotFound) {
 		return nil, err

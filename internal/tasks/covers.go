@@ -13,6 +13,7 @@ import (
 	"github.com/ppablomunoz/coda/internal/config"
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/store"
+	"github.com/ppablomunoz/coda/internal/tags"
 	"github.com/ppablomunoz/coda/internal/utils"
 )
 
@@ -32,15 +33,19 @@ func withCoverLock(releaseID string, fn func() error) error {
 }
 
 // EnsureCover returns the cached cover row for a release, fetching it first
-// when missing. Concurrent misses for one release collapse into a single
-// fetch: the first caller fetches, waiters re-check the cache and reuse
-// its row. Artist/album feed the Deezer text fallback only. A nil fetcher
-// disables fetching (tests): the existing cache still serves, a miss
-// answers ErrNotFound.
+// when missing. A user-removed cover (tombstone) answers ErrNotFound without
+// fetching, so a deletion is never undone by a later GET. Concurrent misses
+// for one release collapse into a single fetch: the first caller fetches,
+// waiters re-check the cache and reuse its row. Artist/album feed the Deezer
+// text fallback only. A nil fetcher disables fetching (tests): the existing
+// cache still serves, a miss answers ErrNotFound.
 func EnsureCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 	coverDir, releaseID, artist, album string,
 ) (*store.CoverParams, error) {
 	if row, err := st.GetCover(ctx, releaseID); err == nil {
+		if row.Removed {
+			return nil, apperrors.ErrNotFound
+		}
 		return row, nil
 	} else if !apperrors.Is(err, apperrors.ErrNotFound) {
 		return nil, err
@@ -53,6 +58,9 @@ func EnsureCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 	err := withCoverLock(releaseID, func() error {
 		// Another caller may have fetched while we waited.
 		if cached, err := st.GetCover(ctx, releaseID); err == nil {
+			if cached.Removed {
+				return apperrors.ErrNotFound
+			}
 			row = cached
 			return nil
 		} else if !apperrors.Is(err, apperrors.ErrNotFound) {
@@ -281,4 +289,117 @@ func (r *Runner) releaseCoverPrefetch(artistID string) {
 	r.coverMu.Lock()
 	defer r.coverMu.Unlock()
 	delete(r.coverPrefetch, artistID)
+}
+
+// embedReleaseCover re-stamps the currently cached release cover into every
+// linked file of the release. Best-effort: per-file failures only log, and
+// a missing cover or no linked files is a clean no-op. The bytes are loaded
+// at run time (not enqueue time) so a later refresh wins over an older
+// upload when the two race.
+func (r *Runner) embedReleaseCover(ctx context.Context, releaseID string) {
+	if err := utils.ValidateMBID(releaseID); err != nil {
+		r.log.Warnf("embed cover release %q: invalid id", releaseID)
+		return
+	}
+
+	row, err := r.st.GetCover(ctx, releaseID)
+	if err != nil {
+		if !apperrors.Is(err, apperrors.ErrNotFound) {
+			r.log.Warnf("embed cover release %q check: %v", releaseID, err)
+		}
+		return
+	}
+	if row.Removed {
+		// A removal won over the queued upload: leave the tombstone alone.
+		return
+	}
+	path, err := config.CoverPath(r.coverDir, releaseID, row.MIME)
+	if err != nil {
+		r.log.Warnf("embed cover release %q path: %v", releaseID, err)
+		return
+	}
+	img, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			_ = r.st.DeleteCover(ctx, releaseID)
+		} else {
+			r.log.Warnf("embed cover release %q read: %v", releaseID, err)
+		}
+		return
+	}
+
+	files, err := r.st.ListFilesByRelease(ctx, releaseID)
+	if err != nil {
+		r.log.Warnf("embed cover release %q list files: %v", releaseID, err)
+		return
+	}
+	if len(files) == 0 {
+		return
+	}
+
+	embedded, failed := 0, 0
+	for _, f := range files {
+		select {
+		case <-ctx.Done():
+			r.log.Warnf("embed cover release %q: stopped early (%d embedded, %d failed)", releaseID, embedded, failed)
+			return
+		default:
+		}
+		if err := tags.WriteCover(f.Path, img); err != nil {
+			failed++
+			r.log.Warnf("embed cover release %q file=%d: %v", releaseID, f.ID, err)
+			continue
+		}
+		embedded++
+	}
+	r.log.Infof("embed cover release %q done: %d embedded, %d failed", releaseID, embedded, failed)
+}
+
+// clearReleaseCover removes the embedded front cover from every linked file
+// of a user-removed release. Best-effort: per-file failures only log, and a
+// missing row or no linked files is a clean no-op. The tombstone is checked
+// at run time (not enqueue time) so an upload or refresh that won the race
+// keeps its art: only a still-removed cover clears files.
+func (r *Runner) clearReleaseCover(ctx context.Context, releaseID string) {
+	if err := utils.ValidateMBID(releaseID); err != nil {
+		r.log.Warnf("clear cover release %q: invalid id", releaseID)
+		return
+	}
+
+	row, err := r.st.GetCover(ctx, releaseID)
+	if err != nil {
+		if !apperrors.Is(err, apperrors.ErrNotFound) {
+			r.log.Warnf("clear cover release %q check: %v", releaseID, err)
+		}
+		return
+	}
+	if !row.Removed {
+		return
+	}
+
+	files, err := r.st.ListFilesByRelease(ctx, releaseID)
+	if err != nil {
+		r.log.Warnf("clear cover release %q list files: %v", releaseID, err)
+		return
+	}
+	if len(files) == 0 {
+		return
+	}
+
+	cleared, failed := 0, 0
+	for _, f := range files {
+		select {
+		case <-ctx.Done():
+			r.log.Warnf("clear cover release %q: stopped early (%d cleared, %d failed)", releaseID, cleared, failed)
+			return
+		default:
+		}
+		if err := tags.ClearCover(f.Path); err != nil {
+			failed++
+			r.log.Warnf("clear cover release %q file=%d: %v", releaseID, f.ID, err)
+			continue
+		}
+		cleared++
+	}
+	r.log.Infof("clear cover release %q done: %d cleared, %d failed", releaseID, cleared, failed)
 }

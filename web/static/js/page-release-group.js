@@ -8,10 +8,18 @@ import {
   MBID_RE,
   mbUrl,
 } from './api.js';
-import { baseName, plural, typeLabel, yearOf } from './format.js';
+import {
+  baseName,
+  coverSourceBadge,
+  coverSourceText,
+  plural,
+  typeLabel,
+  yearOf,
+} from './format.js';
 import {
   byId,
   clear,
+  coverTools,
   creditFragment,
   el,
   emptyState,
@@ -123,21 +131,6 @@ function renderTrackTable(tracks, showDisc) {
   return tableWrap;
 }
 
-function bustCoverImgs() {
-  // The endpoint sends a 24h max-age, so bust the <img> URLs or the
-  // browser would keep showing the previous bytes.
-  const stamp = String(Date.now());
-  for (const img of document.querySelectorAll('img.cover-img')) {
-    try {
-      const url = new URL(img.currentSrc || img.src, location.origin);
-      url.searchParams.set('t', stamp);
-      img.src = url.toString();
-    } catch {
-      /* keep the previous art on weird URLs */
-    }
-  }
-}
-
 function initReleaseGroupPage() {
   const status = byId('status');
   const content = byId('content');
@@ -177,8 +170,9 @@ function initReleaseGroupPage() {
 
   let currentGroup = null;
   let currentRelease = null;
-  let heroRefreshButton = null;
   let heroSwitchButton = null;
+  let heroTools = null;
+  let coverMetaToken = 0;
   let switchInFlight = false;
   let coverInFlight = false;
 
@@ -237,31 +231,148 @@ function initReleaseGroupPage() {
     }
   }
 
-  async function refreshCover(release, button) {
-    await runCoverRefresh(button, () =>
-      api.refreshReleaseCover(release.id),
+  async function refreshCover() {
+    if (!currentRelease) return;
+    await runCoverRefresh(() =>
+      api.refreshReleaseCover(currentRelease.id),
     );
   }
 
-  async function runCoverRefresh(button, refresh) {
+  async function runCoverRefresh(refresh) {
     if (coverInFlight) return;
     coverInFlight = true;
-    setBusy(button, true, 'Refreshing…');
+    heroTools.setBusy(true);
     try {
       const row = await refresh();
+      // Rebuild the hero either way: the page may be showing the disc
+      // fallback (when there was no cached cover before) or stale art
+      // (when the refresh found nothing and dropped the cache).
+      renderHeroCover();
       if (!row) {
         toast('No cover art found.', 'info');
         return;
       }
-      bustCoverImgs();
-      toast(`Cover refreshed (${row.source}).`, 'ok');
+      toast(`Cover refreshed (${coverSourceText(row.source)}).`, 'ok');
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error);
       toast(`Could not refresh cover: ${message}`, 'error');
     } finally {
       coverInFlight = false;
-      setBusy(button, false);
+      heroTools.setBusy(false);
+    }
+  }
+
+  // Renders the hero art with the overlay tools and source badge. Remove
+  // and the badge only show once the <img> proves itself; the disc
+  // fallback keeps them hidden.
+  function renderHeroCover() {
+    if (!currentGroup || !heroTools) return;
+    const art = coverArt('group', currentGroup.id, '', { eager: true });
+    setSharedArtName(art, sharedArtName('group', currentGroup.id));
+    heroArt.replaceChildren(art, heroTools.tools, heroTools.source);
+    syncCoverSource(art);
+    if (heroTools) {
+      heroTools.tools.hidden = !currentRelease;
+      heroTools.source.hidden = heroTools.source.hidden || !currentRelease;
+    }
+  }
+
+  function syncCoverSource(art) {
+    const token = ++coverMetaToken;
+    heroTools.setHasArt(false);
+    if (art.tagName !== 'IMG' || !currentRelease) return;
+    const releaseID = currentRelease.id;
+    const onLoad = () => {
+      heroTools.setHasArt(true);
+      void loadCoverSource(token, releaseID);
+    };
+    if (art.complete && art.naturalWidth > 0) {
+      onLoad();
+      return;
+    }
+    art.addEventListener('load', onLoad);
+    art.addEventListener('error', () => heroTools.setHasArt(false));
+  }
+
+  async function loadCoverSource(token, releaseID) {
+    if (token !== coverMetaToken) return;
+    try {
+      const row = await api.getReleaseCoverMeta(releaseID);
+      if (token !== coverMetaToken) return;
+      heroTools.setSource(row ? coverSourceBadge(row.source) : '');
+    } catch {
+      if (token === coverMetaToken) heroTools.setSource('');
+    }
+  }
+
+  async function uploadCover(file) {
+    if (!currentRelease || coverInFlight) return;
+    coverInFlight = true;
+    heroTools.setBusy(true);
+    try {
+      const row = await api.uploadReleaseCover(currentRelease.id, file);
+      if (!row) {
+        toast('Upload finished with no cover.', 'info');
+        return;
+      }
+      renderHeroCover();
+      toast(
+        'Cover uploaded. Linked files are updating in the background.',
+        'ok',
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      toast(`Could not upload cover: ${message}`, 'error');
+    } finally {
+      coverInFlight = false;
+      heroTools.setBusy(false);
+    }
+  }
+
+  async function removeCover() {
+    if (!currentGroup || !currentRelease || coverInFlight) return;
+    if (
+      !window.confirm(
+        `Remove the cached cover for "${currentGroup.title}"? The cached file is deleted and linked files lose their embedded cover in the background. Upload a new cover or refresh to fetch one again.`,
+      )
+    ) {
+      return;
+    }
+    coverInFlight = true;
+    heroTools.setBusy(true);
+    try {
+      const response = await api.deleteReleaseCover(currentRelease.id);
+      if (response.status === 404) {
+        toast('Release not found.', 'error');
+        return;
+      }
+      if (!response.ok) {
+        let message = response.statusText;
+        try {
+          const body = await response.json();
+          if (typeof body?.error === 'string' && body.error) {
+            message = body.error;
+          }
+        } catch {
+          /* keep status text */
+        }
+        toast(`Could not remove cover: ${message}`, 'error');
+        return;
+      }
+      renderHeroCover();
+      toast(
+        'Cover removed. Linked files are updating in the background.',
+        'ok',
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      toast(`Could not remove cover: ${message}`, 'error');
+    } finally {
+      coverInFlight = false;
+      heroTools.setBusy(false);
     }
   }
 
@@ -321,7 +432,7 @@ function initReleaseGroupPage() {
   function renderRelease(release, group) {
     currentRelease = release;
     const hasRelease = Boolean(release);
-    if (heroRefreshButton) heroRefreshButton.hidden = !hasRelease;
+    if (heroTools) heroTools.tools.hidden = !hasRelease;
     if (heroSwitchButton) heroSwitchButton.hidden = !hasRelease;
 
     if (!release) {
@@ -433,6 +544,9 @@ function initReleaseGroupPage() {
       currentGroup = group;
 
       const release = await api.getReleaseByGroup(group.id, true);
+      // Set before the hero renders so the source badge can load; the
+      // release panel re-affirms it below.
+      currentRelease = release;
 
       document.title = `${group.title} · Coda`;
       crumb.textContent = group.title;
@@ -445,9 +559,19 @@ function initReleaseGroupPage() {
         crumbArtist.textContent = 'Artists';
         crumbArtist.href = '/';
       }
-      const heroCover = coverArt('group', group.id, '', { eager: true });
-      setSharedArtName(heroCover, sharedArtName('group', group.id));
-      heroArt.replaceChildren(heroCover);
+      heroTools = coverTools({
+        refreshLabel: 'Refresh cover',
+        refreshTitle:
+          'Fetch the cover art again (Cover Art Archive, then Deezer)',
+        uploadLabel: 'Upload cover',
+        uploadTitle: 'Upload a JPEG, PNG, or WebP cover (max 15MB)',
+        removeLabel: 'Remove cover',
+        removeTitle: 'Remove the cached cover',
+        onRefresh: () => void refreshCover(),
+        onUpload: (file) => void uploadCover(file),
+        onRemove: () => void removeCover(),
+      });
+      renderHeroCover();
       title.textContent = group.title;
       credit.replaceChildren(creditFragment(group.credit));
       groupMb.href = mbUrl.releaseGroup(group.id);
@@ -468,18 +592,6 @@ function initReleaseGroupPage() {
         () => void openSwitch(currentRelease),
       );
       heroSwitchButton = switchButton;
-      const refreshButton = el(
-        'button',
-        'btn btn--secondary btn--icon btn--icon-refresh',
-        'Refresh cover',
-      );
-      refreshButton.type = 'button';
-      refreshButton.title =
-        'Fetch the cover art again (Cover Art Archive, then Deezer)';
-      refreshButton.addEventListener('click', () => {
-        if (currentRelease) void refreshCover(currentRelease, refreshButton);
-      });
-      heroRefreshButton = refreshButton;
       const deleteButton = el(
         'button',
         'btn btn--danger btn--icon btn--icon-trash',
@@ -489,7 +601,7 @@ function initReleaseGroupPage() {
       deleteButton.addEventListener('click', () =>
         deleteGroup(deleteButton),
       );
-      actions.replaceChildren(switchButton, refreshButton, deleteButton);
+      actions.replaceChildren(switchButton, deleteButton);
 
       renderRelease(release, group);
       status.hidden = true;

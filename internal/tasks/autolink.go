@@ -75,8 +75,9 @@ func EnsureMoveDestination(op string, fileID int64, trackID, src, dst string) er
 }
 
 // EmbedCover stamps the cached release art into the audio file as its front
-// cover. No cached art is a no-op (scan never blocks on the network); a
-// present-but-unreadable cache surfaces as an error like any other link step.
+// cover. No cached art — or a user-removed cover — is a no-op (scan never
+// blocks on the network); a present-but-unreadable cache surfaces as an
+// error like any other link step.
 func EmbedCover(ctx context.Context, st *store.Store, coverDir, filePath, releaseID string) error {
 	row, err := st.GetCover(ctx, releaseID)
 	if err != nil {
@@ -84,6 +85,9 @@ func EmbedCover(ctx context.Context, st *store.Store, coverDir, filePath, releas
 			return nil
 		}
 		return err
+	}
+	if row.Removed {
+		return nil
 	}
 	path, err := config.CoverPath(coverDir, releaseID, row.MIME)
 	if err != nil {

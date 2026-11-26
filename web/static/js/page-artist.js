@@ -7,10 +7,16 @@ import {
   mbUrl,
 } from './api.js';
 import { hydrateReleaseLine, releaseGroupCard } from './cards.js';
-import { formatDateTime, plural } from './format.js';
+import {
+  coverSourceBadge,
+  coverSourceText,
+  formatDateTime,
+  plural,
+} from './format.js';
 import {
   byId,
   clear,
+  coverTools,
   el,
   emptyState,
   mapLimit,
@@ -51,21 +57,6 @@ function sortTypeGroups(typeGroups) {
       sensitivity: 'base',
     });
   });
-}
-
-function bustCoverImgs() {
-  // The endpoint sends a 24h max-age, so bust the <img> URLs or the
-  // browser would keep showing the previous bytes.
-  const stamp = String(Date.now());
-  for (const img of document.querySelectorAll('img.cover-img')) {
-    try {
-      const url = new URL(img.currentSrc || img.src, location.origin);
-      url.searchParams.set('t', stamp);
-      img.src = url.toString();
-    } catch {
-      /* keep the previous art on weird URLs */
-    }
-  }
 }
 
 function initArtistPage() {
@@ -114,6 +105,8 @@ function initArtistPage() {
   let appearsGroups = [];
   let artist = null;
   let coverInFlight = false;
+  let heroTools = null;
+  let coverMetaToken = 0;
   let importPollTimer;
   let importPollToken = 0;
   let lastImportState = 'idle';
@@ -284,25 +277,138 @@ function initArtistPage() {
     }
   }
 
-  async function refreshArtistCover(button) {
+  async function refreshArtistCover() {
     if (!artist || coverInFlight) return;
     coverInFlight = true;
-    setBusy(button, true, 'Refreshing…');
+    heroTools.setBusy(true);
     try {
       const row = await api.refreshArtistCover(artist.id);
+      // Rebuild the hero either way: the page may be showing the avatar
+      // fallback (when there was no cached photo before) or stale art
+      // (when the refresh found nothing and dropped the cache).
+      renderHeroPhoto();
       if (!row) {
         toast('No photo found for this artist.', 'info');
         return;
       }
-      bustCoverImgs();
-      toast(`Artist photo refreshed (${row.source}).`, 'ok');
+      toast(
+        `Artist photo refreshed (${coverSourceText(row.source)}).`,
+        'ok',
+      );
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error);
       toast(`Could not refresh photo: ${message}`, 'error');
     } finally {
       coverInFlight = false;
-      setBusy(button, false);
+      heroTools.setBusy(false);
+    }
+  }
+
+  // Renders the hero art with the overlay tools and source badge. Remove
+  // and the badge only show once the <img> proves itself; fallback tiles
+  // keep them hidden.
+  function renderHeroPhoto() {
+    const art = coverArt('artist', artist.id, '', {
+      eager: true,
+      fallback: () =>
+        artistAvatar(artist.id, artist.name, '', {
+          variant: 'initials',
+        }),
+    });
+    setSharedArtName(art, sharedArtName('artist', artist.id));
+    heroArt.replaceChildren(art, heroTools.tools, heroTools.source);
+    syncPhotoSource(art);
+  }
+
+  function syncPhotoSource(art) {
+    const token = ++coverMetaToken;
+    heroTools.setHasArt(false);
+    if (art.tagName !== 'IMG') return;
+    const onLoad = () => {
+      heroTools.setHasArt(true);
+      void loadPhotoSource(token);
+    };
+    if (art.complete && art.naturalWidth > 0) {
+      onLoad();
+      return;
+    }
+    art.addEventListener('load', onLoad);
+    art.addEventListener('error', () => heroTools.setHasArt(false));
+  }
+
+  async function loadPhotoSource(token) {
+    if (!artist || token !== coverMetaToken) return;
+    try {
+      const row = await api.getArtistCoverMeta(artist.id);
+      if (token !== coverMetaToken || !artist) return;
+      heroTools.setSource(row ? coverSourceBadge(row.source) : '');
+    } catch {
+      if (token === coverMetaToken) heroTools.setSource('');
+    }
+  }
+
+  async function uploadArtistPhoto(file) {
+    if (!artist || coverInFlight) return;
+    coverInFlight = true;
+    heroTools.setBusy(true);
+    try {
+      const row = await api.uploadArtistCover(artist.id, file);
+      if (!row) {
+        toast('Upload finished with no photo.', 'info');
+        return;
+      }
+      renderHeroPhoto();
+      toast('Artist photo uploaded.', 'ok');
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      toast(`Could not upload photo: ${message}`, 'error');
+    } finally {
+      coverInFlight = false;
+      heroTools.setBusy(false);
+    }
+  }
+
+  async function removeArtistPhoto() {
+    if (!artist || coverInFlight) return;
+    if (
+      !window.confirm(
+        `Remove the artist photo for ${artist.name}? The cached file is deleted. Upload a new photo or refresh to fetch one again.`,
+      )
+    ) {
+      return;
+    }
+    coverInFlight = true;
+    heroTools.setBusy(true);
+    try {
+      const response = await api.deleteArtistCover(artist.id);
+      if (response.status === 404) {
+        toast('Artist not found.', 'error');
+        return;
+      }
+      if (!response.ok) {
+        let message = response.statusText;
+        try {
+          const body = await response.json();
+          if (typeof body?.error === 'string' && body.error) {
+            message = body.error;
+          }
+        } catch {
+          /* keep status text */
+        }
+        toast(`Could not remove photo: ${message}`, 'error');
+        return;
+      }
+      renderHeroPhoto();
+      toast('Artist photo removed.', 'ok');
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      toast(`Could not remove photo: ${message}`, 'error');
+    } finally {
+      coverInFlight = false;
+      heroTools.setBusy(false);
     }
   }
 
@@ -658,19 +764,19 @@ function initArtistPage() {
       document.title = `${artist.name} · Coda`;
       crumb.textContent = artist.name;
 
-      heroArt.replaceChildren(
-        coverArt('artist', artist.id, '', {
-          eager: true,
-          fallback: () =>
-            artistAvatar(artist.id, artist.name, '', {
-              variant: 'initials',
-            }),
-        }),
-      );
-      setSharedArtName(
-        heroArt.firstElementChild,
-        sharedArtName('artist', artist.id),
-      );
+      heroTools = coverTools({
+        refreshLabel: 'Refresh photo',
+        refreshTitle:
+          'Fetch the artist photo again (Deezer, then Wikimedia Commons)',
+        uploadLabel: 'Upload photo',
+        uploadTitle: 'Upload a JPEG, PNG, or WebP photo (max 15MB)',
+        removeLabel: 'Remove photo',
+        removeTitle: 'Remove the cached photo',
+        onRefresh: () => void refreshArtistCover(),
+        onUpload: (file) => void uploadArtistPhoto(file),
+        onRemove: () => void removeArtistPhoto(),
+      });
+      renderHeroPhoto();
       artistName.textContent = artist.name;
 
       const meta = [];
@@ -686,19 +792,6 @@ function initArtistPage() {
         `Open ${artist.name} on MusicBrainz`,
       );
       artistMbRow.hidden = false;
-      const photoButton = el(
-        'button',
-        'btn btn--secondary btn--icon btn--icon-photo',
-        'Refresh photo',
-      );
-      photoButton.type = 'button';
-      photoButton.title =
-        'Fetch the artist photo again (Deezer, then Wikimedia Commons)';
-      photoButton.addEventListener(
-        'click',
-        () => void refreshArtistCover(photoButton),
-      );
-      artistActions.append(photoButton);
       const refreshButton = el(
         'button',
         'btn btn--secondary btn--icon btn--icon-refresh',
@@ -717,7 +810,10 @@ function initArtistPage() {
       deleteButton.addEventListener('click', () =>
         deleteArtist(deleteButton),
       );
-      artistActions.replaceChildren(photoButton, refreshButton, deleteButton);
+      artistActions.replaceChildren(
+        refreshButton,
+        deleteButton,
+      );
 
       setTrackStats(artist);
 

@@ -11,6 +11,10 @@ before upgrading and back up your database (see
 
 ### Changed
 
+- Cover image responses use `Cache-Control: no-cache` with ETag
+  revalidation instead of a 24h max-age, so uploads, refreshes, and
+  removals show up without a hard reload; `fetched_at` carries
+  millisecond precision so rapid updates never share an ETag.
 - The install script keeps the previous port, roots, data dir and service
   user when re-run; a passed flag overrides them.
 - The outbound User-Agent contact is now the project URL instead of a
@@ -18,6 +22,19 @@ before upgrading and back up your database (see
 
 ### Added
 
+- Cover and artist-photo uploads (`PUT /releases/:id/cover`,
+  `PUT /artists/:id/cover`, plus hover-overlay "Upload cover"/"Upload
+  photo" actions on the hero image in the web UI). Release uploads replace
+  the cached art immediately and queue a background task that re-embeds it
+  into the release's linked files.
+- Cover and artist-photo removal (`DELETE /releases/:id/cover`,
+  `DELETE /artists/:id/cover`, plus a hover-overlay remove action). The
+  cached file is deleted and stays deleted until the next upload or
+  refresh; removing a release cover also queues a background task that
+  clears the embedded art from its linked files.
+- Hero source badge: the web UI shows where cached art came from ("From
+  Cover Art Archive", "Uploaded", …) via new `GET …/cover/meta` endpoints
+  that read the cached metadata without fetching.
 - User and contributor documentation under `docs/` (install,
   configuration, library, navidrome, api, operations, architecture), a
   CONTRIBUTING guide, a security policy, a code of conduct, and this
