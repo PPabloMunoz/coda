@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/ppablomunoz/coda/internal/config"
@@ -48,30 +47,6 @@ func LibraryTargetPath(root string, info *tags.LinkInfo, ext string) (string, er
 		TotalDiscs: info.DiscTotal,
 		Ext:        ext,
 	}.Path()
-}
-
-// EnsureMoveDestination creates the destination parent dir and reports
-// whether renaming is safe. A pre-existing dst is ErrAlreadyExists so
-// callers fail before writing tags.
-func EnsureMoveDestination(op string, fileID int64, trackID, src, dst string) error {
-	if dst == src {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("%s file=%d track=%q mkdir -> %w", op, fileID, trackID, err),
-		)
-	}
-	if _, err := os.Lstat(dst); err == nil {
-		return apperrors.ErrAlreadyExists
-	} else if !os.IsNotExist(err) {
-		return apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("%s file=%d track=%q stat destination -> %w", op, fileID, trackID, err),
-		)
-	}
-	return nil
 }
 
 // EmbedCover stamps the cached release art into the audio file as its front
@@ -156,7 +131,6 @@ func (r *Runner) autoLinkMoves(ctx context.Context) AutoLinkStats {
 		}
 	}
 
-	roots := map[int64]string{}
 	for _, f := range all {
 		select {
 		case <-ctx.Done():
@@ -175,85 +149,23 @@ func (r *Runner) autoLinkMoves(ctx context.Context) AutoLinkStats {
 			continue
 		}
 
-		fullRelease, track, err := r.st.GetTrackFullRelease(ctx, trackID)
+		// The shared pipeline serializes per file and per destination,
+		// moves with no-replace semantics before writing tags, and maps an
+		// occupied destination to ErrAlreadyExists.
+		linked, moved, err := LinkFile(ctx, r.st, r.coverDir, f.ID, trackID)
 		if err != nil {
+			if apperrors.Is(err, apperrors.ErrAlreadyExists) {
+				stats.SkippedConflict++
+				r.log.Warnf("scan auto-link file=%d track=%q skipped: destination occupied", f.ID, trackID)
+				continue
+			}
 			if apperrors.Is(err, apperrors.ErrNotFound) {
 				continue
 			}
-			r.log.Warnf("scan auto-link file=%d track=%q load release: %v", f.ID, trackID, err)
+			r.log.Warnf("scan auto-link file=%d track=%q: %v", f.ID, trackID, err)
 			continue
 		}
-
-		rootPath, ok := roots[f.RootID]
-		if !ok {
-			root, err := r.st.GetRoot(ctx, f.RootID)
-			if err != nil {
-				r.log.Warnf("scan auto-link file=%d load root: %v", f.ID, err)
-				continue
-			}
-			rootPath = root.Path
-			roots[f.RootID] = rootPath
-		}
-
-		info := LinkInfoFromStore(fullRelease, track)
-		dst, err := LibraryTargetPath(rootPath, info, f.FormatHint)
-		if err != nil {
-			r.log.Debugf("scan auto-link file=%d track=%q build path: %v", f.ID, trackID, err)
-			continue
-		}
-		if dst == f.Path && f.TrackID != nil && *f.TrackID == trackID {
-			continue
-		}
-
-		if err := EnsureMoveDestination("scan", f.ID, trackID, f.Path, dst); err != nil {
-			if apperrors.Is(err, apperrors.ErrAlreadyExists) {
-				stats.SkippedConflict++
-				r.log.Warnf("scan auto-link file=%d track=%q skipped: destination occupied (%q)", f.ID, trackID, dst)
-				continue
-			}
-			r.log.Warnf("scan auto-link file=%d track=%q destination: %v", f.ID, trackID, err)
-			continue
-		}
-
-		if err := tags.WriteTags(f.Path, tags.ToMap(tags.SnapshotFromLink(info))); err != nil {
-			r.log.Warnf("scan auto-link file=%d track=%q write tags: %v", f.ID, trackID, err)
-			continue
-		}
-		if err := EmbedCover(ctx, r.st, r.coverDir, f.Path, fullRelease.ID); err != nil {
-			r.log.Warnf("scan auto-link file=%d track=%q write cover: %v", f.ID, trackID, err)
-			continue
-		}
-
-		src := f.Path
-		moved := dst != src
-		if moved {
-			if err := os.Rename(src, dst); err != nil {
-				r.log.Warnf("scan auto-link file=%d track=%q move: %v", f.ID, trackID, err)
-				continue
-			}
-		}
-
-		fi, err := os.Stat(dst)
-		if err != nil {
-			// Tags were written and the file may have moved; the DB still
-			// points at src. The next scan heals this to unlinked, never
-			// to a wrong link.
-			r.log.Errorf("scan auto-link file=%d track=%q stat: %v", f.ID, trackID, err)
-			continue
-		}
-
-		if err := r.st.Link(ctx, f.ID, trackID, dst, fi.Size(), fi.ModTime().UnixNano()); err != nil {
-			if moved {
-				if rbErr := os.Rename(dst, src); rbErr != nil {
-					r.log.Errorf("scan auto-link file=%d track=%q rollback failed: %v", f.ID, trackID, rbErr)
-				}
-			}
-			if apperrors.Is(err, apperrors.ErrAlreadyExists) {
-				stats.SkippedConflict++
-				r.log.Warnf("scan auto-link file=%d track=%q skipped: destination tracked (%q)", f.ID, trackID, dst)
-				continue
-			}
-			r.log.Warnf("scan auto-link file=%d track=%q save: %v", f.ID, trackID, err)
+		if !linked {
 			continue
 		}
 

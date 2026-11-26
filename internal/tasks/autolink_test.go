@@ -2,11 +2,9 @@ package tasks
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
-	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/tags"
 )
 
@@ -98,28 +96,6 @@ func TestLibraryTargetPathFallsBackWithoutFolderArtist(t *testing.T) {
 	want := filepath.Join(root, "Alice_&_Bob", "Album", "01_Song.mp3")
 	if got != want {
 		t.Errorf("path = %q, want %q", got, want)
-	}
-}
-
-func TestEnsureMoveDestination(t *testing.T) {
-	root := t.TempDir()
-	if err := EnsureMoveDestination("test", 1, "track", root+"/a.mp3", root+"/a.mp3"); err != nil {
-		t.Errorf("same path = %v, want nil", err)
-	}
-
-	dst := filepath.Join(root, "sub", "dir", "song.mp3")
-	if err := EnsureMoveDestination("test", 1, "track", root+"/a.mp3", dst); err != nil {
-		t.Fatalf("new nested dst = %v, want nil", err)
-	}
-	if fi, err := os.Stat(filepath.Dir(dst)); err != nil || !fi.IsDir() {
-		t.Errorf("parent dir not created: %v", err)
-	}
-
-	if err := os.WriteFile(dst, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := EnsureMoveDestination("test", 1, "track", root+"/a.mp3", dst); !apperrors.Is(err, apperrors.ErrAlreadyExists) {
-		t.Errorf("occupied dst = %v, want ALREADY_EXISTS", err)
 	}
 }
 

@@ -53,7 +53,11 @@ Linked files move to a canonical path under their root:
   and trailing dots/underscores are trimmed, repeated `_` collapse, and a
   segment is capped at 100 characters.
 - An occupied destination refuses the move with `409` and leaves the
-  source file untouched. Coda never overwrites an existing file.
+  source file untouched. Coda never overwrites an existing file: moves use
+  no-replace semantics (hard link plus an `O_EXCL` copy fallback, so
+  cross-filesystem moves work too), and link/refresh operations for the
+  same file or the same destination are serialized against each other and
+  the scan auto-link.
 
 ## Supported formats
 
@@ -89,8 +93,15 @@ Unlinking clears exactly those keys and the embedded cover. Every other
 frame in the file is preserved.
 
 All tag writes go through a same-directory temp copy and an atomic rename,
-so a crash mid-write cannot corrupt a file. Writes to the same path are
-serialized between the scan and the API.
+so a crash mid-write cannot corrupt a file. Linking runs one shared
+pipeline (manual link, refresh, and scan auto-link): the file moves to its
+canonical path first with no-replace semantics, then tags and cover are
+written and the database link is recorded. Each run holds a per-file
+operation lock across move, tag write, cover embed, and database link, plus
+a per-destination lock, so concurrent links to the same file or the same
+destination cannot overwrite each other. A failed move leaves tags and the
+database untouched; a failed tag, cover, or database step moves the file
+back without replacing anything.
 
 ## Custom covers
 

@@ -389,12 +389,6 @@ func readCoverUpload(c *gin.Context) ([]byte, string, error) {
 	}
 }
 
-// embedCover stamps the cached release art into the audio file as its front
-// cover. Single owner is tasks.EmbedCover (reused by the scan auto-link).
-func (h *Handler) embedCover(ctx context.Context, filePath, releaseID string) error {
-	return tasks.EmbedCover(ctx, h.st, h.coverDir, filePath, releaseID)
-}
-
 // removeCoverFiles deletes every cached file for a release (all extensions).
 // The DB row is expected to be gone already (FK cascade or explicit delete).
 func removeCoverFiles(coverDir, releaseID string) {
