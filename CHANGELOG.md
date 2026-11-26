@@ -24,6 +24,12 @@ before upgrading and back up your database (see
   empty: the walk reports per-root completeness, incomplete roots never
   prune, and empty-but-previously-populated roots keep their rows unless
   the scan is forced (`POST /api/v1/scan?force_prune=true`).
+- Switching the saved release no longer drops all file links or fails later
+  imports: discography refreshes keep the user-selected release, tracklists
+  reconcile (removed tracks unlink, moved tracks keep links, duplicate
+  positions skip) instead of aborting, and files whose recording plus
+  disc/position match the new release stay linked with tags, cover, and
+  paths rewritten by a background task.
 
 ### Changed
 

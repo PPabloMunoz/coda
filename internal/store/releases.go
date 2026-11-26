@@ -215,6 +215,14 @@ func normalizeRGType(t string) string {
 
 // SaveFullRelease upserts the group, its single release and tracks in one tx,
 // keyed by MBID throughout. Tracks with missing position/title are skipped.
+// If the group already stores a different release (a user-selected switch),
+// the stored release is preserved and the incoming one is skipped so a
+// later discography refresh never overwrites the selection or aborts on the
+// UNIQUE(release_group_id) constraint. Tracks are reconciled: vanished
+// tracks are deleted (unlinking their files), duplicate positions in one
+// batch are skipped, and surviving tracks are parked out of the way before
+// upsert so a changed tracklist never hits UNIQUE(release_id, disc, position).
+// An empty (or fully invalid) incoming tracklist leaves existing tracks alone.
 func (st *Store) SaveFullRelease(ctx context.Context, tx *sql.Tx, p FullReleaseParams) error {
 	rgCreditID, err := createCreditTx(ctx, tx, p.Group.Credit)
 	if err != nil {
@@ -233,6 +241,19 @@ func (st *Store) SaveFullRelease(ctx context.Context, tx *sql.Tx, p FullReleaseP
 			apperrors.ErrInternal,
 			fmt.Errorf("upsert release-group: %w", err),
 		)
+	}
+
+	var storedID string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT id FROM releases WHERE release_group_id = ?`,
+		p.Group.ID,
+	).Scan(&storedID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query stored release: %w", err),
+		)
+	} else if err == nil && storedID != p.ID {
+		return nil
 	}
 
 	relCreditID, err := createCreditTx(ctx, tx, p.Credit)
@@ -259,8 +280,135 @@ func (st *Store) SaveFullRelease(ctx context.Context, tx *sql.Tx, p FullReleaseP
 		)
 	}
 
-	if len(p.Tracks) == 0 {
+	type validTrack struct {
+		TrackParams
+		disc int
+	}
+	valid := make([]validTrack, 0, len(p.Tracks))
+	seenPos := make(map[[2]int]struct{}, len(p.Tracks))
+	seenID := make(map[string]struct{}, len(p.Tracks))
+	for _, t := range p.Tracks {
+		if t.Position < 1 || strings.TrimSpace(t.Title) == "" {
+			continue
+		}
+		if _, ok := seenID[t.ID]; ok {
+			continue
+		}
+		disc := max(t.Disc, 1)
+		key := [2]int{disc, t.Position}
+		if _, ok := seenPos[key]; ok {
+			continue
+		}
+		seenID[t.ID] = struct{}{}
+		seenPos[key] = struct{}{}
+		valid = append(valid, validTrack{TrackParams: t, disc: disc})
+	}
+
+	if len(valid) == 0 {
 		return nil
+	}
+
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, disc_number, position FROM tracks WHERE release_id = ?`,
+		p.ID,
+	)
+	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query existing tracks: %w", err),
+		)
+	}
+	defer func() { _ = rows.Close() }()
+	existing := make(map[string]struct{}, len(valid))
+	maxPos := 0
+	for rows.Next() {
+		var id string
+		var disc, pos int
+		if err := rows.Scan(&id, &disc, &pos); err != nil {
+			_ = rows.Close()
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan existing track: %w", err),
+			)
+		}
+		existing[id] = struct{}{}
+		if pos > maxPos {
+			maxPos = pos
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading existing tracks: %w", err),
+		)
+	}
+	for _, t := range valid {
+		if t.Position > maxPos {
+			maxPos = t.Position
+		}
+	}
+
+	incoming := make(map[string]struct{}, len(valid))
+	for _, t := range valid {
+		incoming[t.ID] = struct{}{}
+	}
+
+	if len(incoming) > 0 {
+		args := make([]any, 0, len(incoming)+1)
+		args = append(args, p.ID)
+		for id := range incoming {
+			args = append(args, id)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM tracks WHERE release_id = ? AND id NOT IN (`+placeholders(len(incoming))+`)`,
+			args...,
+		); err != nil {
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("reconcile tracks delete: %w", err),
+			)
+		}
+	}
+
+	// Explicitly unlink files of removed tracks. Production runs with
+	// foreign_keys=ON so the cascade already nulled them; the explicit
+	// update keeps behavior identical when FK enforcement is off (tests)
+	// and never touches surviving links.
+	deleted := make([]any, 0)
+	for id := range existing {
+		if _, ok := incoming[id]; !ok {
+			deleted = append(deleted, id)
+		}
+	}
+	if len(deleted) > 0 {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE local_files SET track_id = NULL WHERE track_id IN (`+placeholders(len(deleted))+`)`,
+			deleted...,
+		); err != nil {
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("unlink removed tracks: %w", err),
+			)
+		}
+	}
+
+	survivors := 0
+	for id := range existing {
+		if _, ok := incoming[id]; ok {
+			survivors++
+		}
+	}
+	if survivors > 0 {
+		offset := maxPos + 100000
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE tracks SET position = position + ? WHERE release_id = ?`,
+			offset, p.ID,
+		); err != nil {
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("park surviving tracks: %w", err),
+			)
+		}
 	}
 
 	stmt, err := tx.PrepareContext(ctx, `
@@ -286,19 +434,14 @@ func (st *Store) SaveFullRelease(ctx context.Context, tx *sql.Tx, p FullReleaseP
 	}
 	defer func() { _ = stmt.Close() }()
 
-	for _, t := range p.Tracks {
-		if t.Position < 1 || strings.TrimSpace(t.Title) == "" {
-			continue
-		}
-		disc := max(t.Disc, 1)
-
+	for _, t := range valid {
 		trackCreditID, err := createCreditTx(ctx, tx, t.Credit)
 		if err != nil {
 			return err
 		}
 
 		if _, err := stmt.ExecContext(ctx,
-			t.ID, p.ID, disc, t.Position, t.Number,
+			t.ID, p.ID, t.disc, t.Position, t.Number,
 			t.Title, trackCreditID, t.DurMS, t.RecordingID,
 		); err != nil {
 			return apperrors.Wrap(
@@ -312,9 +455,11 @@ func (st *Store) SaveFullRelease(ctx context.Context, tx *sql.Tx, p FullReleaseP
 }
 
 // ReplaceRelease swaps the single saved release for a release group with a
-// new one from the same group. Old tracks cascade-delete and linked files
-// auto-unlink via ON DELETE SET NULL; the new release and tracks are then
-// upserted in the same tx.
+// new one from the same group. File links whose recording + disc/position
+// match a track on the new release are remapped in the same tx so they
+// survive the switch; the rest unlink via ON DELETE SET NULL. The new
+// release and tracks are then upserted, and a background task rewrites
+// tags, covers, and paths for the remapped files.
 func (st *Store) ReplaceRelease(ctx context.Context, groupID string, p FullReleaseParams) error {
 	if p.Group.ID != groupID {
 		return apperrors.Wrap(
@@ -333,6 +478,51 @@ func (st *Store) ReplaceRelease(ctx context.Context, groupID string, p FullRelea
 		)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	type oldLink struct {
+		fileID int64
+		rec    string
+		disc   int
+		pos    int
+	}
+	oldLinks := []oldLink{}
+	linkRows, err := tx.QueryContext(ctx, `
+		SELECT lf.id, t.recording_id, t.disc_number, t.position
+		FROM local_files lf
+		JOIN tracks t ON t.id = lf.track_id
+		JOIN releases r ON r.id = t.release_id
+		WHERE r.release_group_id = ? AND lf.track_id IS NOT NULL`,
+		groupID,
+	)
+	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query outgoing links: %w", err),
+		)
+	}
+	for linkRows.Next() {
+		var l oldLink
+		var rec sql.NullString
+		if err := linkRows.Scan(&l.fileID, &rec, &l.disc, &l.pos); err != nil {
+			_ = linkRows.Close()
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan outgoing link: %w", err),
+			)
+		}
+		if rec.Valid {
+			l.rec = strings.TrimSpace(rec.String)
+		}
+		oldLinks = append(oldLinks, l)
+	}
+	if err := linkRows.Err(); err != nil {
+		_ = linkRows.Close()
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading outgoing links: %w", err),
+		)
+	}
+	_ = linkRows.Close()
 
 	res, err := tx.ExecContext(ctx,
 		`DELETE FROM releases WHERE release_group_id = ?`,
@@ -355,8 +545,93 @@ func (st *Store) ReplaceRelease(ctx context.Context, groupID string, p FullRelea
 		return apperrors.ErrNotFound
 	}
 
+	// Explicitly unlink outgoing files. Production runs with
+	// foreign_keys=ON so the cascade already nulled them; the explicit
+	// update keeps behavior identical when FK enforcement is off (tests).
+	if len(oldLinks) > 0 {
+		ids := make([]any, 0, len(oldLinks))
+		for _, l := range oldLinks {
+			ids = append(ids, l.fileID)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE local_files SET track_id = NULL WHERE id IN (`+placeholders(len(ids))+`)`,
+			ids...,
+		); err != nil {
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("unlink outgoing files: %w", err),
+			)
+		}
+	}
+
 	if err := st.SaveFullRelease(ctx, tx, p); err != nil {
 		return err
+	}
+
+	if len(oldLinks) > 0 {
+		newRows, err := tx.QueryContext(ctx,
+			`SELECT id, recording_id, disc_number, position FROM tracks WHERE release_id = ?`,
+			p.ID,
+		)
+		if err != nil {
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("query new tracks: %w", err),
+			)
+		}
+		type trackKey struct {
+			rec  string
+			disc int
+			pos  int
+		}
+		byKey := make(map[trackKey]string)
+		for newRows.Next() {
+			var id string
+			var rec sql.NullString
+			var disc, pos int
+			if err := newRows.Scan(&id, &rec, &disc, &pos); err != nil {
+				_ = newRows.Close()
+				return apperrors.Wrap(
+					apperrors.ErrInternal,
+					fmt.Errorf("scan new track: %w", err),
+				)
+			}
+			recStr := ""
+			if rec.Valid {
+				recStr = strings.TrimSpace(rec.String)
+			}
+			if recStr == "" {
+				continue
+			}
+			byKey[trackKey{rec: recStr, disc: disc, pos: pos}] = id
+		}
+		if err := newRows.Err(); err != nil {
+			_ = newRows.Close()
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("reading new tracks: %w", err),
+			)
+		}
+		_ = newRows.Close()
+
+		for _, l := range oldLinks {
+			if strings.TrimSpace(l.rec) == "" {
+				continue
+			}
+			newID, ok := byKey[trackKey{rec: l.rec, disc: l.disc, pos: l.pos}]
+			if !ok {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE local_files SET track_id = ? WHERE id = ?`,
+				newID, l.fileID,
+			); err != nil {
+				return apperrors.Wrap(
+					apperrors.ErrInternal,
+					fmt.Errorf("remap file link: %w", err),
+				)
+			}
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

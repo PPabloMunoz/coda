@@ -63,6 +63,14 @@ func LockFileOp(id int64) func() {
 // file was relocated. An occupied destination (filesystem or DB) returns
 // ErrAlreadyExists so callers answer 409 and leave the source untouched.
 func LinkFile(ctx context.Context, st *store.Store, coverDir string, fileID int64, trackID string) (linked, moved bool, err error) {
+	return linkFile(ctx, st, coverDir, fileID, trackID, false)
+}
+
+// linkFile is LinkFile with a force flag for the post-switch relink pass.
+// force=true skips the already-current no-op so files whose DB link was
+// remapped to a new track ID still get their tags, cover, and path
+// rewritten even when the canonical path did not change.
+func linkFile(ctx context.Context, st *store.Store, coverDir string, fileID int64, trackID string, force bool) (linked, moved bool, err error) {
 	fileMu := fileOpLock(fileID)
 	fileMu.Lock()
 	defer fileMu.Unlock()
@@ -100,7 +108,7 @@ func LinkFile(ctx context.Context, st *store.Store, coverDir string, fileID int6
 	dstMu.Lock()
 	defer dstMu.Unlock()
 
-	if filepath.Clean(dst) == filepath.Clean(src) &&
+	if !force && filepath.Clean(dst) == filepath.Clean(src) &&
 		localFile.TrackID != nil && *localFile.TrackID == trackID {
 		return false, false, nil
 	}

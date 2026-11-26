@@ -163,6 +163,9 @@ func (h *Handler) replaceRelease(c *gin.Context) {
 		_ = h.st.DeleteCover(ctx, oldRelease.ID)
 		removeCoverFiles(h.coverDir, oldRelease.ID)
 	}
+	// The DB link is already remapped; heal tags, covers, and paths in the
+	// background so the switch stays fast.
+	h.queue.EnqueueRelinkRelease(newReleaseID)
 
 	c.JSON(http.StatusOK, nil)
 }

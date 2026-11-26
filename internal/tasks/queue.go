@@ -189,6 +189,26 @@ func (q *Queue) EnqueueClearReleaseCover(releaseID string) {
 	q.signal()
 }
 
+// EnqueueRelinkRelease queues a background tag/move rewrite for every file
+// linked to a release after a release switch. Dedupes per release while
+// queued: one run covers repeated switches, and the DB link is already
+// remapped synchronously in ReplaceRelease so this only heals on-disk state.
+func (q *Queue) EnqueueRelinkRelease(releaseID string) {
+	q.mu.Lock()
+	for _, t := range q.items {
+		if t.Key == TaskRelinkRelease && t.ID == releaseID {
+			q.mu.Unlock()
+			q.debugf("task %s already queued %q", TaskRelinkRelease, releaseID)
+			return
+		}
+	}
+	q.items = append(q.items, Task{Key: TaskRelinkRelease, ID: releaseID})
+	depth := len(q.items)
+	q.mu.Unlock()
+	q.debugf("task %s queued %q (depth=%d)", TaskRelinkRelease, releaseID, depth)
+	q.signal()
+}
+
 // ArtistImportStatus returns the current import state for id, or idle when unknown.
 func (q *Queue) ArtistImportStatus(id string) ArtistImportStatus {
 	q.mu.Lock()

@@ -367,3 +367,66 @@ func TestReplaceReleaseValidation(t *testing.T) {
 		t.Errorf("mb failure = %d, want 502", w.Code)
 	}
 }
+
+func TestReplaceReleaseKeepsLinks(t *testing.T) {
+	const (
+		groupID    = "11111111-2222-4333-8444-555555555555"
+		oldRelID   = "33333333-4444-4555-b666-777777777777"
+		oldTrackID = "55555555-6666-4777-b888-999999999999"
+		newRelID   = "44444444-5555-4666-b777-888888888888"
+		newTrackID = "66666666-7777-4888-b999-aaaaaaaaaaaa"
+		recShared  = "77777777-8888-4999-baaa-bbbbbbbbbbbb"
+	)
+	root := t.TempDir()
+	env := newTestEnv(t, root)
+	ctx := context.Background()
+
+	credit := []store.CreditEntry{{ArtistID: "d5b32d03-2aaf-4baf-ba5d-3721d095b833", Name: "Artist", CreditedName: "Artist"}}
+	if err := env.st.CreateArtist(ctx, store.Artist{ID: "d5b32d03-2aaf-4baf-ba5d-3721d095b833", Name: "Artist"}); err != nil {
+		t.Fatalf("CreateArtist = %v", err)
+	}
+	if err := env.st.SaveDiscography(ctx, []store.FullReleaseParams{{
+		ID: oldRelID, Title: "Release", Credit: credit,
+		Group: store.ReleaseGroupParams{ID: groupID, Title: "Group", Type: "album", Credit: credit},
+		Tracks: []store.TrackParams{{
+			ID: oldTrackID, ReleaseID: oldRelID, Disc: 1, Position: 1,
+			Number: "1", Title: "Track", Credit: credit, RecordingID: recShared,
+		}},
+	}}); err != nil {
+		t.Fatalf("SaveDiscography = %v", err)
+	}
+	id, path := syncLinkWav(t, env.st, root, "song.wav")
+	f, err := env.st.GetFile(ctx, id, false)
+	if err != nil {
+		t.Fatalf("GetFile = %v", err)
+	}
+	if err := env.st.Link(ctx, id, oldTrackID, path, f.SizeBytes, f.MtimeNs); err != nil {
+		t.Fatalf("Link = %v", err)
+	}
+
+	env.mbMux.HandleFunc("/release/"+newRelID, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(musicbrainz.Release{
+			ID: newRelID, Title: "Release", Status: "Official",
+			ReleaseGroup: musicbrainz.ReleaseGroup{ID: groupID, Title: "Group", PrimaryType: "Album"},
+			Media: []musicbrainz.Medium{{Position: 1, Tracks: []musicbrainz.ReleaseTrack{{
+				ID: newTrackID, Position: 1, Number: "1", Title: "Track",
+				Recording: musicbrainz.RecordingRef{ID: recShared},
+			}}}},
+		})
+	})
+	w := doRequest(t, env.router, "PUT", "/api/v1/release-groups/"+groupID+"/update",
+		map[string]string{"new_release_id": newRelID})
+	if w.Code != http.StatusOK {
+		t.Fatalf("switch = %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	got, err := env.st.GetFile(ctx, id, false)
+	if err != nil {
+		t.Fatalf("GetFile after = %v", err)
+	}
+	if got.TrackID == nil || *got.TrackID != newTrackID {
+		t.Errorf("after switch track = %v, want %q", got.TrackID, newTrackID)
+	}
+	if _, err := env.st.GetRelease(ctx, oldRelID, false); err == nil {
+		t.Error("old release still present, want it replaced")
+	}
+}

@@ -309,7 +309,12 @@ saved for the group. One release per group is enforced by the schema.
 
 Replaces the group's kept release with another release of the same group
 (fetched from MusicBrainz). Returns `200` with an empty body; the old
-release's rows and cached cover are dropped. The new release must belong to
+release's rows and cached cover are dropped. Files whose recording MBID
+plus disc/position match a track on the new release stay linked (the
+database remap is synchronous) and are retagged, re-covered, and moved to
+their canonical paths by a background task; the rest unlink. A later
+discography refresh keeps the switched release instead of overwriting it.
+The new release must belong to
 the group: `404` when MusicBrainz has no such release, `400` when it belongs
 to a different group, `502` on MusicBrainz failure.
 
