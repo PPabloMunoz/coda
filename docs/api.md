@@ -47,12 +47,35 @@ Every handled failure returns JSON:
 | `ALREADY_EXISTS`    | 409  | Conflict (occupied path, already linked) |
 | `INVALID_INPUT`     | 400  | Bad query param or body                  |
 | `INVALID_ID`        | 400  | Malformed MBID or file id                |
+| `PAYLOAD_TOO_LARGE` | 413  | JSON body over the 1 MiB API limit       |
+| `INVALID_HOST`      | 421  | Host header not in the allowlist         |
 | `MUSICBRAINZ_FAILED`| 502  | MusicBrainz or artwork upstream failed   |
 | *(anything else)*   | 500  | An unexpected error occurred (no code)   |
 
 A truly unexpected error has no `code` field. 404 means "not present or
 hidden": a file under a root removed from the config and a collaboration-only
 artist both answer 404. The UI treats 404 as `null`.
+
+### Request limits and security headers
+
+JSON API bodies are capped at 1 MiB: a declared `Content-Length` over the
+limit is rejected before reading, and chunked bodies are cut off while
+reading. Oversized bodies answer `413 PAYLOAD_TOO_LARGE` without buffering
+the whole body. Cover uploads (`PUT /releases/:id/cover`,
+`PUT /artists/:id/cover`) are exempt and keep their 15 MiB limit — an
+oversized cover answers `400 INVALID_INPUT`, like other cover validation
+failures.
+
+Requests whose `Host` header is not localhost, an IP literal, the
+configured listen `host`, or a name in `allowed_hosts` answer `421
+INVALID_HOST` (see [configuration.md](configuration.md#host-allowlist)).
+The port is ignored: `coda.lan:8687` matches `coda.lan`.
+
+Every response carries `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: no-referrer`, and a same-origin `Content-Security-Policy`
+(`script-src 'self'`, `style-src 'self'`, `img-src 'self' data:`,
+`connect-src 'self'`). The UI ships no inline scripts or styles, so the
+policy needs no `'unsafe-inline'` exception.
 
 ### MusicBrainz IDs
 

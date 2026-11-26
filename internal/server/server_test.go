@@ -38,6 +38,11 @@ func newTestEnv(t *testing.T, roots ...string) *testEnv {
 
 func newTestEnvWithArt(t *testing.T, art *artwork.Fetcher, roots ...string) *testEnv {
 	t.Helper()
+	return newTestEnvWithArtAndOptions(t, art, Options{}, roots...)
+}
+
+func newTestEnvWithArtAndOptions(t *testing.T, art *artwork.Fetcher, opts Options, roots ...string) *testEnv {
+	t.Helper()
 	log := utils.NewWithWriter(io.Discard)
 	st, err := store.NewStore(filepath.Join(t.TempDir(), "test.db"), roots, log)
 	if err != nil {
@@ -63,7 +68,7 @@ func newTestEnvWithArt(t *testing.T, art *artwork.Fetcher, roots ...string) *tes
 		t.Fatalf("mb New = %v", err)
 	}
 	coverDir := t.TempDir()
-	router := NewHandler(log, st, mb, q, art, coverDir)
+	router := NewHandler(log, st, mb, q, art, coverDir, opts)
 	return &testEnv{router: router, st: st, queue: q, mbSrv: srv, mbMux: mux, coverDir: coverDir}
 }
 
@@ -78,6 +83,7 @@ func doRequest(t *testing.T, router *gin.Engine, method, path string, body any) 
 		rdr = bytes.NewReader(buf)
 	}
 	req := httptest.NewRequest(method, path, rdr)
+	req.Host = "localhost"
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -160,6 +166,7 @@ func TestHttpStatusFor(t *testing.T) {
 	cases := map[string]int{
 		"NOT_FOUND": 404, "UNAUTHORIZED": 401, "FORBIDDEN": 403,
 		"ALREADY_EXISTS": 409, "INVALID_INPUT": 400, "INVALID_ID": 400,
+		"PAYLOAD_TOO_LARGE": 413, "INVALID_HOST": 421,
 		"MUSICBRAINZ_FAILED": 502, "UNKNOWN": 500, "": 500,
 	}
 	for code, want := range cases {

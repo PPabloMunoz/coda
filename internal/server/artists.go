@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -131,7 +132,10 @@ func (h *Handler) postArtist(c *gin.Context) {
 	var body PostArtistBody
 
 	if err := c.ShouldBindBodyWith(&body, binding.JSON); err != nil {
-		h.writeAppError(c, apperrors.ErrInvalidInput)
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("body invalid: %w", err)),
+		)
 		return
 	}
 

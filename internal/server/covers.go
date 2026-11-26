@@ -3,13 +3,13 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -386,7 +386,8 @@ func readCoverUpload(c *gin.Context) ([]byte, string, error) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, artwork.DefaultMaxBytes+1)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		if strings.Contains(err.Error(), "request body too large") {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
 			return nil, "", apperrors.Wrap(
 				apperrors.ErrInvalidInput,
 				fmt.Errorf("cover image exceeds %dMB limit", artwork.DefaultMaxBytes>>20),

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,10 @@ func httpStatusFor(code string) int {
 		return http.StatusConflict
 	case "INVALID_INPUT", "INVALID_ID":
 		return http.StatusBadRequest
+	case "PAYLOAD_TOO_LARGE":
+		return http.StatusRequestEntityTooLarge
+	case "INVALID_HOST":
+		return http.StatusMisdirectedRequest
 	case "MUSICBRAINZ_FAILED":
 		return http.StatusBadGateway
 	default:
@@ -29,7 +34,17 @@ func httpStatusFor(code string) int {
 }
 
 // writeAppError logs err with method/route and aborts with its safe message and code.
+// A *http.MaxBytesError anywhere in the chain maps to 413 PAYLOAD_TOO_LARGE
+// (cover uploads handle their own limit and never leak MaxBytesError here).
 func (h *Handler) writeAppError(c *gin.Context, err error) {
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		h.log.Errorf("%s %s -> PAYLOAD_TOO_LARGE: %v | cause: %v",
+			c.Request.Method, c.FullPath(), err, maxErr)
+		c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge,
+			gin.H{"error": apperrors.ErrPayloadTooLarge.Message, "code": apperrors.ErrPayloadTooLarge.Code})
+		return
+	}
 	appErr, ok := apperrors.Get(err)
 	if !ok {
 		h.log.Errorf("%s %s: unexpected: %v", c.Request.Method, c.FullPath(), err)

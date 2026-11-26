@@ -19,6 +19,8 @@ var (
 	ErrAlreadyExists     = &AppError{Code: "ALREADY_EXISTS", Message: "Resource already exists"}
 	ErrInvalidID         = &AppError{Code: "INVALID_ID", Message: "The id must be a valid uuid"}
 	ErrInvalidInput      = &AppError{Code: "INVALID_INPUT", Message: "Invalid input"}
+	ErrPayloadTooLarge   = &AppError{Code: "PAYLOAD_TOO_LARGE", Message: "Request body too large"}
+	ErrInvalidHost       = &AppError{Code: "INVALID_HOST", Message: "Host not allowed"}
 	ErrMusicBrainzFailed = &AppError{Code: "MUSICBRAINZ_FAILED", Message: "MusicBrainz failed"}
 	ErrInternal          = &AppError{Code: "INTERNAL_ERROR", Message: "An unexpected error occurred"}
 )
