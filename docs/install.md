@@ -73,6 +73,14 @@ curl localhost:8687/api/v1/health
 
 The compose file uses `ghcr.io/ppablomunoz/coda` and mounts `music/` and
 `data/` (config, DB and covers live under `/data` inside the container).
+The published port binds to loopback by default (`127.0.0.1:8687`):
+Coda has no authentication, so it is only reachable from the Docker host
+unless you opt out:
+
+```sh
+CODA_BIND_ADDR=0.0.0.0 docker compose up -d   # trusted LANs only
+```
+
 Files Coda moves or tags are written as `PUID:PGID`, Lidarr-style — the
 host dirs must be owned by those ids, or the scan fails and linking cannot
 move files. If you point `MUSIC_DIR` at an existing library, chown it
@@ -105,8 +113,9 @@ binaries, and you only downloaded one. Run `coda --version` to confirm,
 then see [configuration.md](configuration.md) for config and env.
 
 Run it under your init system of choice, or a plain `systemd` unit
-equivalent to what the installer writes (env-only config: `CODA_PORT`,
-`CODA_ROOTS`, `CODA_CONFIG`, `CODA_DB_PATH`).
+equivalent to what the installer writes (env-only config: `CODA_HOST`,
+`CODA_PORT`, `CODA_ROOTS`, `CODA_CONFIG`, `CODA_DB_PATH`). Set
+`CODA_HOST=127.0.0.1` to listen on loopback only.
 
 ## Build from source
 

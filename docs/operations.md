@@ -74,7 +74,7 @@ off by default; enable with `CODA_DEBUG=1` (or `CODA_LOG_LEVEL=debug`).
 
 - `GET /api/v1/health` answers `200 ok` (the Docker image health-checks
   this itself).
-- `coda --check-config` prints the resolved port, roots, DB and covers
+- `coda --check-config` prints the resolved listen address, port, roots, DB and covers
   paths and exits without starting — the first thing to run when config
   seems off.
 

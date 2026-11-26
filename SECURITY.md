@@ -20,10 +20,11 @@ reporting, and read the [CHANGELOG](CHANGELOG.md).
 ## Deployment caveats
 
 Coda has **no authentication** by design and serves its full API and UI to
-anyone who can reach the port. It binds to all interfaces. Run it on a
-trusted network, bind the port to localhost (e.g. `127.0.0.1:8687:8687` in
-Docker, or a firewall rule otherwise), or put it behind an authenticating
-reverse proxy. Reports that assume public internet exposure without
+anyone who can reach the port. The binary listens on all interfaces by
+default; set `host: 127.0.0.1` in `config.yaml` (or `CODA_HOST=127.0.0.1`)
+to restrict it to loopback. Docker Compose publishes on loopback by
+default — keep `CODA_BIND_ADDR=127.0.0.1` (or put Coda behind an
+authenticating reverse proxy) unless your LAN is trusted. Reports that assume public internet exposure without
 authentication should propose a design that fits Coda's scope (a single
 binary, no external services).
 

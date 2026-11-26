@@ -5,8 +5,8 @@ command-line flags, then environment, then the config file.
 
 ## Config file
 
-Created automatically on first run with defaults (`port: 8687`, empty
-`roots`):
+Created automatically on first run with defaults (empty `host`, `port:
+8687`, empty `roots`):
 
 - macOS: `~/Library/Application Support/Coda/config.yaml`
 - Linux: `~/.config/coda/config.yaml`
@@ -15,12 +15,17 @@ Created automatically on first run with defaults (`port: 8687`, empty
 Override the location with `CODA_CONFIG` or `coda --config /path/to/config.yaml`.
 
 ```yaml
+# host: empty = all interfaces (default). Set to 127.0.0.1 to listen on
+# loopback only — recommended when Coda is not behind a reverse proxy.
+host: ""
 port: 8687
 roots:
   - /absolute/path/to/music
 ```
 
-Validation: `port` must be 1–65535; each `roots` entry must be an absolute
+Validation: `host` must be empty or a bare hostname/IP (`127.0.0.1`,
+`::1`); `host:port` values are rejected — the port belongs in `port`.
+`port` must be 1–65535; each `roots` entry must be an absolute
 path to an existing directory; duplicates and nested roots (one inside
 another) are rejected; symlinks are resolved to their real path.
 
@@ -29,6 +34,7 @@ another) are rejected; symlinks are resolved to their real path.
 | Variable | Meaning |
 | --- | --- |
 | `CODA_CONFIG` | config file path |
+| `CODA_HOST` | listen address: bare hostname or IP (`127.0.0.1` for loopback only). Empty keeps the file's `host`; empty file value means all interfaces. |
 | `CODA_PORT` | server port (1–65535), wins over the file |
 | `CODA_ROOTS` | music roots, **replaces** the file's `roots`. OS path list: `:`-separated on macOS/Linux, `;`-separated on Windows. Empty entries are dropped. |
 | `CODA_DB_PATH` | SQLite database path (the `covers/` cache dir lands next to it) |
@@ -48,13 +54,17 @@ use it to validate a new setup or container environment:
 ```sh
 $ coda --check-config
 coda 0.2.0
+host: 127.0.0.1
 port: 8687
+listen: 127.0.0.1:8687
 roots: 2
   - /music
   - /other
 db: /home/you/.local/share/coda/coda.db
 covers: /home/you/.local/share/coda/covers
 ```
+
+An empty `host` prints `host: (all interfaces)` and `listen: :8687`.
 
 ## Docker Compose variables
 
@@ -65,7 +75,8 @@ The compose file reads:
 | `PUID` / `PGID` | `1000` | user/group the container runs as; must own `music/` and `data/` on the host |
 | `MUSIC_DIR` | `./music` | host path mounted at `/music` |
 | `DATA_DIR` | `./data` | host path mounted at `/data` (config, DB, covers) |
-| `CODA_PORT` | `8687` | published port |
+| `CODA_PORT` | `8687` | host-side port of the published mapping |
+| `CODA_BIND_ADDR` | `127.0.0.1` | host interface to publish on; `0.0.0.0` exposes Coda to the LAN (trusted networks only — Coda has no authentication) |
 | `CODA_TAG` | `latest` | image tag (`latest`, `0.2`, `0.2.0`) |
 
 ## Installer flags
