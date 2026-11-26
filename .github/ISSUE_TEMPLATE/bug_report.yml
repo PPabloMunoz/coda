@@ -27,8 +27,8 @@ body:
       label: Environment
       description: Version, OS, and how you run Coda.
       placeholder: |
-        - Coda commit:
-        - `go version`:
+        - Coda version (`coda --version`):
+        - Install method (script / Docker / manual binary / source):
         - Browser (if UI):
         - OS:
         - `CODA_CONFIG` / `CODA_DB_PATH` overrides (redact paths if needed):
