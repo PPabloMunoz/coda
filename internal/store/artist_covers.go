@@ -9,8 +9,8 @@ import (
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
-// Artist cover sources. 'upload' is reserved for a future manual-upload path
-// so no schema change is needed when it lands (same disk layout, same table).
+// Artist cover sources. 'upload' records manual uploads, which reuse the
+// fetcher layout (same disk layout, same table) via tasks.SaveArtistCover.
 const (
 	ArtistCoverSourceDeezer    = "deezer"
 	ArtistCoverSourceWikimedia = "wikimedia"

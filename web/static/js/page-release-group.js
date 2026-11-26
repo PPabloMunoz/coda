@@ -16,6 +16,7 @@ import {
   el,
   emptyState,
   externalLink,
+  imageUploadButton,
   link,
   mbLogoLink,
   setBusy,
@@ -178,6 +179,8 @@ function initReleaseGroupPage() {
   let currentGroup = null;
   let currentRelease = null;
   let heroRefreshButton = null;
+  let heroUploadButton = null;
+  let heroUploadInput = null;
   let heroSwitchButton = null;
   let switchInFlight = false;
   let coverInFlight = false;
@@ -265,6 +268,39 @@ function initReleaseGroupPage() {
     }
   }
 
+  function rebuildHeroCover() {
+    if (!currentGroup) return;
+    const heroCover = coverArt('group', currentGroup.id, '', { eager: true });
+    setSharedArtName(heroCover, sharedArtName('group', currentGroup.id));
+    heroArt.replaceChildren(heroCover);
+    bustCoverImgs();
+  }
+
+  async function uploadCover(file, button) {
+    if (!currentRelease || coverInFlight) return;
+    coverInFlight = true;
+    setBusy(button, true, 'Uploading…');
+    try {
+      const row = await api.uploadReleaseCover(currentRelease.id, file);
+      if (!row) {
+        toast('Upload finished with no cover.', 'info');
+        return;
+      }
+      rebuildHeroCover();
+      toast(
+        'Cover uploaded. Linked files are updating in the background.',
+        'ok',
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      toast(`Could not upload cover: ${message}`, 'error');
+    } finally {
+      coverInFlight = false;
+      setBusy(button, false);
+    }
+  }
+
   async function deleteGroup(button) {
     if (!currentGroup) return;
     const groupTitle = currentGroup.title;
@@ -322,6 +358,7 @@ function initReleaseGroupPage() {
     currentRelease = release;
     const hasRelease = Boolean(release);
     if (heroRefreshButton) heroRefreshButton.hidden = !hasRelease;
+    if (heroUploadButton) heroUploadButton.hidden = !hasRelease;
     if (heroSwitchButton) heroSwitchButton.hidden = !hasRelease;
 
     if (!release) {
@@ -480,6 +517,17 @@ function initReleaseGroupPage() {
         if (currentRelease) void refreshCover(currentRelease, refreshButton);
       });
       heroRefreshButton = refreshButton;
+      const { button: uploadButton, input: uploadInput } =
+        imageUploadButton(
+          'Upload cover',
+          'btn btn--secondary btn--icon btn--icon-upload',
+          {
+            title: 'Upload a JPEG, PNG, or WebP cover (max 15MB)',
+            onFile: (file) => void uploadCover(file, uploadButton),
+          },
+        );
+      heroUploadButton = uploadButton;
+      heroUploadInput = uploadInput;
       const deleteButton = el(
         'button',
         'btn btn--danger btn--icon btn--icon-trash',
@@ -489,7 +537,13 @@ function initReleaseGroupPage() {
       deleteButton.addEventListener('click', () =>
         deleteGroup(deleteButton),
       );
-      actions.replaceChildren(switchButton, refreshButton, deleteButton);
+      actions.replaceChildren(
+        switchButton,
+        refreshButton,
+        uploadButton,
+        uploadInput,
+        deleteButton,
+      );
 
       renderRelease(release, group);
       status.hidden = true;

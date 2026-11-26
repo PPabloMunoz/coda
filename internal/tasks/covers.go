@@ -13,6 +13,7 @@ import (
 	"github.com/ppablomunoz/coda/internal/config"
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/store"
+	"github.com/ppablomunoz/coda/internal/tags"
 	"github.com/ppablomunoz/coda/internal/utils"
 )
 
@@ -281,4 +282,64 @@ func (r *Runner) releaseCoverPrefetch(artistID string) {
 	r.coverMu.Lock()
 	defer r.coverMu.Unlock()
 	delete(r.coverPrefetch, artistID)
+}
+
+// embedReleaseCover re-stamps the currently cached release cover into every
+// linked file of the release. Best-effort: per-file failures only log, and
+// a missing cover or no linked files is a clean no-op. The bytes are loaded
+// at run time (not enqueue time) so a later refresh wins over an older
+// upload when the two race.
+func (r *Runner) embedReleaseCover(ctx context.Context, releaseID string) {
+	if err := utils.ValidateMBID(releaseID); err != nil {
+		r.log.Warnf("embed cover release %q: invalid id", releaseID)
+		return
+	}
+
+	row, err := r.st.GetCover(ctx, releaseID)
+	if err != nil {
+		if !apperrors.Is(err, apperrors.ErrNotFound) {
+			r.log.Warnf("embed cover release %q check: %v", releaseID, err)
+		}
+		return
+	}
+	path, err := config.CoverPath(r.coverDir, releaseID, row.MIME)
+	if err != nil {
+		r.log.Warnf("embed cover release %q path: %v", releaseID, err)
+		return
+	}
+	img, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			_ = r.st.DeleteCover(ctx, releaseID)
+		} else {
+			r.log.Warnf("embed cover release %q read: %v", releaseID, err)
+		}
+		return
+	}
+
+	files, err := r.st.ListFilesByRelease(ctx, releaseID)
+	if err != nil {
+		r.log.Warnf("embed cover release %q list files: %v", releaseID, err)
+		return
+	}
+	if len(files) == 0 {
+		return
+	}
+
+	embedded, failed := 0, 0
+	for _, f := range files {
+		select {
+		case <-ctx.Done():
+			r.log.Warnf("embed cover release %q: stopped early (%d embedded, %d failed)", releaseID, embedded, failed)
+			return
+		default:
+		}
+		if err := tags.WriteCover(f.Path, img); err != nil {
+			failed++
+			r.log.Warnf("embed cover release %q file=%d: %v", releaseID, f.ID, err)
+			continue
+		}
+		embedded++
+	}
+	r.log.Infof("embed cover release %q done: %d embedded, %d failed", releaseID, embedded, failed)
 }

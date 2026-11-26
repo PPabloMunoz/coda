@@ -279,6 +279,24 @@ export const api = {
       `/api/v1/artists/${encodeURIComponent(id)}/cover/refresh`,
       { method: 'POST' },
     ),
+  uploadReleaseCover: (id, file) =>
+    request(
+      `/api/v1/releases/${encodeURIComponent(id)}/cover`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': file?.type || 'application/octet-stream' },
+        body: file,
+      },
+    ),
+  uploadArtistCover: (id, file) =>
+    request(
+      `/api/v1/artists/${encodeURIComponent(id)}/cover`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': file?.type || 'application/octet-stream' },
+        body: file,
+      },
+    ),
 
   link: (fileID, trackID) =>
     fetch(`/api/v1/files/${fileID}/link`, {

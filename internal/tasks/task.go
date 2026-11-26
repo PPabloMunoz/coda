@@ -7,6 +7,7 @@ const (
 	TaskImportDiscography     TaskKey = "import-discography"
 	TaskPruneArtists          TaskKey = "prune-artists"
 	TaskDeleteInactiveArtists TaskKey = "delete-inactive-artists"
+	TaskEmbedReleaseCover     TaskKey = "embed-release-cover"
 )
 
 type Task struct {

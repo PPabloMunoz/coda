@@ -50,7 +50,8 @@ contract is in [docs/library.md](docs/library.md).
 - Works with Navidrome and other tag-aware players
   ([docs/navidrome.md](docs/navidrome.md)).
 - Cover art from Cover Art Archive, Deezer and iTunes; artist photos from
-  Deezer and Wikimedia Commons.
+  Deezer and Wikimedia Commons. Custom JPEG/PNG/WebP uploads replace the
+  cached art (release uploads re-embed into linked files).
 - Embedded web UI: plain HTML/CSS/JS, no build step, no Node.
 
 ## Install

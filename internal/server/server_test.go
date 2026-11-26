@@ -49,7 +49,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("mb New = %v", err)
 	}
-	router := NewHandler(log, st, mb, q, nil, "")
+	router := NewHandler(log, st, mb, q, nil, t.TempDir())
 	return &testEnv{router: router, st: st, queue: q, mbSrv: srv, mbMux: mux}
 }
 

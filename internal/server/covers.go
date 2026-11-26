@@ -1,15 +1,19 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/ppablomunoz/coda/internal/artwork"
 	"github.com/ppablomunoz/coda/internal/config"
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/store"
@@ -141,6 +145,127 @@ func (h *Handler) doRefreshReleaseCover(ctx context.Context, releaseID string) (
 		artist = tasks.CreditDisplayName(rel.Group.Credit)
 	}
 	return tasks.EnsureCover(ctx, h.st, h.art, h.coverDir, releaseID, artist, rel.Title)
+}
+
+// uploadReleaseCover replaces the cached cover for a release with
+// caller-supplied image bytes and queues a background re-embed into the
+// release's linked files. The body is the raw image (Content-Type is only
+// a hint); the real type is sniffed from magic bytes. Refresh keeps its
+// meaning (fetch provider art) and replaces an upload.
+func (h *Handler) uploadReleaseCover(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	releaseID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetRelease(ctx, releaseID, false); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	img, mime, err := readCoverUpload(c)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if err := tasks.SaveCover(ctx, h.st, h.coverDir, releaseID, &artwork.Result{
+		Bytes:  img,
+		MIME:   mime,
+		Source: artwork.SourceUpload,
+	}); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	row, err := h.st.GetCover(ctx, releaseID)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	h.queue.EnqueueEmbedReleaseCover(releaseID)
+	c.JSON(http.StatusOK, row)
+}
+
+// uploadArtistCover replaces the cached artist photo with caller-supplied
+// image bytes. Artist photos are display-only: they are never embedded
+// into audio files, so no background work is queued.
+func (h *Handler) uploadArtistCover(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	artistID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetArtistByID(ctx, artistID); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	img, mime, err := readCoverUpload(c)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if err := tasks.SaveArtistCover(ctx, h.st, h.coverDir, artistID, &artwork.Result{
+		Bytes:  img,
+		MIME:   mime,
+		Source: artwork.SourceUpload,
+	}); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+
+	row, err := h.st.GetArtistCover(ctx, artistID)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, row)
+}
+
+// readCoverUpload reads a raw image upload body with the same size cap as
+// the provider fetcher and sniffs the real content type from magic bytes.
+// Only JPEG, PNG, and WebP are accepted.
+func readCoverUpload(c *gin.Context) ([]byte, string, error) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, artwork.DefaultMaxBytes+1)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		if strings.Contains(err.Error(), "request body too large") {
+			return nil, "", apperrors.Wrap(
+				apperrors.ErrInvalidInput,
+				fmt.Errorf("cover image exceeds %dMB limit", artwork.DefaultMaxBytes>>20),
+			)
+		}
+		return nil, "", apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("read cover image: %w", err),
+		)
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil, "", apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("cover image is empty"),
+		)
+	}
+	if int64(len(body)) > artwork.DefaultMaxBytes {
+		return nil, "", apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("cover image exceeds %dMB limit", artwork.DefaultMaxBytes>>20),
+		)
+	}
+	mime := http.DetectContentType(body)
+	switch mime {
+	case "image/jpeg", "image/png", "image/webp":
+		return body, mime, nil
+	default:
+		return nil, "", apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("unsupported cover image type %q (want JPEG, PNG, or WebP)", mime),
+		)
+	}
 }
 
 // embedCover stamps the cached release art into the audio file as its front

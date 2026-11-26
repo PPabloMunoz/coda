@@ -92,6 +92,21 @@ All tag writes go through a same-directory temp copy and an atomic rename,
 so a crash mid-write cannot corrupt a file. Writes to the same path are
 serialized between the scan and the API.
 
+## Custom covers
+
+The artist page ("Upload photo") and the release-group page ("Upload
+cover") replace Coda's cached image with a JPEG, PNG, or WebP file up to
+15MB. No schema or library rescan is needed: the next cover GET serves the
+upload, with `"source": "upload"` in the metadata row.
+
+- Release covers propagate to audio files: the upload queues a background
+  task that re-embeds the new art as the front cover picture of every file
+  already linked to the release. Per-file failures only log; the upload
+  itself already succeeded.
+- Artist photos are display-only and are never written into audio files.
+- Fetching provider art again ("Refresh cover"/"Refresh photo") replaces an
+  upload.
+
 ## What Coda never does
 
 - Never deletes an audio file. Unlinking and deleting artists only clear

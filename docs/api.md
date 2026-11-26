@@ -344,6 +344,8 @@ like:
 | GET    | `/releases/:id/cover`        | Release front cover image         |
 | GET    | `/release-groups/:id/cover`  | Cover of the group's kept release |
 | GET    | `/artists/:id/cover`         | Artist photo image                |
+| PUT    | `/releases/:id/cover`        | Upload a release cover            |
+| PUT    | `/artists/:id/cover`         | Upload an artist photo            |
 | POST   | `/releases/:id/cover/refresh`| Re-fetch release cover            |
 | POST   | `/artists/:id/cover/refresh` | Re-fetch artist photo             |
 
@@ -367,6 +369,29 @@ the cached image and fetch again, returning `200` with the cover metadata row:
 Artist refreshes use `artist_id` instead of `release_id`. Refresh endpoints
 return `404` for unknown ids and `500` when cover fetching is disabled.
 Artist photos are display-only; they are never embedded into audio files.
+
+### Uploading covers
+
+`PUT /releases/:id/cover` and `PUT /artists/:id/cover` replace the cached
+image with caller-supplied bytes. The body is the raw image (no multipart),
+up to 15MB; the real type is sniffed from magic bytes and must be JPEG,
+PNG, or WebP, otherwise the answer is `400 INVALID_INPUT`. Unknown ids
+answer `404`, like the refresh endpoints.
+
+```sh
+curl -X PUT localhost:8687/api/v1/releases/<mbid>/cover \
+  --data-binary @cover.png -H 'Content-Type: image/png'
+```
+
+A successful upload returns `200` with the same metadata row shape as a
+refresh, with `"source": "upload"` and `"source_url": null`. Uploads work
+even when provider fetching is disabled. A later refresh discards the
+upload and fetches provider art again.
+
+Uploading a release cover also queues a background task that re-embeds the
+new art into every file already linked to the release. The upload itself
+succeeds first; embedding failures only log (check the server logs), so a
+file that can't be rewritten doesn't fail the upload.
 
 ## Async operations
 

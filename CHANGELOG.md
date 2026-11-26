@@ -18,6 +18,10 @@ before upgrading and back up your database (see
 
 ### Added
 
+- Cover and artist-photo uploads (`PUT /releases/:id/cover`,
+  `PUT /artists/:id/cover`, plus "Upload cover"/"Upload photo" actions in
+  the web UI). Release uploads replace the cached art immediately and queue
+  a background task that re-embeds it into the release's linked files.
 - User and contributor documentation under `docs/` (install,
   configuration, library, navidrome, api, operations, architecture), a
   CONTRIBUTING guide, a security policy, a code of conduct, and this

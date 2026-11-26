@@ -18,7 +18,7 @@ import (
 
 const (
 	// Sources mirror the store CoverSource* values so Fetcher results can be
-	// recorded directly. 'upload' is reserved for manual uploads, which
+	// recorded directly. 'upload' is written by the upload handlers, which
 	// bypass the fetcher entirely.
 	SourceCoverArtArchive = "coverartarchive"
 	SourceDeezer          = "deezer"
@@ -26,12 +26,15 @@ const (
 	SourceWikimedia       = "wikimedia"
 	SourceUpload          = "upload"
 
-	DefaultCAABaseURL           = "https://coverartarchive.org"
-	DefaultDeezerBaseURL        = "https://api.deezer.com"
-	DefaultiTunesBaseURL        = "https://itunes.apple.com"
-	DefaultCommonsBaseURL       = "https://commons.wikimedia.org"
-	defaultTimeout              = 15 * time.Second
-	defaultMaxBytes       int64 = 15 << 20 // 15MB cap so a rogue response can't blow up the cache
+	DefaultCAABaseURL     = "https://coverartarchive.org"
+	DefaultDeezerBaseURL  = "https://api.deezer.com"
+	DefaultiTunesBaseURL  = "https://itunes.apple.com"
+	DefaultCommonsBaseURL = "https://commons.wikimedia.org"
+	defaultTimeout        = 15 * time.Second
+	// DefaultMaxBytes caps a single cached image at 15MB so a rogue
+	// response can't blow up the cache. The upload handlers reuse the
+	// same limit so cached bytes never exceed what the fetcher can write.
+	DefaultMaxBytes int64 = 15 << 20
 )
 
 // Result is one fetched cover image.
@@ -110,7 +113,7 @@ func New(cfg Config) (*Fetcher, error) {
 		cfg.Timeout = defaultTimeout
 	}
 	if cfg.MaxBytes <= 0 {
-		cfg.MaxBytes = defaultMaxBytes
+		cfg.MaxBytes = DefaultMaxBytes
 	}
 	return &Fetcher{
 		caaBase:     strings.TrimRight(cfg.CAABaseURL, "/"),

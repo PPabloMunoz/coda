@@ -317,6 +317,46 @@ export function setBusy(button, busy, busyLabel = 'Working…') {
   }
 }
 
+/**
+ * Cover/photo upload limit shared with the API (15MB, same as the artwork
+ * fetcher cap). The server enforces it; the client prechecks so an
+ * oversized pick fails fast without a round trip.
+ */
+export const COVER_UPLOAD_MAX_BYTES = 15 * 1024 * 1024;
+
+/** MIME types the cover endpoints accept (sniffed server-side). */
+export const COVER_UPLOAD_ACCEPT = 'image/jpeg,image/png,image/webp';
+
+/**
+ * An upload action: a button that opens a hidden file picker and calls
+ * `onFile` with the picked image. Callers append both nodes (the input is
+ * hidden) and drive their own busy state inside `onFile`.
+ */
+export function imageUploadButton(label, className, options = {}) {
+  const { title, accept = COVER_UPLOAD_ACCEPT, onFile } = options;
+  const button = el('button', className, label);
+  button.type = 'button';
+  if (title) button.title = title;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = accept;
+  input.hidden = true;
+  input.tabIndex = -1;
+  input.setAttribute('aria-hidden', 'true');
+  button.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || typeof onFile !== 'function') return;
+    if (file.size > COVER_UPLOAD_MAX_BYTES) {
+      toast('That image is over the 15MB limit.', 'error');
+      return;
+    }
+    void onFile(file);
+  });
+  return { button, input };
+}
+
 export async function mapLimit(items, limit, fn) {
   const results = Array.from({ length: items.length });
   let next = 0;

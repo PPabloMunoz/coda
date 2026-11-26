@@ -13,6 +13,7 @@ import {
   clear,
   el,
   emptyState,
+  imageUploadButton,
   mapLimit,
   normalize,
   setBusy,
@@ -300,6 +301,47 @@ function initArtistPage() {
       const message =
         error instanceof Error ? error.message : String(error);
       toast(`Could not refresh photo: ${message}`, 'error');
+    } finally {
+      coverInFlight = false;
+      setBusy(button, false);
+    }
+  }
+
+  function rebuildHeroPhoto() {
+    heroArt.replaceChildren(
+      coverArt('artist', artist.id, '', {
+        eager: true,
+        fallback: () =>
+          artistAvatar(artist.id, artist.name, '', {
+            variant: 'initials',
+          }),
+      }),
+    );
+    setSharedArtName(
+      heroArt.firstElementChild,
+      sharedArtName('artist', artist.id),
+    );
+    bustCoverImgs();
+  }
+
+  async function uploadArtistPhoto(file, button) {
+    if (!artist || coverInFlight) return;
+    coverInFlight = true;
+    setBusy(button, true, 'Uploading…');
+    try {
+      const row = await api.uploadArtistCover(artist.id, file);
+      if (!row) {
+        toast('Upload finished with no photo.', 'info');
+        return;
+      }
+      // Rebuild the hero: the page may be showing the avatar fallback
+      // (no <img> to bust) when there was no cached photo before.
+      rebuildHeroPhoto();
+      toast('Artist photo uploaded.', 'ok');
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      toast(`Could not upload photo: ${message}`, 'error');
     } finally {
       coverInFlight = false;
       setBusy(button, false);
@@ -699,6 +741,16 @@ function initArtistPage() {
         () => void refreshArtistCover(photoButton),
       );
       artistActions.append(photoButton);
+      const { button: uploadPhotoButton, input: uploadPhotoInput } =
+        imageUploadButton(
+          'Upload photo',
+          'btn btn--secondary btn--icon btn--icon-upload',
+          {
+            title: 'Upload a JPEG, PNG, or WebP photo (max 15MB)',
+            onFile: (file) => void uploadArtistPhoto(file, uploadPhotoButton),
+          },
+        );
+      artistActions.append(uploadPhotoButton, uploadPhotoInput);
       const refreshButton = el(
         'button',
         'btn btn--secondary btn--icon btn--icon-refresh',
@@ -717,7 +769,13 @@ function initArtistPage() {
       deleteButton.addEventListener('click', () =>
         deleteArtist(deleteButton),
       );
-      artistActions.replaceChildren(photoButton, refreshButton, deleteButton);
+      artistActions.replaceChildren(
+        photoButton,
+        uploadPhotoButton,
+        uploadPhotoInput,
+        refreshButton,
+        deleteButton,
+      );
 
       setTrackStats(artist);
 

@@ -143,6 +143,26 @@ func (q *Queue) EnqueueDeleteInactiveArtists() {
 	q.signal()
 }
 
+// EnqueueEmbedReleaseCover queues a background re-embed of the cached
+// release cover into its linked files. Dedupes per release while queued:
+// the task always embeds whatever bytes are cached at run time, so one
+// run covers repeated uploads.
+func (q *Queue) EnqueueEmbedReleaseCover(releaseID string) {
+	q.mu.Lock()
+	for _, t := range q.items {
+		if t.Key == TaskEmbedReleaseCover && t.ID == releaseID {
+			q.mu.Unlock()
+			q.debugf("task %s already queued %q", TaskEmbedReleaseCover, releaseID)
+			return
+		}
+	}
+	q.items = append(q.items, Task{Key: TaskEmbedReleaseCover, ID: releaseID})
+	depth := len(q.items)
+	q.mu.Unlock()
+	q.debugf("task %s queued %q (depth=%d)", TaskEmbedReleaseCover, releaseID, depth)
+	q.signal()
+}
+
 // ArtistImportStatus returns the current import state for id, or idle when unknown.
 func (q *Queue) ArtistImportStatus(id string) ArtistImportStatus {
 	q.mu.Lock()

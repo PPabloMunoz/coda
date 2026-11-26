@@ -37,7 +37,7 @@ func ExtFromMIME(mime string) (string, error) {
 // CoverPath returns the deterministic cache path for a release cover.
 // Paths are never stored in the DB (keeps rows portable when the data dir
 // moves); callers recompute them from the cover dir + release MBID + mime.
-// A future manual upload uses the same layout with source='upload'.
+// Manual uploads reuse the same layout with source='upload'.
 func CoverPath(coverDir, releaseID, mime string) (string, error) {
 	if err := utils.ValidateMBID(releaseID); err != nil {
 		return "", fmt.Errorf("config: invalid release id: %w", err)
