@@ -1,0 +1,73 @@
+# Changelog
+
+All notable changes to Coda are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
+[Semantic Versioning](https://semver.org). Coda is `0.x`: breaking
+changes are expected between releases, so read the **Breaking** notes
+before upgrading and back up your database (see
+[docs/operations.md](docs/operations.md#backup-and-restore)).
+
+## [Unreleased]
+
+### Changed
+
+- The install script keeps the previous port, roots, data dir and service
+  user when re-run; a passed flag overrides them.
+- The outbound User-Agent contact is now the project URL instead of a
+  personal email.
+
+### Added
+
+- User and contributor documentation under `docs/` (install,
+  configuration, library, navidrome, api, operations, architecture), a
+  CONTRIBUTING guide, a security policy, a code of conduct, and this
+  changelog.
+
+## [0.2.0] - 2026-11-26
+
+### Added
+
+- POSIX install script for Linux (systemd and OpenRC; Debian/Ubuntu,
+  Fedora/RHEL, openSUSE, Arch, Alpine, Void), installing the release
+  binary as a verified, hardened service.
+- Docker image hardening: non-root by default, read-only root
+  filesystem, dropped capabilities, image healthcheck.
+
+### Fixed
+
+- Atomic tag writes: same-directory temp copy, fsync and rename, so a
+  crash mid-write cannot corrupt an audio file; per-path mutexes
+  serialize scan-time vs handler-time writes.
+- Resilient scan sync: tags are read before the write transaction,
+  unchanged files are skipped, unreadable files are logged instead of
+  failing the scan, and link state survives re-scans.
+- Error handling hardening across the store and server layers.
+
+## [0.1.2] - 2026-11-25
+
+### Fixed
+
+- Docker image metadata outputs for the ghcr.io push.
+
+## [0.1.1] - 2026-11-25
+
+### Added
+
+- Docker packaging (image, compose file), env-based configuration
+  (`CODA_PORT`, `CODA_ROOTS`, `CODA_CONFIG`, `CODA_DB_PATH`), and
+  automated release builds (`--version` flag, checksums, ghcr.io image).
+
+## [0.1.0] - 2026-11-25
+
+### Added
+
+- First public release: library scan into SQLite, MusicBrainz-backed
+  artist imports and discography caching, file linking with standard tag
+  writes, cover art and artist photos, embedded web UI, background task
+  queue and scheduler, release automation.
+
+[Unreleased]: https://github.com/PPabloMunoz/coda/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/PPabloMunoz/coda/compare/v0.1.2...v0.2.0
+[0.1.2]: https://github.com/PPabloMunoz/coda/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/PPabloMunoz/coda/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/PPabloMunoz/coda/releases/tag/v0.1.0

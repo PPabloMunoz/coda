@@ -3,197 +3,111 @@
   <h1>Coda</h1>
   <p><strong>Self-hosted music library management, done carefully.</strong></p>
   <p>Accurate metadata first. Automation only when it's trustworthy.</p>
+  <p>
+    <a href="https://github.com/PPabloMunoz/coda/actions/workflows/ci.yml"><img src="https://github.com/PPabloMunoz/coda/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+    <a href="https://github.com/PPabloMunoz/coda/releases"><img src="https://img.shields.io/github/v/release/PPabloMunoz/coda" alt="Release" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License: GPL v3" /></a>
+    <a href="https://github.com/PPabloMunoz/coda/pkgs/container/coda"><img src="https://img.shields.io/badge/image-ghcr.io-blue" alt="ghcr.io image" /></a>
+  </p>
 </div>
 
-> Coda `0.1.0` is the first release — early prototype, expect breaking changes in `0.x`.
+> Early prototype (`0.x`) — expect breaking changes. Read the
+> [changelog](CHANGELOG.md) and back up before upgrading
+> ([how](docs/operations.md#backup-and-restore)).
 
 ## What is Coda
 
-Coda is open-source, self-hosted music library management software. It takes
-inspiration from [Lidarr](https://lidarr.audio/),
+Coda is open-source, self-hosted music library management software. It
+takes inspiration from [Lidarr](https://lidarr.audio/),
 [MusicBrainz Picard](https://picard.musicbrainz.org/), and the self-hosted
 music ecosystem (e.g. Navidrome) — with a narrower focus: a library and
 metadata you can trust.
 
 Coda scans audio files from your configured folders into a local SQLite
 database and serves them over a small HTTP API plus an embedded web UI.
-Scanning is read-only: ambiguous matches are surfaced for review, never
-guessed silently. Tags are written only when you explicitly link/unlink a
-file to a release track.
+The scan auto-links files whose tags already carry a MusicBrainz
+release-track ID: those get their tags rewritten, the cover embedded, and
+the file moved to its canonical library path. Everything ambiguous waits
+for review in the link wizard — nothing is guessed. The full read/write
+contract is in [docs/library.md](docs/library.md).
+
+<p align="center">
+  <img src="docs/assets/screenshot-artists.png" alt="Coda artist grid" width="800" />
+</p>
+<p align="center">
+  <img src="docs/assets/screenshot-artist.png" alt="Artist page with release groups" width="49%" />
+  <img src="docs/assets/screenshot-link.png" alt="Link wizard with a suggested match" width="49%" />
+</p>
+
+## Features
+
+- Files-only by design: one static Go binary, one SQLite file, no
+  downloads, no download clients, no automation.
+- MusicBrainz-backed: artists imported by MBID, discography cached
+  locally, refreshes rate-limited and retried.
+- Link files to release tracks: standard tags written, front cover
+  embedded, files moved to `<root>/<Artist>/<Album>/`.
+- Works with Navidrome and other tag-aware players
+  ([docs/navidrome.md](docs/navidrome.md)).
+- Cover art from Cover Art Archive, Deezer and iTunes; artist photos from
+  Deezer and Wikimedia Commons.
+- Embedded web UI: plain HTML/CSS/JS, no build step, no Node.
 
 ## Install
 
-### Install script (Debian/Ubuntu/Alpine)
-
-Best for a Proxmox LXC/VM or any bare-metal host. POSIX `sh`, needs only
-`curl` (installed for you via `apt`/`apk` when missing):
+Linux server (systemd/OpenRC — Debian/Ubuntu, Fedora/RHEL, openSUSE,
+Arch, Alpine, Void):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/PPabloMunoz/coda/main/scripts/install.sh | sudo sh
 ```
 
-This fetches the latest release binary, verifies `checksums.txt`, installs
-to `/usr/local/bin/coda`, creates a `coda` user, and starts a service with
-env-only config — a systemd unit on Debian/Ubuntu, an OpenRC service on
-Alpine. No YAML editing. Then open `http://<host>:8687`.
-
-Supported flags: `--version` (default: latest), `--port`, `--roots`
-(`:`-separated), `--data-dir`, `--user`, `--no-service`, `--help`.
-Re-run the script to upgrade.
-
-### Docker Compose
-
-Config via env, no YAML editing:
+Docker:
 
 ```sh
 mkdir -p music data
-sudo chown -R 1000:1000 music data
 PUID=$(id -u) PGID=$(id -g) docker compose up -d
-curl localhost:8687/api/v1/health
-# upgrade later:
-docker compose pull && docker compose up -d
 ```
 
-The compose file uses `ghcr.io/ppablomunoz/coda:latest` and mounts
-`./music:/music:rw` plus `./data:/data:rw` (DB, covers, and generated
-`config.yaml` all live under `/data`). Ownership follows `PUID`/`PGID`
-like Lidarr: coda runs as that user, so the host dirs must be owned by
-the same ids or the scan fails and linking cannot move files.
+macOS, Windows (build from source), and every other option:
+[docs/install.md](docs/install.md). Releases are published for
+`linux` and `darwin` on `amd64` and `arm64`; there are no prebuilt
+Windows binaries.
 
-### Manual binary
+## Quick start
 
-Download the binary for your platform plus `checksums.txt` from
-[GitHub Releases](https://github.com/PPabloMunoz/coda/releases), verify it,
-and put `coda` on your `PATH` (requires Go only to build from source,
-developed with go1.27.3):
+1. Point Coda at your library (`roots` in `config.yaml`, or
+   `CODA_ROOTS=/music:/other`; validate with `coda --check-config`) —
+   [docs/configuration.md](docs/configuration.md).
+2. Open `http://localhost:8687` and add artists by MusicBrainz ID.
+3. Open **Link** to attach unlinked files to release tracks.
 
-```sh
-sha256sum -c checksums.txt
-chmod +x coda-darwin-arm64
-sudo mv coda-darwin-arm64 /usr/local/bin/coda
-coda --version
-coda --help
-go run ./cmd/coda --version
-```
+## Documentation
 
-## How to use
-
-The UI is committed static files
-under `web/static/` — no build step, no Node, no package manager.
-
-`coda --help` prints all flags. The useful ones:
-
-- `coda --version` — print version and exit (release builds report the
-  tag, e.g. `0.1.2`; local builds report `dev`).
-- `coda --check-config` — print the resolved port, roots, DB and covers
-  dir, then exit without starting. Use it to validate a new setup or
-  container env.
-- `coda --config /path/to/config.yaml` — same as setting `CODA_CONFIG`.
-
-Env overrides win over the config file: `CODA_CONFIG`, `CODA_DB_PATH`,
-`CODA_PORT`, `CODA_ROOTS`.
-
-```sh
-go run ./cmd/coda
-```
-
-Or with [just](https://just.systems/):
-
-```sh
-just run
-```
-
-On first start Coda creates a config file if one doesn't exist:
-
-- macOS: `~/Library/Application Support/Coda/config.yaml`
-- Linux: `~/.config/coda/config.yaml`
-- Override with `CODA_CONFIG=/path/to/config.yaml` or `coda --config
-  /path/to/config.yaml`
-
-Edit it to point at your library:
-
-```yaml
-port: 8687
-roots:
-  - /absolute/path/to/music
-```
-
-`roots` must be absolute paths to existing directories, with no duplicates
-or nesting. For containers / one-off runs you can skip the file and use
-env instead (env wins over the file):
-
-```sh
-CODA_PORT=8687 CODA_ROOTS=/music:/other coda --check-config
-```
-
-`CODA_ROOTS` is an OS path list: `:`-separated on macOS/Linux,
-`;`-separated on Windows. Validate without starting the server:
-
-```sh
-coda --check-config
-```
-
-The SQLite database defaults to the platform data dir, not necessarily
-next to the config:
-
-- macOS: `~/Library/Application Support/Coda/coda.db` (alongside config)
-- Linux: `~/.local/share/coda/coda.db` (or `$XDG_DATA_HOME/coda/coda.db`)
-- Override with `CODA_DB_PATH`.
-
-Once running, Coda scans `roots` on startup and serves the UI and API on
-`http://localhost:<port>`:
-
-```sh
-curl localhost:8687/api/v1/health
-curl "localhost:8687/api/v1/files?limit=20&offset=0"
-curl localhost:8687/api/v1/files/1
-curl localhost:8687/api/v1/files/1/suggestions
-curl localhost:8687/api/v1/stats
-curl localhost:8687/api/v1/files/stats
-curl "localhost:8687/api/v1/artists?limit=20&offset=0"
-curl "localhost:8687/api/v1/musicbrainz/artists?q=portishead"
-curl "localhost:8687/api/v1/release-groups?limit=20&offset=0"
-curl "localhost:8687/api/v1/releases?group=<release-group-mbid>"
-```
-
-Artists are added by MusicBrainz ID, which queues a background discography
-import (see `web/README.md` for the UI pages):
-
-```sh
-curl -X POST localhost:8687/api/v1/artists \
-  -H 'Content-Type: application/json' \
-  -d '{"id":"<artist-mbid>"}'
-curl localhost:8687/api/v1/artists/<artist-mbid>/import
-curl -X POST localhost:8687/api/v1/artists/<artist-mbid>/refresh
-```
-
-Linking a file writes standard tags (title/album/artists/track/disc/date/
-MBIDs) plus the release cover, and moves the file to its library path
-(`<root>/<artist>/<album>/…`; occupied destinations fail with 409 and leave
-the source untouched). Unlinking clears those keys only. Ranked link
-candidates are available per file, so linking rarely starts from a blank
-MBID:
-
-```sh
-curl -X POST localhost:8687/api/v1/files/1/link \
-  -H 'Content-Type: application/json' \
-  -d '{"track_id":"<track-mbid>"}'
-curl -X DELETE localhost:8687/api/v1/files/1/link
-```
+| | |
+| --- | --- |
+| [Install](docs/install.md) | installer, Docker, binary, build from source |
+| [Configuration](docs/configuration.md) | config file, env vars, compose variables, data locations |
+| [Library behaviour](docs/library.md) | scanning, layout, naming, formats, tags |
+| [Navidrome](docs/navidrome.md) | tag compatibility and integration |
+| [API](docs/api.md) | routes, parameters, envelopes, errors |
+| [Operations](docs/operations.md) | backups, upgrades, logs, troubleshooting |
+| [Architecture](docs/architecture.md) | how the code fits together (contributors) |
 
 ## Contributing
 
-Issues and pull requests are welcome. Please use the issue templates
-(bug report, feature request, question) and fill in the pull request
-template.
-
-Scope is files-only: single binary + SQLite, no downloads, download
-clients, or automation. Keep changes small, keep tags Navidrome-compatible,
-and run the full gate before pushing:
+Issues and pull requests are welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md) for scope, setup, and the PR workflow.
+In short: files-only scope, small focused PRs, Conventional Commit titles,
+and the full gate before pushing:
 
 ```sh
 just check
 ```
+
+Security issues go through [SECURITY.md](SECURITY.md). Note that Coda has
+no authentication and binds to all interfaces — keep it off the public
+internet.
 
 ## License
 

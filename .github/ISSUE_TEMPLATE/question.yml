@@ -18,7 +18,8 @@ body:
       placeholder: |
         - OS:
         - roots layout:
-        - Docs checked: README, web/README, MusicBrainz / Navidrome docs
+        - Docs checked: README, docs/ (install, configuration, library,
+          navidrome, api, operations), MusicBrainz / Navidrome docs
   - type: textarea
     id: tried
     attributes:

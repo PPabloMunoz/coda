@@ -21,7 +21,7 @@ Use `just` (wrappers around `go`):
 - `just tidy` — `go mod tidy && go mod vendor` (`vendor/` is gitignored local output, not committed).
 - `just db-reset` — macOS-only (`rm -f "$HOME/Library/Application Support/Coda/"*.db*`); on Linux remove `$XDG_DATA_HOME/coda/*.db*` (or `~/.local/share/coda/`) or the `CODA_DB_PATH` target instead.
 
-Env overrides: `CODA_CONFIG=/path/to/config.yaml`, `CODA_DB_PATH=/path/to/coda.db`, `CODA_PORT=1234`, `CODA_ROOTS=/path/a:/path/b` (OS path-list separated, merged over config `roots`), `GIN_MODE=debug` (opt back into Gin's debug route dump; release is the default). Flags: `-config` (overrides `CODA_CONFIG`), `-check-config` (print resolved config and exit), `-version`. Tests exist for `internal/errors` and `internal/utils` (`go test ./...`) — don't add test scaffolding unless asked.
+Env overrides: `CODA_CONFIG=/path/to/config.yaml`, `CODA_DB_PATH=/path/to/coda.db`, `CODA_PORT=1234`, `CODA_ROOTS=/path/a:/path/b` (OS path-list separated, **replaces** config `roots`), `GIN_MODE=debug` (opt back into Gin's debug route dump; release is the default), `CODA_DEBUG=1` or `CODA_LOG_LEVEL=debug` (stderr debug logs). Flags: `-config` (overrides `CODA_CONFIG`), `-check-config` (print resolved config and exit), `-version`. Tests exist across most packages (`go test ./...`; `internal/artwork` has none) — don't add test scaffolding unless asked.
 
 ## Runtime
 
@@ -44,9 +44,11 @@ Env overrides: `CODA_CONFIG=/path/to/config.yaml`, `CODA_DB_PATH=/path/to/coda.d
 - `utils/` — tiny stderr `Logger` (`Info`/`Error` + `f` variants, no levels to configure) plus `ValidateMBID` and `NullIfEmpty`.
 - `web/` — vanilla static UI (`web/static/`, no build step; all calls use `/api/v1/*`). Committed HTML/CSS/JS embedded by `web/embed.go` (`go:embed all:static`) and served by `server/web.go` after the `/api/v1/*` routes: exact `GET /` + `HEAD /`, `pageRoutes` map for UI pages (trailing slash tolerated), real files (`/css/*`, `/js/*`, `/logo.png`, …), `NoRoute` for the rest (`/api/*` → JSON 404, else root `index.html` fallback; 404 `web build missing` fallback when `static` is absent). Never use Gin's `c.FileFromFS` with `index.html` — it delegates to `http.FileServer`, which 301-redirects `*/index.html` to `./` (self-redirect loop on `/`); `serveFSFile` reads bytes from the embed FS and writes them via `c.Data` instead. Don't expand UI scope or add frontend infra without asking.
 
+- `docs/` — user and contributor documentation: `install.md`, `configuration.md`, `library.md`, `navidrome.md`, `api.md`, `operations.md`, `architecture.md`; `CHANGELOG.md` lives at the repo root. Keep these in sync with behavior — a user-facing change without a docs update is an incomplete change.
+
 ## Schema / metadata rules (load-bearing)
 
 - Entity split is deliberate: `artists / artist_credits / release_groups / releases / tracks / local_files` (one release per release-group; recording MBIDs live on `tracks`). Credits reference `artist_credits(id)` only — never add an `artist_id` shortcut or collapse to one artist string.
 - The core job is linking files to music: `local_files.track_id` ties a scanned file to a release track, and tags written back to files must stay Navidrome-compatible (standard frames only — don't invent custom tag fields).
 - MusicBrainz IDs are `TEXT UNIQUE` (nullable until matched); refresh by MBID, never text matching. MBID columns enforce 36-char length.
-- Don't add services (Redis, queues, K8s), download clients, automation, `docs/decisions|`architecture|roadmap` files, or unrelated refactors. Keep changes small; single binary + SQLite only.
+- Don't add services (Redis, queues, K8s), download clients, automation, `docs/decisions` or `docs/roadmap` files, or unrelated refactors. Keep changes small; single binary + SQLite only.

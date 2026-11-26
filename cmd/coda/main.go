@@ -64,6 +64,18 @@ func main() {
 			flag.CommandLine.Output(),
 			"  CODA_ROOTS   OS path list of music dirs (: on macOS/Linux, ; on Windows)\n",
 		)
+		fmt.Fprintf(
+			flag.CommandLine.Output(),
+			"  CODA_DEBUG   1/true/yes/on enables debug logs\n",
+		)
+		fmt.Fprintf(
+			flag.CommandLine.Output(),
+			"  CODA_LOG_LEVEL  \"debug\" also enables debug logs\n",
+		)
+		fmt.Fprintf(
+			flag.CommandLine.Output(),
+			"  GIN_MODE     \"debug\" opts back into Gin's debug route dump\n",
+		)
 		fmt.Fprintf(flag.CommandLine.Output(), "\nExamples:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  coda --version\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  coda --help\n")
@@ -134,7 +146,7 @@ func main() {
 	}
 
 	mb, err := musicbrainz.New(musicbrainz.Config{
-		UserAgent: fmt.Sprintf("Coda/%s ( pablomunoz@pablomunoz.dev )", version),
+		UserAgent: fmt.Sprintf("Coda/%s ( https://github.com/PPabloMunoz/coda )", version),
 		Logger:    log,
 	})
 	if err != nil {
@@ -144,7 +156,7 @@ func main() {
 
 	coverDir := config.CoverDirFromDBPath(dsn)
 	art, err := artwork.New(artwork.Config{
-		UserAgent: fmt.Sprintf("Coda/%s ( pablomunoz@pablomunoz.dev )", version),
+		UserAgent: fmt.Sprintf("Coda/%s ( https://github.com/PPabloMunoz/coda )", version),
 		Logger:    log,
 	})
 	if err != nil {
