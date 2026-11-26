@@ -52,8 +52,13 @@ func (h *Handler) getReleaseGroupCover(c *gin.Context) {
 	h.serveCover(c, release.ID)
 }
 
-// serveCover ensures and serves the cached cover bytes for a release with ETag caching.
+// serveCover ensures and serves the cached cover bytes for a release with
+// ETag revalidation. The endpoint answers no-cache (store, but revalidate
+// every use) so uploads and refreshes show up without a hard reload; the
+// ETag validator rides on 200 and 304 alike, and even misses carry
+// no-cache so a removed cover never sticks in the browser.
 func (h *Handler) serveCover(c *gin.Context, releaseID string) {
+	c.Header("Cache-Control", "no-cache")
 	ctx := c.Request.Context()
 
 	rel, err := h.st.GetRelease(ctx, releaseID, false)
@@ -69,6 +74,13 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 	row, err := tasks.EnsureCover(ctx, h.st, h.art, h.coverDir, releaseID, artist, rel.Title)
 	if err != nil {
 		h.writeAppError(c, err)
+		return
+	}
+
+	etag := `"` + strconv.FormatInt(row.SizeBytes, 10) + "-" + row.FetchedAt + `"`
+	c.Header("ETag", etag)
+	if c.GetHeader("If-None-Match") == etag {
+		c.Status(http.StatusNotModified)
 		return
 	}
 
@@ -92,13 +104,6 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 		return
 	}
 
-	etag := `"` + strconv.FormatInt(row.SizeBytes, 10) + "-" + row.FetchedAt + `"`
-	if c.GetHeader("If-None-Match") == etag {
-		c.Status(http.StatusNotModified)
-		return
-	}
-	c.Header("ETag", etag)
-	c.Header("Cache-Control", "public, max-age=86400")
 	c.Data(http.StatusOK, row.MIME, data)
 }
 
@@ -172,6 +177,9 @@ func (h *Handler) getReleaseCoverMeta(c *gin.Context) {
 		h.writeAppError(c, apperrors.ErrNotFound)
 		return
 	}
+	// Never store the metadata row: upload/refresh responses must not feed
+	// a stale badge on the next read.
+	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, row)
 }
 
@@ -240,6 +248,9 @@ func (h *Handler) getArtistCoverMeta(c *gin.Context) {
 		h.writeAppError(c, apperrors.ErrNotFound)
 		return
 	}
+	// Never store the metadata row: upload/refresh responses must not feed
+	// a stale badge on the next read.
+	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, row)
 }
 
@@ -406,8 +417,13 @@ func (h *Handler) getArtistCover(c *gin.Context) {
 	h.serveArtistCover(c, artistID)
 }
 
-// serveArtistCover ensures and serves the cached photo bytes for an artist with ETag caching.
+// serveArtistCover ensures and serves the cached photo bytes for an artist
+// with ETag revalidation. The endpoint answers no-cache (store, but
+// revalidate every use) so uploads and refreshes show up without a hard
+// reload; the ETag validator rides on 200 and 304 alike, and even misses
+// carry no-cache so a removed photo never sticks in the browser.
 func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
+	c.Header("Cache-Control", "no-cache")
 	ctx := c.Request.Context()
 
 	artist, err := h.st.GetArtistByID(ctx, artistID)
@@ -419,6 +435,13 @@ func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 	row, err := tasks.EnsureArtistCover(ctx, h.st, h.art, h.coverDir, artistID, artist.Name)
 	if err != nil {
 		h.writeAppError(c, err)
+		return
+	}
+
+	etag := `"` + strconv.FormatInt(row.SizeBytes, 10) + "-" + row.FetchedAt + `"`
+	c.Header("ETag", etag)
+	if c.GetHeader("If-None-Match") == etag {
+		c.Status(http.StatusNotModified)
 		return
 	}
 
@@ -442,13 +465,6 @@ func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 		return
 	}
 
-	etag := `"` + strconv.FormatInt(row.SizeBytes, 10) + "-" + row.FetchedAt + `"`
-	if c.GetHeader("If-None-Match") == etag {
-		c.Status(http.StatusNotModified)
-		return
-	}
-	c.Header("ETag", etag)
-	c.Header("Cache-Control", "public, max-age=86400")
 	c.Data(http.StatusOK, row.MIME, data)
 }
 

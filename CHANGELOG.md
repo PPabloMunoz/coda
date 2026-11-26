@@ -11,6 +11,10 @@ before upgrading and back up your database (see
 
 ### Changed
 
+- Cover image responses use `Cache-Control: no-cache` with ETag
+  revalidation instead of a 24h max-age, so uploads, refreshes, and
+  removals show up without a hard reload; `fetched_at` carries
+  millisecond precision so rapid updates never share an ETag.
 - The install script keeps the previous port, roots, data dir and service
   user when re-run; a passed flag overrides them.
 - The outbound User-Agent contact is now the project URL instead of a

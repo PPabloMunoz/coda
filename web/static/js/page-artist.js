@@ -59,21 +59,6 @@ function sortTypeGroups(typeGroups) {
   });
 }
 
-function bustCoverImgs() {
-  // The endpoint sends a 24h max-age, so bust the <img> URLs or the
-  // browser would keep showing the previous bytes.
-  const stamp = String(Date.now());
-  for (const img of document.querySelectorAll('img.cover-img')) {
-    try {
-      const url = new URL(img.currentSrc || img.src, location.origin);
-      url.searchParams.set('t', stamp);
-      img.src = url.toString();
-    } catch {
-      /* keep the previous art on weird URLs */
-    }
-  }
-}
-
 function initArtistPage() {
   const status = byId('status');
   const content = byId('content');
@@ -298,14 +283,14 @@ function initArtistPage() {
     heroTools.setBusy(true);
     try {
       const row = await api.refreshArtistCover(artist.id);
+      // Rebuild the hero either way: the page may be showing the avatar
+      // fallback (when there was no cached photo before) or stale art
+      // (when the refresh found nothing and dropped the cache).
+      renderHeroPhoto();
       if (!row) {
         toast('No photo found for this artist.', 'info');
         return;
       }
-      // Rebuild the hero: the page may be showing the avatar fallback
-      // (no <img> to bust) when there was no cached photo before.
-      renderHeroPhoto();
-      bustCoverImgs();
       toast(
         `Artist photo refreshed (${coverSourceText(row.source)}).`,
         'ok',
@@ -374,7 +359,6 @@ function initArtistPage() {
         return;
       }
       renderHeroPhoto();
-      bustCoverImgs();
       toast('Artist photo uploaded.', 'ok');
     } catch (error) {
       const message =
@@ -417,7 +401,6 @@ function initArtistPage() {
         return;
       }
       renderHeroPhoto();
-      bustCoverImgs();
       toast('Artist photo removed.', 'ok');
     } catch (error) {
       const message =

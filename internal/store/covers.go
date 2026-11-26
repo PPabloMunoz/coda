@@ -32,20 +32,21 @@ type CoverParams struct {
 	Removed   bool    `json:"-"`
 }
 
-// UpsertCover inserts or replaces the cover row for a release. fetched_at is
-// always refreshed to now and any removal tombstone is cleared; the caller
+// UpsertCover inserts or replaces the cover row for a release. fetched_at
+// is always refreshed to now (millisecond precision, so two rapid updates
+// never share an ETag) and any removal tombstone is cleared; the caller
 // writes the image bytes to config.CoverPath separately.
 func (st *Store) UpsertCover(ctx context.Context, p CoverParams) error {
 	if _, err := st.db.ExecContext(ctx, `
 		INSERT INTO release_covers
 			(release_id, source, source_url, mime, size_bytes, fetched_at, removed)
-		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 0)
+		VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 0)
 		ON CONFLICT(release_id) DO UPDATE SET
 			source=excluded.source,
 			source_url=excluded.source_url,
 			mime=excluded.mime,
 			size_bytes=excluded.size_bytes,
-			fetched_at=CURRENT_TIMESTAMP,
+			fetched_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
 			removed=0`,
 		p.ReleaseID, p.Source, p.SourceURL, p.MIME, p.SizeBytes,
 	); err != nil {
@@ -95,10 +96,10 @@ func (st *Store) MarkCoverRemoved(ctx context.Context, releaseID string) error {
 	if _, err := st.db.ExecContext(ctx, `
 		INSERT INTO release_covers
 			(release_id, source, source_url, mime, size_bytes, fetched_at, removed)
-		VALUES (?, 'upload', NULL, 'image/jpeg', 0, CURRENT_TIMESTAMP, 1)
+		VALUES (?, 'upload', NULL, 'image/jpeg', 0, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 1)
 		ON CONFLICT(release_id) DO UPDATE SET
 			removed=1,
-			fetched_at=CURRENT_TIMESTAMP`,
+			fetched_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
 		releaseID,
 	); err != nil {
 		return apperrors.Wrap(

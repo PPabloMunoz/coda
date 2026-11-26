@@ -131,21 +131,6 @@ function renderTrackTable(tracks, showDisc) {
   return tableWrap;
 }
 
-function bustCoverImgs() {
-  // The endpoint sends a 24h max-age, so bust the <img> URLs or the
-  // browser would keep showing the previous bytes.
-  const stamp = String(Date.now());
-  for (const img of document.querySelectorAll('img.cover-img')) {
-    try {
-      const url = new URL(img.currentSrc || img.src, location.origin);
-      url.searchParams.set('t', stamp);
-      img.src = url.toString();
-    } catch {
-      /* keep the previous art on weird URLs */
-    }
-  }
-}
-
 function initReleaseGroupPage() {
   const status = byId('status');
   const content = byId('content');
@@ -259,14 +244,14 @@ function initReleaseGroupPage() {
     heroTools.setBusy(true);
     try {
       const row = await refresh();
+      // Rebuild the hero either way: the page may be showing the disc
+      // fallback (when there was no cached cover before) or stale art
+      // (when the refresh found nothing and dropped the cache).
+      renderHeroCover();
       if (!row) {
         toast('No cover art found.', 'info');
         return;
       }
-      // Rebuild the hero: the page may be showing the disc fallback
-      // (no <img> to bust) when there was no cached cover before.
-      renderHeroCover();
-      bustCoverImgs();
       toast(`Cover refreshed (${coverSourceText(row.source)}).`, 'ok');
     } catch (error) {
       const message =
@@ -332,7 +317,6 @@ function initReleaseGroupPage() {
         return;
       }
       renderHeroCover();
-      bustCoverImgs();
       toast(
         'Cover uploaded. Linked files are updating in the background.',
         'ok',
@@ -378,7 +362,6 @@ function initReleaseGroupPage() {
         return;
       }
       renderHeroCover();
-      bustCoverImgs();
       toast(
         'Cover removed. Linked files are updating in the background.',
         'ok',

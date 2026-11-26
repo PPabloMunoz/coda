@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/ppablomunoz/coda/internal/artwork"
@@ -191,6 +193,100 @@ func TestUploadArtistCoverUnknownArtist(t *testing.T) {
 	}
 }
 
+func doGetWithHeaders(t *testing.T, env *testEnv, path string, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, req)
+	return w
+}
+
+func TestReleaseCoverRevalidates(t *testing.T) {
+	env := newTestEnv(t)
+	seedUploadRelease(t, env)
+
+	w := doRawRequest(t, env, "PUT", "/api/v1/releases/"+uploadRelID+"/cover", tinyPNG, "image/png")
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload = %d, want 200", w.Code)
+	}
+	if fetched := decodeCoverRow(t, w.Body.Bytes())["fetched_at"]; !strings.Contains(fmt.Sprint(fetched), ".") {
+		t.Errorf("fetched_at = %v, want sub-second precision", fetched)
+	}
+
+	w = doRequest(t, env.router, "GET", "/api/v1/releases/"+uploadRelID+"/cover", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get = %d, want 200", w.Code)
+	}
+	if cc := w.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("cache-control = %q, want no-cache", cc)
+	}
+	etag := w.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("missing ETag")
+	}
+
+	// Matching validator: 304, still carrying the validator headers.
+	w = doGetWithHeaders(t, env, "/api/v1/releases/"+uploadRelID+"/cover",
+		map[string]string{"If-None-Match": etag})
+	if w.Code != http.StatusNotModified {
+		t.Fatalf("revalidate = %d, want 304", w.Code)
+	}
+	if got := w.Header().Get("ETag"); got != etag {
+		t.Errorf("304 etag = %q, want %q", got, etag)
+	}
+	if cc := w.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("304 cache-control = %q, want no-cache", cc)
+	}
+
+	// New bytes under the same URL: the old validator no longer matches.
+	bigger := append(append([]byte(nil), tinyPNG...), 0x00)
+	w = doRawRequest(t, env, "PUT", "/api/v1/releases/"+uploadRelID+"/cover", bigger, "image/png")
+	if w.Code != http.StatusOK {
+		t.Fatalf("re-upload = %d, want 200", w.Code)
+	}
+	w = doGetWithHeaders(t, env, "/api/v1/releases/"+uploadRelID+"/cover",
+		map[string]string{"If-None-Match": etag})
+	if w.Code != http.StatusOK {
+		t.Fatalf("get after change = %d, want 200", w.Code)
+	}
+	if !bytes.Equal(w.Body.Bytes(), bigger) {
+		t.Error("body is not the new bytes")
+	}
+	if got := w.Header().Get("ETag"); got == etag {
+		t.Error("etag unchanged after new bytes")
+	}
+}
+
+func TestArtistCoverRevalidates(t *testing.T) {
+	env := newTestEnv(t)
+	seedUploadRelease(t, env)
+
+	w := doRawRequest(t, env, "PUT", "/api/v1/artists/"+uploadArtistID+"/cover", tinyPNG, "image/png")
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload = %d, want 200", w.Code)
+	}
+
+	w = doRequest(t, env.router, "GET", "/api/v1/artists/"+uploadArtistID+"/cover", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get = %d, want 200", w.Code)
+	}
+	if cc := w.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("cache-control = %q, want no-cache", cc)
+	}
+	etag := w.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("missing ETag")
+	}
+	w = doGetWithHeaders(t, env, "/api/v1/artists/"+uploadArtistID+"/cover",
+		map[string]string{"If-None-Match": etag})
+	if w.Code != http.StatusNotModified {
+		t.Fatalf("revalidate = %d, want 304", w.Code)
+	}
+}
+
 func TestDeleteReleaseCoverRoundTrip(t *testing.T) {
 	env := newTestEnv(t)
 	seedUploadRelease(t, env)
@@ -273,6 +369,9 @@ func TestReleaseCoverMeta(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("meta = %d, want 200", w.Code)
 	}
+	if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("meta cache-control = %q, want no-store", cc)
+	}
 	row := decodeCoverRow(t, w.Body.Bytes())
 	if row["source"] != "upload" {
 		t.Errorf("source = %v, want upload", row["source"])
@@ -317,6 +416,9 @@ func TestArtistCoverMeta(t *testing.T) {
 	w = doRequest(t, env.router, "GET", "/api/v1/artists/"+uploadArtistID+"/cover/meta", nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("meta = %d, want 200", w.Code)
+	}
+	if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("meta cache-control = %q, want no-store", cc)
 	}
 	row := decodeCoverRow(t, w.Body.Bytes())
 	if row["source"] != "upload" {

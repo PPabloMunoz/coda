@@ -33,20 +33,20 @@ type ArtistCoverParams struct {
 }
 
 // UpsertArtistCover inserts or replaces the cover row for an artist.
-// fetched_at is always refreshed to now and any removal tombstone is
-// cleared; the caller writes the image bytes to config.ArtistCoverPath
-// separately.
+// fetched_at is always refreshed to now (millisecond precision, so two
+// rapid updates never share an ETag) and any removal tombstone is cleared;
+// the caller writes the image bytes to config.ArtistCoverPath separately.
 func (st *Store) UpsertArtistCover(ctx context.Context, p ArtistCoverParams) error {
 	if _, err := st.db.ExecContext(ctx, `
 		INSERT INTO artist_covers
 			(artist_id, source, source_url, mime, size_bytes, fetched_at, removed)
-		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 0)
+		VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 0)
 		ON CONFLICT(artist_id) DO UPDATE SET
 			source=excluded.source,
 			source_url=excluded.source_url,
 			mime=excluded.mime,
 			size_bytes=excluded.size_bytes,
-			fetched_at=CURRENT_TIMESTAMP,
+			fetched_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
 			removed=0`,
 		p.ArtistID, p.Source, p.SourceURL, p.MIME, p.SizeBytes,
 	); err != nil {
@@ -95,10 +95,10 @@ func (st *Store) MarkArtistCoverRemoved(ctx context.Context, artistID string) er
 	if _, err := st.db.ExecContext(ctx, `
 		INSERT INTO artist_covers
 			(artist_id, source, source_url, mime, size_bytes, fetched_at, removed)
-		VALUES (?, 'upload', NULL, 'image/jpeg', 0, CURRENT_TIMESTAMP, 1)
+		VALUES (?, 'upload', NULL, 'image/jpeg', 0, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 1)
 		ON CONFLICT(artist_id) DO UPDATE SET
 			removed=1,
-			fetched_at=CURRENT_TIMESTAMP`,
+			fetched_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
 		artistID,
 	); err != nil {
 		return apperrors.Wrap(
