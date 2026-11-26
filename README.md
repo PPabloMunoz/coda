@@ -108,8 +108,8 @@ just check
 ```
 
 Security issues go through [SECURITY.md](SECURITY.md). Note that Coda has
-no authentication and binds to all interfaces — keep it off the public
-internet.
+no authentication — bind it to loopback (`host: 127.0.0.1`) or run it
+behind a reverse proxy, and keep it off the public internet.
 
 ## License
 

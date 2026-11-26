@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,6 +16,9 @@ import (
 )
 
 type Config struct {
+	// Host is the interface to listen on. Empty means all interfaces
+	// (previous behavior); "127.0.0.1" restricts to loopback.
+	Host  string   `yaml:"host"`
 	Port  int      `yaml:"port"`
 	Roots []string `yaml:"roots"`
 }
@@ -23,11 +27,17 @@ const (
 	ConfigName = "config.yaml"
 )
 
-var DefaultConfig = Config{Port: 8687, Roots: []string{}}
+var DefaultConfig = Config{Host: "", Port: 8687, Roots: []string{}}
+
+// ListenAddr returns the TCP address for http.Server.Addr. An empty Host
+// keeps the previous all-interfaces behavior (":port").
+func (c Config) ListenAddr() string {
+	return net.JoinHostPort(strings.TrimSpace(c.Host), strconv.Itoa(c.Port))
+}
 
 // GetConfig loads config.yaml (creating it with defaults on first run),
-// applies CODA_PORT/CODA_ROOTS env overrides, validates roots and port,
-// and returns the effective config.
+// applies CODA_HOST/CODA_PORT/CODA_ROOTS env overrides, validates host,
+// roots and port, and returns the effective config.
 func GetConfig(log *utils.Logger) (*Config, error) {
 	var conf Config
 
@@ -86,10 +96,14 @@ func GetConfig(log *utils.Logger) (*Config, error) {
 	return &conf, nil
 }
 
-// applyEnvOverrides lets CODA_PORT and CODA_ROOTS override the file.
+// applyEnvOverrides lets CODA_HOST, CODA_PORT and CODA_ROOTS override the file.
 // CODA_ROOTS uses the OS path list (filepath.SplitList): colon-separated
 // on macOS/Linux, semicolon-separated on Windows. Empty entries are dropped.
+// An empty CODA_HOST leaves the file's host untouched.
 func applyEnvOverrides(conf *Config) error {
+	if h := strings.TrimSpace(os.Getenv("CODA_HOST")); h != "" {
+		conf.Host = h
+	}
 	if p := strings.TrimSpace(os.Getenv("CODA_PORT")); p != "" {
 		port, err := strconv.Atoi(p)
 		if err != nil {
@@ -109,11 +123,41 @@ func applyEnvOverrides(conf *Config) error {
 	return nil
 }
 
+// normalizeHost trims whitespace, unwraps bracketed IPv6 ("[::1]" -> "::1"),
+// and rejects values that are not a bare hostname or IP. Empty stays empty
+// (listen on all interfaces). A "host:port" value is rejected — the port
+// belongs in `port` / CODA_PORT.
+func normalizeHost(conf *Config) error {
+	h := strings.TrimSpace(conf.Host)
+	if h == "" {
+		conf.Host = ""
+		return nil
+	}
+	if strings.HasPrefix(h, "[") && strings.HasSuffix(h, "]") {
+		h = strings.TrimSpace(h[1 : len(h)-1])
+		if h == "" {
+			return fmt.Errorf("host must not be empty")
+		}
+	}
+	if strings.ContainsAny(h, " \t\r\n/") {
+		return fmt.Errorf("host %q is invalid: must be a bare hostname or IP", conf.Host)
+	}
+	if strings.Contains(h, ":") && net.ParseIP(h) == nil {
+		return fmt.Errorf("host %q is invalid: must be a bare hostname or IP, not host:port", conf.Host)
+	}
+	conf.Host = h
+	return nil
+}
+
 // validateConfig cleans root paths, resolves symlinks, and rejects empty,
-// relative, duplicate, or nested roots plus invalid ports and non-directories.
+// relative, duplicate, or nested roots plus invalid hosts/ports and non-directories.
 func validateConfig(conf *Config) error {
 	if conf.Port < 1 || conf.Port > 65535 {
 		return fmt.Errorf("port must be between 1-65535")
+	}
+
+	if err := normalizeHost(conf); err != nil {
+		return err
 	}
 
 	for i, r := range conf.Roots {

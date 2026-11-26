@@ -107,6 +107,86 @@ func TestValidateConfigRoots(t *testing.T) {
 	})
 }
 
+func TestValidateConfigHost(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		host    string
+		want    string
+		wantErr bool
+	}{
+		{"empty keeps all interfaces", "", "", false},
+		{"loopback", "127.0.0.1", "127.0.0.1", false},
+		{"hostname", "localhost", "localhost", false},
+		{"ipv6", "::1", "::1", false},
+		{"bracketed ipv6 unwrapped", "[::1]", "::1", false},
+		{"whitespace trimmed", "  127.0.0.1  ", "127.0.0.1", false},
+		{"host:port rejected", "127.0.0.1:8687", "", true},
+		{"url rejected", "http://localhost", "", true},
+		{"slash rejected", "foo/bar", "", true},
+		{"space rejected", "foo bar", "", true},
+		{"empty brackets rejected", "[]", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conf := Config{Host: tc.host, Port: 8687, Roots: []string{}}
+			err := validateConfig(&conf)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("validateConfig(host=%q) = nil, want error", tc.host)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("validateConfig(host=%q) = %v, want nil", tc.host, err)
+			}
+			if conf.Host != tc.want {
+				t.Errorf("host = %q, want %q", conf.Host, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplyEnvOverridesHost(t *testing.T) {
+	t.Run("env wins over file", func(t *testing.T) {
+		t.Setenv("CODA_HOST", "127.0.0.1")
+		conf := Config{Host: "", Port: 8687}
+		if err := applyEnvOverrides(&conf); err != nil {
+			t.Fatal(err)
+		}
+		if conf.Host != "127.0.0.1" {
+			t.Errorf("Host = %q, want 127.0.0.1", conf.Host)
+		}
+	})
+
+	t.Run("empty env keeps file value", func(t *testing.T) {
+		t.Setenv("CODA_HOST", "")
+		conf := Config{Host: "0.0.0.0", Port: 8687}
+		if err := applyEnvOverrides(&conf); err != nil {
+			t.Fatal(err)
+		}
+		if conf.Host != "0.0.0.0" {
+			t.Errorf("Host = %q, want 0.0.0.0", conf.Host)
+		}
+	})
+}
+
+func TestListenAddr(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		conf Config
+		want string
+	}{
+		{"empty host binds all interfaces", Config{Port: 8687}, ":8687"},
+		{"loopback", Config{Host: "127.0.0.1", Port: 8687}, "127.0.0.1:8687"},
+		{"ipv6 is bracketed", Config{Host: "::1", Port: 8687}, "[::1]:8687"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.conf.ListenAddr(); got != tc.want {
+				t.Errorf("ListenAddr() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGetDBPathEnvOverride(t *testing.T) {
 	t.Setenv("CODA_DB_PATH", "/tmp/custom.db")
 	got, err := GetDBPath()

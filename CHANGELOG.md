@@ -64,6 +64,11 @@ before upgrading and back up your database (see
 - Hero source badge: the web UI shows where cached art came from ("From
   Cover Art Archive", "Uploaded", …) via new `GET …/cover/meta` endpoints
   that read the cached metadata without fetching.
+- Configurable listen address: `host` in `config.yaml` (or `CODA_HOST`),
+  resolved with the port into the HTTP listen address (`coda
+  --check-config` shows `host`/`listen`). Docker Compose now publishes on
+  loopback by default via `CODA_BIND_ADDR` (`127.0.0.1`; set `0.0.0.0` to
+  expose to a trusted LAN).
 - User and contributor documentation under `docs/` (install,
   configuration, library, navidrome, api, operations, architecture), a
   CONTRIBUTING guide, a security policy, a code of conduct, and this

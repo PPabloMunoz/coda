@@ -9,9 +9,15 @@ services:
     # fails and linking cannot move files.
     user: "${PUID:-1000}:${PGID:-1000}"
     ports:
-      # Coda has no authentication: bind to 127.0.0.1 (or put it behind a
-      # reverse proxy) unless your LAN is trusted.
-      - "${CODA_PORT:-8687}:8687"
+      # Coda has no authentication: published on loopback by default (or put
+      # it behind a reverse proxy). Set CODA_BIND_ADDR=0.0.0.0 to expose it
+      # to the LAN — only on a trusted network.
+      - "${CODA_BIND_ADDR:-127.0.0.1}:${CODA_PORT:-8687}:8687"
+    environment:
+      # Listen on all container interfaces so the published port above works
+      # even when /data/config.yaml sets `host`. LAN exposure is still
+      # controlled by the host-side bind (CODA_BIND_ADDR).
+      CODA_HOST: 0.0.0.0
     # CODA_ROOTS, CODA_CONFIG, CODA_DB_PATH and GIN_MODE are set in the image.
     volumes:
       - ${MUSIC_DIR:-./music}:/music

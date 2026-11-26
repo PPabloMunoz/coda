@@ -58,6 +58,10 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "  CODA_DB_PATH database file path\n")
 		fmt.Fprintf(
 			flag.CommandLine.Output(),
+			"  CODA_HOST    listen address: IP or hostname, empty = all interfaces\n",
+		)
+		fmt.Fprintf(
+			flag.CommandLine.Output(),
 			"  CODA_PORT    server port (1-65535)\n",
 		)
 		fmt.Fprintf(
@@ -107,7 +111,7 @@ func main() {
 		log.Error(err.Error())
 		os.Exit(1)
 	}
-	log.Infof("config loaded: port=%d roots=%d", cfg.Port, len(cfg.Roots))
+	log.Infof("config loaded: listen=%s roots=%d", cfg.ListenAddr(), len(cfg.Roots))
 	log.Debugf("config roots: %q", cfg.Roots)
 
 	dsn, err := config.GetDBPath()
@@ -121,7 +125,13 @@ func main() {
 
 	if *checkConfig {
 		fmt.Printf("coda %s\n", version)
+		if cfg.Host == "" {
+			fmt.Printf("host: (all interfaces)\n")
+		} else {
+			fmt.Printf("host: %s\n", cfg.Host)
+		}
 		fmt.Printf("port: %d\n", cfg.Port)
+		fmt.Printf("listen: %s\n", cfg.ListenAddr())
 		fmt.Printf("roots: %d\n", len(cfg.Roots))
 		for _, r := range cfg.Roots {
 			fmt.Printf("  - %s\n", r)
@@ -169,7 +179,7 @@ func main() {
 	scheduler := tasks.NewScheduler(queue, log)
 
 	// Start server
-	addr := fmt.Sprintf(":%d", cfg.Port)
+	addr := cfg.ListenAddr()
 	// Gin defaults to debug mode (route table dump + warnings on stdout).
 	// Release is the default for the shipped binary; developers can still
 	// opt back into debug output with GIN_MODE=debug.
