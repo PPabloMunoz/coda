@@ -67,9 +67,11 @@ state keeps serving.
 2. `store.SyncLocalFiles` upserts by absolute path, preserving `track_id`;
    tags are read before the write transaction; unchanged files (size +
    mtime) are skipped; rows for vanished files are pruned.
-3. The auto-link pass (`tasks/autolink.go`) rewrites tags, embeds the
-   cached cover, and moves every file whose on-disk release-track MBID
-   resolves to a known track — the same write path as manual link.
+3. The auto-link pass (`tasks/autolink.go`) links every file whose on-disk
+   release-track MBID resolves to a known track through the same shared
+   no-replace link pipeline as manual link: move first, then tags, cover,
+   and database link. Occupied destinations are skipped and reported, never
+   overwritten.
 4. Orphan credits and trackless collaborators are cleaned up.
 
 ## Data model

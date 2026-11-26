@@ -3,7 +3,6 @@ package server
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -97,20 +96,6 @@ type PostLinkBody struct {
 	TrackID string `json:"track_id"`
 }
 
-// libraryTargetPath builds the on-disk destination for a linked track
-// under root. Filesystem work stays in the caller; this is pure.
-// Single owner is tasks.LibraryTargetPath (reused by the scan auto-link).
-func libraryTargetPath(root string, info *tags.LinkInfo, ext string) (string, error) {
-	return tasks.LibraryTargetPath(root, info, ext)
-}
-
-// ensureMoveDestination creates the destination parent dir and reports
-// whether renaming is safe. Single owner is tasks.EnsureMoveDestination
-// (reused by the scan auto-link).
-func ensureMoveDestination(op string, fileID int64, trackID, src, dst string) error {
-	return tasks.EnsureMoveDestination(op, fileID, trackID, src, dst)
-}
-
 // link writes release tags and cover to a file, moves it to its library path,
 // and records the track link (204). Occupied destinations fail with 409 untouched.
 func (h *Handler) link(c *gin.Context) {
@@ -140,115 +125,11 @@ func (h *Handler) link(c *gin.Context) {
 
 	start := time.Now()
 
-	// Write tags to file
-	// Get file
-	localFile, err := h.st.GetFile(ctx, localFileID, false)
-	if err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("link file %d load -> %w", localFileID, err)),
-		)
-		return
-	}
-
-	// Get tacks release data
-	fullRelease, track, err := h.st.GetTrackFullRelease(
-		ctx,
-		trackID)
-	if err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("link file=%d track=%q load release -> %w", localFileID, trackID, err)),
-		)
-		return
-	}
-
-	// Write tags to the source file first (in place). The rename below
-	// moves the already-tagged file, then the DB is updated to the
-	// final on-disk state.
-	linkInfo := tasks.LinkInfoFromStore(fullRelease, track)
-
-	root, err := h.st.GetRoot(ctx, localFile.RootID)
-	if err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("link file=%d load root -> %w", localFileID, err)),
-		)
-		return
-	}
-
-	dst, err := libraryTargetPath(root.Path, linkInfo, localFile.FormatHint)
-	if err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("link file=%d track=%q build path -> %w", localFileID, trackID, err)),
-		)
-		return
-	}
-
-	// Fail before touching tags when the destination is occupied, so a
-	// 409 leaves the source file untouched.
-	if err := ensureMoveDestination("link", localFileID, trackID, localFile.Path, dst); err != nil {
+	// The shared pipeline (tasks.LinkFile) serializes per file and per
+	// destination, moves with no-replace semantics before writing tags, and
+	// maps an occupied destination to ErrAlreadyExists (409).
+	if _, _, err := tasks.LinkFile(ctx, h.st, h.coverDir, localFileID, trackID); err != nil {
 		h.writeAppError(c, err)
-		return
-	}
-
-	t := tags.ToMap(tags.SnapshotFromLink(linkInfo))
-	if err := tags.WriteTags(localFile.Path, t); err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("link file=%d track=%q write tags -> %w", localFileID, trackID, err)),
-		)
-		return
-	}
-	if err := h.embedCover(ctx, localFile.Path, fullRelease.ID); err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("link file=%d track=%q write cover -> %w", localFileID, trackID, err)),
-		)
-		return
-	}
-
-	src := localFile.Path
-	moved := dst != src
-	if moved {
-		if err := os.Rename(src, dst); err != nil {
-			h.writeAppError(c, apperrors.Wrap(
-				apperrors.ErrInternal,
-				fmt.Errorf("link file=%d track=%q move -> %w", localFileID, trackID, err)),
-			)
-			return
-		}
-	}
-
-	fi, err := os.Stat(dst)
-	if err != nil {
-		// Tags were written and the file may have moved; DB still
-		// points at src. Next scan heals this to unlinked, never
-		// to a wrong link.
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("link file=%d track=%q stat -> %w", localFileID, trackID, err)),
-		)
-		return
-	}
-
-	if err := h.st.Link(ctx, localFileID,
-		trackID, dst, fi.Size(), fi.ModTime().UnixNano(),
-	); err != nil {
-		if moved {
-			if rbErr := os.Rename(dst, src); rbErr != nil {
-				h.log.Errorf("link file=%d track=%q rollback failed: %v", localFileID, trackID, rbErr)
-			}
-		}
-		if apperrors.Is(err, apperrors.ErrAlreadyExists) {
-			h.writeAppError(c, err)
-			return
-		}
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("link file=%d track=%q save -> %w", localFileID, trackID, err)),
-		)
 		return
 	}
 
@@ -257,6 +138,8 @@ func (h *Handler) link(c *gin.Context) {
 }
 
 // unlink clears a file's tags and cover and removes its DB track link (204).
+// It holds the per-file operation lock so a concurrent link/refresh for the
+// same file serializes instead of interleaving on a stale path.
 func (h *Handler) unlink(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -268,12 +151,12 @@ func (h *Handler) unlink(c *gin.Context) {
 
 	start := time.Now()
 
+	unlock := tasks.LockFileOp(localFileID)
+	defer unlock()
+
 	localFile, err := h.st.GetFile(ctx, localFileID, false)
 	if err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("unlink file=%d load -> %w", localFileID, err)),
-		)
+		h.writeAppError(c, fmt.Errorf("unlink file=%d load: %w", localFileID, err))
 		return
 	}
 
@@ -295,10 +178,7 @@ func (h *Handler) unlink(c *gin.Context) {
 
 	err = h.st.Unlink(ctx, localFileID)
 	if err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("unlink file=%d save -> %w", localFileID, err)),
-		)
+		h.writeAppError(c, fmt.Errorf("unlink file=%d save: %w", localFileID, err))
 		return
 	}
 
@@ -307,7 +187,8 @@ func (h *Handler) unlink(c *gin.Context) {
 }
 
 // refreshLocalFile rewrites tags/cover for an already-linked file and moves it
-// to its current library path (204).
+// to its current library path (204). It runs the shared link pipeline, so an
+// occupied destination fails with 409 and the source is untouched.
 func (h *Handler) refreshLocalFile(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -317,14 +198,9 @@ func (h *Handler) refreshLocalFile(c *gin.Context) {
 		return
 	}
 
-	// Write tags to file
-	// Get file
 	localFile, err := h.st.GetFile(ctx, localFileID, false)
 	if err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("refresh file=%d load -> %w", localFileID, err)),
-		)
+		h.writeAppError(c, fmt.Errorf("refresh file=%d load: %w", localFileID, err))
 		return
 	}
 
@@ -339,104 +215,8 @@ func (h *Handler) refreshLocalFile(c *gin.Context) {
 	start := time.Now()
 	trackID := *localFile.TrackID
 
-	// Get tacks release data
-	fullRelease, track, err := h.st.GetTrackFullRelease(
-		ctx,
-		trackID)
-	if err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("refresh file=%d track=%q load release -> %w", localFileID, trackID, err)),
-		)
-		return
-	}
-
-	// Write tags to the source file first (in place). The rename below
-	// moves the already-tagged file, then the DB is updated to the
-	// final on-disk state.
-	linkInfo := tasks.LinkInfoFromStore(fullRelease, track)
-
-	root, err := h.st.GetRoot(ctx, localFile.RootID)
-	if err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("refresh file=%d load root -> %w", localFileID, err)),
-		)
-		return
-	}
-
-	dst, err := libraryTargetPath(root.Path, linkInfo, localFile.FormatHint)
-	if err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("refresh file=%d track=%q build path -> %w", localFileID, trackID, err)),
-		)
-		return
-	}
-
-	// Fail before touching tags when the destination is occupied, so a
-	// 409 leaves the source file untouched.
-	if err := ensureMoveDestination("refresh", localFileID, trackID, localFile.Path, dst); err != nil {
+	if _, _, err := tasks.LinkFile(ctx, h.st, h.coverDir, localFileID, trackID); err != nil {
 		h.writeAppError(c, err)
-		return
-	}
-
-	t := tags.ToMap(tags.SnapshotFromLink(linkInfo))
-	if err := tags.WriteTags(localFile.Path, t); err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("refresh file=%d track=%q write tags -> %w", localFileID, trackID, err)),
-		)
-		return
-	}
-	if err := h.embedCover(ctx, localFile.Path, fullRelease.ID); err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("refresh file=%d track=%q write cover -> %w", localFileID, trackID, err)),
-		)
-		return
-	}
-
-	src := localFile.Path
-	moved := dst != src
-	if moved {
-		if err := os.Rename(src, dst); err != nil {
-			h.writeAppError(c, apperrors.Wrap(
-				apperrors.ErrInternal,
-				fmt.Errorf("refresh file=%d track=%q move -> %w", localFileID, trackID, err)),
-			)
-			return
-		}
-	}
-
-	fi, err := os.Stat(dst)
-	if err != nil {
-		// Tags were written and the file may have moved; DB still
-		// points at src. Next scan heals this to unlinked, never
-		// to a wrong link.
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("refresh file=%d track=%q stat -> %w", localFileID, trackID, err)),
-		)
-		return
-	}
-
-	if err := h.st.Link(ctx, localFileID,
-		trackID, dst, fi.Size(), fi.ModTime().UnixNano(),
-	); err != nil {
-		if moved {
-			if rbErr := os.Rename(dst, src); rbErr != nil {
-				h.log.Errorf("refresh file=%d track=%q rollback failed: %v", localFileID, trackID, rbErr)
-			}
-		}
-		if apperrors.Is(err, apperrors.ErrAlreadyExists) {
-			h.writeAppError(c, err)
-			return
-		}
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("refresh file=%d track=%q save -> %w", localFileID, trackID, err)),
-		)
 		return
 	}
 

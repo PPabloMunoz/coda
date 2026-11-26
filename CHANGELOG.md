@@ -9,6 +9,18 @@ before upgrading and back up your database (see
 
 ## [Unreleased]
 
+### Fixed
+
+- Library moves are non-overwriting and serialized: manual link, refresh,
+  and scan auto-link share one pipeline that moves with no-replace
+  semantics (hard link plus an `O_EXCL` copy fallback for filesystems
+  without hard links and cross-device moves) before writing tags, holds a
+  per-file lock across move, tag write, cover embed, and database link plus
+  a per-destination lock, and rolls back without replacing anything. An
+  occupied destination answers `409` with the source untouched; concurrent
+  links to the same destination resolve to one success and one `409` with
+  no lost file.
+
 ### Changed
 
 - Cover image responses use `Cache-Control: no-cache` with ETag

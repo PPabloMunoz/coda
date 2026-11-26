@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -29,14 +30,19 @@ type testEnv struct {
 	coverDir string
 }
 
-func newTestEnv(t *testing.T) *testEnv {
+func newTestEnv(t *testing.T, roots ...string) *testEnv {
 	t.Helper()
 	log := utils.NewWithWriter(io.Discard)
-	st, err := store.NewStore(filepath.Join(t.TempDir(), "test.db"), nil, log)
+	st, err := store.NewStore(filepath.Join(t.TempDir(), "test.db"), roots, log)
 	if err != nil {
 		t.Fatalf("NewStore = %v", err)
 	}
 	t.Cleanup(st.Close)
+	if len(roots) > 0 {
+		if err := st.AddRootDirs(context.Background()); err != nil {
+			t.Fatalf("AddRootDirs = %v", err)
+		}
+	}
 	q := tasks.NewQueue(log)
 
 	mux := http.NewServeMux()
