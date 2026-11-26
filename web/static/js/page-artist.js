@@ -286,10 +286,10 @@ function initArtistPage() {
     }
   }
 
-  async function refreshArtistCover(button) {
+  async function refreshArtistCover() {
     if (!artist || coverInFlight) return;
     coverInFlight = true;
-    setBusy(button, true, 'Refreshing…');
+    heroTools.setBusy(true);
     try {
       const row = await api.refreshArtistCover(artist.id);
       if (!row) {
@@ -307,7 +307,7 @@ function initArtistPage() {
       toast(`Could not refresh photo: ${message}`, 'error');
     } finally {
       coverInFlight = false;
-      setBusy(button, false);
+      heroTools.setBusy(false);
     }
   }
 
@@ -756,10 +756,14 @@ function initArtistPage() {
       crumb.textContent = artist.name;
 
       heroTools = coverTools({
+        refreshLabel: 'Refresh photo',
+        refreshTitle:
+          'Fetch the artist photo again (Deezer, then Wikimedia Commons)',
         uploadLabel: 'Upload photo',
         uploadTitle: 'Upload a JPEG, PNG, or WebP photo (max 15MB)',
         removeLabel: 'Remove photo',
         removeTitle: 'Remove the cached photo',
+        onRefresh: () => void refreshArtistCover(),
         onUpload: (file) => void uploadArtistPhoto(file),
         onRemove: () => void removeArtistPhoto(),
       });
@@ -779,19 +783,6 @@ function initArtistPage() {
         `Open ${artist.name} on MusicBrainz`,
       );
       artistMbRow.hidden = false;
-      const photoButton = el(
-        'button',
-        'btn btn--secondary btn--icon btn--icon-photo',
-        'Refresh photo',
-      );
-      photoButton.type = 'button';
-      photoButton.title =
-        'Fetch the artist photo again (Deezer, then Wikimedia Commons)';
-      photoButton.addEventListener(
-        'click',
-        () => void refreshArtistCover(photoButton),
-      );
-      artistActions.append(photoButton);
       const refreshButton = el(
         'button',
         'btn btn--secondary btn--icon btn--icon-refresh',
@@ -811,7 +802,6 @@ function initArtistPage() {
         deleteArtist(deleteButton),
       );
       artistActions.replaceChildren(
-        photoButton,
         refreshButton,
         deleteButton,
       );

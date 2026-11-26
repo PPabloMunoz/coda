@@ -178,7 +178,6 @@ function initReleaseGroupPage() {
 
   let currentGroup = null;
   let currentRelease = null;
-  let heroRefreshButton = null;
   let heroSwitchButton = null;
   let heroTools = null;
   let switchInFlight = false;
@@ -239,16 +238,17 @@ function initReleaseGroupPage() {
     }
   }
 
-  async function refreshCover(release, button) {
-    await runCoverRefresh(button, () =>
-      api.refreshReleaseCover(release.id),
+  async function refreshCover() {
+    if (!currentRelease) return;
+    await runCoverRefresh(() =>
+      api.refreshReleaseCover(currentRelease.id),
     );
   }
 
-  async function runCoverRefresh(button, refresh) {
+  async function runCoverRefresh(refresh) {
     if (coverInFlight) return;
     coverInFlight = true;
-    setBusy(button, true, 'Refreshing…');
+    heroTools.setBusy(true);
     try {
       const row = await refresh();
       if (!row) {
@@ -266,7 +266,7 @@ function initReleaseGroupPage() {
       toast(`Could not refresh cover: ${message}`, 'error');
     } finally {
       coverInFlight = false;
-      setBusy(button, false);
+      heroTools.setBusy(false);
     }
   }
 
@@ -422,7 +422,6 @@ function initReleaseGroupPage() {
   function renderRelease(release, group) {
     currentRelease = release;
     const hasRelease = Boolean(release);
-    if (heroRefreshButton) heroRefreshButton.hidden = !hasRelease;
     if (heroTools) heroTools.tools.hidden = !hasRelease;
     if (heroSwitchButton) heroSwitchButton.hidden = !hasRelease;
 
@@ -548,10 +547,14 @@ function initReleaseGroupPage() {
         crumbArtist.href = '/';
       }
       heroTools = coverTools({
+        refreshLabel: 'Refresh cover',
+        refreshTitle:
+          'Fetch the cover art again (Cover Art Archive, then Deezer)',
         uploadLabel: 'Upload cover',
         uploadTitle: 'Upload a JPEG, PNG, or WebP cover (max 15MB)',
         removeLabel: 'Remove cover',
         removeTitle: 'Remove the cached cover',
+        onRefresh: () => void refreshCover(),
         onUpload: (file) => void uploadCover(file),
         onRemove: () => void removeCover(),
       });
@@ -576,18 +579,6 @@ function initReleaseGroupPage() {
         () => void openSwitch(currentRelease),
       );
       heroSwitchButton = switchButton;
-      const refreshButton = el(
-        'button',
-        'btn btn--secondary btn--icon btn--icon-refresh',
-        'Refresh cover',
-      );
-      refreshButton.type = 'button';
-      refreshButton.title =
-        'Fetch the cover art again (Cover Art Archive, then Deezer)';
-      refreshButton.addEventListener('click', () => {
-        if (currentRelease) void refreshCover(currentRelease, refreshButton);
-      });
-      heroRefreshButton = refreshButton;
       const deleteButton = el(
         'button',
         'btn btn--danger btn--icon btn--icon-trash',
@@ -597,7 +588,7 @@ function initReleaseGroupPage() {
       deleteButton.addEventListener('click', () =>
         deleteGroup(deleteButton),
       );
-      actions.replaceChildren(switchButton, refreshButton, deleteButton);
+      actions.replaceChildren(switchButton, deleteButton);
 
       renderRelease(release, group);
       status.hidden = true;

@@ -328,24 +328,34 @@ export const COVER_UPLOAD_MAX_BYTES = 15 * 1024 * 1024;
 export const COVER_UPLOAD_ACCEPT = 'image/jpeg,image/png,image/webp';
 
 /**
- * Hover overlay for the detail hero art: icon-only upload + remove buttons
- * over the image, revealed on hover/focus (always visible on touch).
- * Callers render the art node, append `tools` to the same hero container,
- * and drive `setHasArt` as the image proves itself so Remove only shows
- * for real art. Busy state is the caller's (disable both buttons).
+ * Hover overlay for the detail hero art: icon-only refresh, upload and
+ * remove buttons over the image, revealed on hover/focus (always visible
+ * on touch). Callers render the art node, append `tools` to the same hero
+ * container, and drive `setHasArt` as the image proves itself so Remove
+ * only shows for real art. Busy state is the caller's via `setBusy`.
  */
 export function coverTools(options = {}) {
   const {
+    refreshLabel = 'Refresh',
+    refreshTitle,
     uploadLabel = 'Upload',
     uploadTitle,
     removeLabel = 'Remove',
     removeTitle,
+    onRefresh,
     onUpload,
     onRemove,
   } = options;
   const tools = el('div', 'hero-media__tools');
   tools.setAttribute('role', 'group');
   tools.setAttribute('aria-label', 'Artwork actions');
+  const refreshButton = el(
+    'button',
+    'hero-media__btn btn--icon btn--icon-refresh',
+  );
+  refreshButton.type = 'button';
+  refreshButton.setAttribute('aria-label', refreshLabel);
+  if (refreshTitle) refreshButton.title = refreshTitle;
   const uploadButton = el(
     'button',
     'hero-media__btn btn--icon btn--icon-upload',
@@ -367,6 +377,9 @@ export function coverTools(options = {}) {
   input.hidden = true;
   input.tabIndex = -1;
   input.setAttribute('aria-hidden', 'true');
+  refreshButton.addEventListener('click', () => {
+    if (typeof onRefresh === 'function') void onRefresh();
+  });
   uploadButton.addEventListener('click', () => input.click());
   input.addEventListener('change', () => {
     const file = input.files?.[0];
@@ -381,9 +394,10 @@ export function coverTools(options = {}) {
   removeButton.addEventListener('click', () => {
     if (typeof onRemove === 'function') void onRemove();
   });
-  tools.append(uploadButton, removeButton, input);
+  tools.append(refreshButton, uploadButton, removeButton, input);
   return {
     tools,
+    refreshButton,
     uploadButton,
     uploadInput: input,
     removeButton,
@@ -391,6 +405,7 @@ export function coverTools(options = {}) {
       removeButton.hidden = !has;
     },
     setBusy(busy) {
+      refreshButton.disabled = busy;
       uploadButton.disabled = busy;
       removeButton.disabled = busy;
     },
