@@ -30,6 +30,13 @@ before upgrading and back up your database (see
   positions skip) instead of aborting, and files whose recording plus
   disc/position match the new release stay linked with tags, cover, and
   paths rewritten by a background task.
+- Cover refreshes are non-destructive and re-embed: fetching provider art
+  again swaps the cache only on success (a failure or no-art miss keeps the
+  existing upload or cached art), a successful release-cover refresh queues
+  the same background re-embed into linked files that uploads use, and
+  upload/delete/refresh serialize per release or artist so concurrent
+  operations can't overwrite each other. Artist-photo refreshes follow the
+  same fetch-before-swap rule.
 
 ### Changed
 

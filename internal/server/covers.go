@@ -95,8 +95,19 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		// Row without bytes (deleted/moved data dir): drop the stale row
-		// so the next request retries instead of 500ing forever.
-		_ = h.st.DeleteCover(ctx, releaseID)
+		// so the next request retries instead of 500ing forever. Only drop
+		// the row we served: a concurrent upload, refresh, or delete may
+		// have replaced it or recorded a tombstone while we were reading.
+		if cur, gerr := h.st.GetCover(ctx, releaseID); gerr == nil && !cur.Removed &&
+			cur.MIME == row.MIME && cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
+			_ = h.st.DeleteCover(ctx, releaseID)
+		} else if gerr == nil && cur.Removed {
+			h.writeAppError(c, apperrors.ErrNotFound)
+			return
+		} else if apperrors.Is(gerr, apperrors.ErrNotFound) {
+			h.writeAppError(c, apperrors.ErrNotFound)
+			return
+		}
 		h.writeAppError(c, apperrors.Wrap(
 			apperrors.ErrInternal,
 			fmt.Errorf("cover file=%q read -> %w", releaseID, err)),
@@ -107,10 +118,12 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 	c.Data(http.StatusOK, row.MIME, data)
 }
 
-// refreshReleaseCover drops the cached cover for a release and fetches it
-// again (CAA, then Deezer). Missing art answers 404 null; an upstream
-// failure surfaces as an error so the old state is never confused with "no
-// art". The row cascades are untouched — only the cache is rebuilt.
+// refreshReleaseCover fetches provider art again and swaps the cache only
+// on success; a fetch failure or a no-art miss leaves the previous cached
+// art untouched. Missing art answers 404 null; an upstream failure
+// surfaces as an error so the old state is never confused with "no art".
+// A successful refresh queues the same background re-embed into linked
+// files that uploads use.
 func (h *Handler) refreshReleaseCover(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -126,10 +139,12 @@ func (h *Handler) refreshReleaseCover(c *gin.Context) {
 		return
 	}
 
+	h.queue.EnqueueEmbedReleaseCover(releaseID)
 	c.JSON(http.StatusOK, row)
 }
 
-// doRefreshReleaseCover drops cached bytes/row for a release and refetches its cover.
+// doRefreshReleaseCover fetches provider art for a release and swaps the
+// cached bytes/row only on success.
 func (h *Handler) doRefreshReleaseCover(ctx context.Context, releaseID string) (*store.CoverParams, error) {
 	rel, err := h.st.GetRelease(ctx, releaseID, false)
 	if err != nil {
@@ -142,14 +157,11 @@ func (h *Handler) doRefreshReleaseCover(ctx context.Context, releaseID string) (
 		)
 	}
 
-	_ = h.st.DeleteCover(ctx, releaseID)
-	removeCoverFiles(h.coverDir, releaseID)
-
 	artist := tasks.CreditDisplayName(rel.Credit)
 	if artist == "" {
 		artist = tasks.CreditDisplayName(rel.Group.Credit)
 	}
-	return tasks.EnsureCover(ctx, h.st, h.art, h.coverDir, releaseID, artist, rel.Title)
+	return tasks.RefreshCover(ctx, h.st, h.art, h.coverDir, releaseID, artist, rel.Title)
 }
 
 // getReleaseCoverMeta returns the cached cover metadata row for a release
@@ -206,17 +218,22 @@ func (h *Handler) uploadReleaseCover(c *gin.Context) {
 		h.writeAppError(c, err)
 		return
 	}
-	if err := tasks.SaveCover(ctx, h.st, h.coverDir, releaseID, &artwork.Result{
-		Bytes:  img,
-		MIME:   mime,
-		Source: artwork.SourceUpload,
+	var row *store.CoverParams
+	if err := tasks.WithReleaseCoverLock(releaseID, func() error {
+		if err := tasks.SaveCover(ctx, h.st, h.coverDir, releaseID, &artwork.Result{
+			Bytes:  img,
+			MIME:   mime,
+			Source: artwork.SourceUpload,
+		}); err != nil {
+			return err
+		}
+		r, err := h.st.GetCover(ctx, releaseID)
+		if err != nil {
+			return err
+		}
+		row = r
+		return nil
 	}); err != nil {
-		h.writeAppError(c, err)
-		return
-	}
-
-	row, err := h.st.GetCover(ctx, releaseID)
-	if err != nil {
 		h.writeAppError(c, err)
 		return
 	}
@@ -275,17 +292,22 @@ func (h *Handler) uploadArtistCover(c *gin.Context) {
 		h.writeAppError(c, err)
 		return
 	}
-	if err := tasks.SaveArtistCover(ctx, h.st, h.coverDir, artistID, &artwork.Result{
-		Bytes:  img,
-		MIME:   mime,
-		Source: artwork.SourceUpload,
+	var row *store.ArtistCoverParams
+	if err := tasks.WithArtistCoverLock(artistID, func() error {
+		if err := tasks.SaveArtistCover(ctx, h.st, h.coverDir, artistID, &artwork.Result{
+			Bytes:  img,
+			MIME:   mime,
+			Source: artwork.SourceUpload,
+		}); err != nil {
+			return err
+		}
+		r, err := h.st.GetArtistCover(ctx, artistID)
+		if err != nil {
+			return err
+		}
+		row = r
+		return nil
 	}); err != nil {
-		h.writeAppError(c, err)
-		return
-	}
-
-	row, err := h.st.GetArtistCover(ctx, artistID)
-	if err != nil {
 		h.writeAppError(c, err)
 		return
 	}
@@ -311,11 +333,16 @@ func (h *Handler) deleteReleaseCover(c *gin.Context) {
 		return
 	}
 
-	if err := h.st.MarkCoverRemoved(ctx, releaseID); err != nil {
+	if err := tasks.WithReleaseCoverLock(releaseID, func() error {
+		if err := h.st.MarkCoverRemoved(ctx, releaseID); err != nil {
+			return err
+		}
+		removeCoverFiles(h.coverDir, releaseID)
+		return nil
+	}); err != nil {
 		h.writeAppError(c, err)
 		return
 	}
-	removeCoverFiles(h.coverDir, releaseID)
 	h.queue.EnqueueClearReleaseCover(releaseID)
 	c.Status(http.StatusNoContent)
 }
@@ -339,11 +366,16 @@ func (h *Handler) deleteArtistCover(c *gin.Context) {
 		return
 	}
 
-	if err := h.st.MarkArtistCoverRemoved(ctx, artistID); err != nil {
+	if err := tasks.WithArtistCoverLock(artistID, func() error {
+		if err := h.st.MarkArtistCoverRemoved(ctx, artistID); err != nil {
+			return err
+		}
+		removeArtistCoverFiles(h.coverDir, artistID)
+		return nil
+	}); err != nil {
 		h.writeAppError(c, err)
 		return
 	}
-	removeArtistCoverFiles(h.coverDir, artistID)
 	c.Status(http.StatusNoContent)
 }
 
@@ -450,8 +482,19 @@ func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		// Row without bytes (deleted/moved data dir): drop the stale row
-		// so the next request retries instead of 500ing forever.
-		_ = h.st.DeleteArtistCover(ctx, artistID)
+		// so the next request retries instead of 500ing forever. Only drop
+		// the row we served: a concurrent upload, refresh, or delete may
+		// have replaced it or recorded a tombstone while we were reading.
+		if cur, gerr := h.st.GetArtistCover(ctx, artistID); gerr == nil && !cur.Removed &&
+			cur.MIME == row.MIME && cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
+			_ = h.st.DeleteArtistCover(ctx, artistID)
+		} else if gerr == nil && cur.Removed {
+			h.writeAppError(c, apperrors.ErrNotFound)
+			return
+		} else if apperrors.Is(gerr, apperrors.ErrNotFound) {
+			h.writeAppError(c, apperrors.ErrNotFound)
+			return
+		}
 		h.writeAppError(c, apperrors.Wrap(
 			apperrors.ErrInternal,
 			fmt.Errorf("artist cover artist=%q read -> %w", artistID, err)),
@@ -462,10 +505,11 @@ func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 	c.Data(http.StatusOK, row.MIME, data)
 }
 
-// refreshArtistCover drops the cached photo for an artist and fetches it
-// again (Deezer, then Wikimedia). Missing art answers 404 null; an upstream
-// failure surfaces as an error so the old state is never confused with "no
-// art".
+// refreshArtistCover fetches the photo again (Deezer, then Wikimedia) and
+// swaps the cache only on success; a fetch failure or a no-photo miss
+// leaves the previous cached photo untouched. Missing art answers 404
+// null; an upstream failure surfaces as an error so the old state is never
+// confused with "no art".
 func (h *Handler) refreshArtistCover(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -488,10 +532,7 @@ func (h *Handler) refreshArtistCover(c *gin.Context) {
 		return
 	}
 
-	_ = h.st.DeleteArtistCover(ctx, artistID)
-	removeArtistCoverFiles(h.coverDir, artistID)
-
-	row, err := tasks.EnsureArtistCover(ctx, h.st, h.art, h.coverDir, artistID, artist.Name)
+	row, err := tasks.RefreshArtistCover(ctx, h.st, h.art, h.coverDir, artistID, artist.Name)
 	if err != nil {
 		h.writeAppError(c, err)
 		return

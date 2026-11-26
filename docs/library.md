@@ -141,8 +141,11 @@ in the metadata row.
   release cover also queues a background task that clears the embedded
   front cover from its linked files.
 - Artist photos are display-only and are never written into audio files.
-- Fetching provider art again ("Refresh cover"/"Refresh photo") replaces an
-  upload or a removal.
+- Fetching provider art again ("Refresh cover"/"Refresh photo") fetches
+  first and swaps the cache only on success: a failed refresh or a no-art
+  miss keeps the existing upload or cached art, while a successful refresh
+  replaces an upload or a removal. A successful release-cover refresh also
+  queues the same background re-embed into linked files that uploads use.
 
 ## What Coda never does
 

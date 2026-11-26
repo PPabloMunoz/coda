@@ -53,7 +53,7 @@ type Config struct {
 	UserAgent      string
 	CAABaseURL     string
 	DeezerBaseURL  string
-	iTunesBaseURL  string
+	ITunesBaseURL  string
 	CommonsBaseURL string
 	Timeout        time.Duration
 	MaxBytes       int64
@@ -103,8 +103,8 @@ func New(cfg Config) (*Fetcher, error) {
 	if cfg.DeezerBaseURL == "" {
 		cfg.DeezerBaseURL = DefaultDeezerBaseURL
 	}
-	if cfg.iTunesBaseURL == "" {
-		cfg.iTunesBaseURL = DefaultiTunesBaseURL
+	if cfg.ITunesBaseURL == "" {
+		cfg.ITunesBaseURL = DefaultiTunesBaseURL
 	}
 	if cfg.CommonsBaseURL == "" {
 		cfg.CommonsBaseURL = DefaultCommonsBaseURL
@@ -118,7 +118,7 @@ func New(cfg Config) (*Fetcher, error) {
 	return &Fetcher{
 		caaBase:     strings.TrimRight(cfg.CAABaseURL, "/"),
 		deezerBase:  strings.TrimRight(cfg.DeezerBaseURL, "/"),
-		itunesBase:  strings.TrimRight(cfg.iTunesBaseURL, "/"),
+		itunesBase:  strings.TrimRight(cfg.ITunesBaseURL, "/"),
 		commonsBase: strings.TrimRight(cfg.CommonsBaseURL, "/"),
 		http:        &http.Client{Timeout: cfg.Timeout},
 		ua:          cfg.UserAgent,

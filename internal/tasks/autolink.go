@@ -75,7 +75,13 @@ func EmbedCover(ctx context.Context, st *store.Store, coverDir, filePath, releas
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Stale row; drop it so the next GET refetches, link goes on.
-			_ = st.DeleteCover(ctx, releaseID)
+			// Only drop the row we checked: a concurrent upload, refresh,
+			// or delete may have replaced it or recorded a tombstone.
+			if cur, gerr := st.GetCover(ctx, releaseID); gerr == nil &&
+				!cur.Removed && cur.MIME == row.MIME &&
+				cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
+				_ = st.DeleteCover(ctx, releaseID)
+			}
 			return nil
 		}
 		return apperrors.Wrap(
