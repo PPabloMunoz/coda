@@ -185,6 +185,14 @@ func (q *Queue) markArtistImportDone(id string) {
 	status.Error = ""
 }
 
+// ForgetArtistImport drops the status entry for id, so removed artists
+// don't leave stale import state behind forever.
+func (q *Queue) ForgetArtistImport(id string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	delete(q.artistImports, id)
+}
+
 // markArtistImportFailed marks an import as failed with the error message and finish timestamp.
 func (q *Queue) markArtistImportFailed(id string, err error) {
 	q.mu.Lock()

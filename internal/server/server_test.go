@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -237,6 +238,20 @@ func TestGetLocalFilesValidation(t *testing.T) {
 	w = doRequest(t, env.router, "GET", "/api/v1/files?limit=5", nil)
 	if w.Code != http.StatusOK {
 		t.Errorf("valid = %d, want 200", w.Code)
+	}
+}
+
+// TestPostLinkRejectsInvalidTrackID guards the link handler's report of a
+// bad track_id: it must answer 400 with a JSON error, never an empty 200.
+func TestPostLinkRejectsInvalidTrackID(t *testing.T) {
+	env := newTestEnv(t)
+	w := doRequest(t, env.router, "POST", "/api/v1/files/1/link",
+		map[string]string{"track_id": "not-a-uuid"})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("bad track_id = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "INVALID_ID") {
+		t.Errorf("body = %q, want an INVALID_ID error object", w.Body.String())
 	}
 }
 

@@ -134,6 +134,7 @@ func (h *Handler) link(c *gin.Context) {
 
 	trackID, err := requireMBID(body.TrackID)
 	if err != nil {
+		h.writeAppError(c, err)
 		return
 	}
 

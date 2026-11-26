@@ -22,6 +22,7 @@ var migrationsFS embed.FS
 type Store struct {
 	db        *sql.DB
 	rootPaths []string
+	log       *utils.Logger
 }
 
 // NewStore opens the SQLite DB (single connection), runs goose migrations, and
@@ -31,10 +32,11 @@ func NewStore(dsn string, rootPaths []string, log *utils.Logger) (*Store, error)
 	if err != nil {
 		return nil, err
 	}
-	return &Store{db: db, rootPaths: rootPaths}, nil
+	return &Store{db: db, rootPaths: rootPaths, log: log}, nil
 }
 
-// AddRootDirs upserts configured roots as active and deletes rows for removed roots.
+// AddRootDirs upserts configured roots as active and soft-deactivates roots
+// removed from config (rows and links are kept for a future re-add).
 func (st *Store) AddRootDirs(ctx context.Context) error {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -55,7 +57,7 @@ func (st *Store) AddRootDirs(ctx context.Context) error {
 		if execErr != nil {
 			return apperrors.Wrap(
 				apperrors.ErrInternal,
-				fmt.Errorf("error inserting root %q into DB: %w", r, err),
+				fmt.Errorf("error inserting root %q into DB: %w", r, execErr),
 			)
 		}
 	}
@@ -75,7 +77,7 @@ func (st *Store) AddRootDirs(ctx context.Context) error {
 			args[i] = r
 		}
 		_, err := tx.ExecContext(ctx,
-			`DELETE FROM roots WHERE path NOT IN (`+ph+`)`,
+			`UPDATE roots SET active=0 WHERE path NOT IN (`+ph+`)`,
 			args...,
 		)
 		if err != nil {
@@ -122,11 +124,13 @@ func openDB(dsn string, log *utils.Logger) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 
 	if err := db.Ping(); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("store: connect to db: %w", err)
 	}
 
 	log.Debug("db migration start")
 	if err := migration(db); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("store: migrate db: %w", err)
 	}
 	log.Debug("db migration done")

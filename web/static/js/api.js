@@ -151,6 +151,13 @@ export async function collectAll(fetchPage, pageSize = 100, maxItems = 5000) {
     }
   }
 
+  if (items.length < total) {
+    console.warn(
+      `collectAll: truncated at ${items.length} of ${total} items — ` +
+        'raising maxItems is safer than trusting an incomplete list'
+    );
+  }
+
   return { items, total };
 }
 

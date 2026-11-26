@@ -1,9 +1,13 @@
 package store
 
 import (
+	"bytes"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
@@ -72,6 +76,127 @@ func TestSyncLocalFilesPrunesStale(t *testing.T) {
 	}
 	if total != 0 || len(files) != 0 {
 		t.Errorf("after prune total = %d, want 0", total)
+	}
+}
+
+func TestSyncLocalFilesToleratesUnreadableFile(t *testing.T) {
+	root := t.TempDir()
+	st := newTestStore(t, root)
+	rootID := testRootID(t, st)
+
+	// A tracked file with an intact row and matching on-disk state skips
+	// the tag read, so its link survives even though the file is junk.
+	good := root + "/good.mp3"
+	if err := os.WriteFile(good, bytes.Repeat([]byte("a"), 100), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracked := "t-123"
+	if _, err := st.db.Exec(
+		`INSERT INTO local_files (root_id, path, size_bytes, mtime_ns, format_hint, scanned_at, track_id)
+		 VALUES (?, ?, ?, ?, 'mp3', '2024-01-01 00:00:00', ?)`,
+		rootID, good, fi.Size(), fi.ModTime().UnixNano(), tracked,
+	); err != nil {
+		t.Fatalf("insert tracked file = %v", err)
+	}
+
+	// An unreadable file must not fail the sync.
+	bad := root + "/bad.mp3"
+	if err := os.WriteFile(bad, []byte("audio bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(bad, 0o000); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := st.SyncLocalFiles(ctx(), []ScannedFile{
+		{LibraryRoot: root, Path: good, SizeBytes: fi.Size(), MtimeNs: fi.ModTime().UnixNano(), FormatHint: "mp3"},
+		{LibraryRoot: root, Path: bad, SizeBytes: 17, MtimeNs: 1, FormatHint: "mp3"},
+	}, "2024-06-01 00:00:00")
+	if err != nil {
+		t.Fatalf("SyncLocalFiles = %v", err)
+	}
+	if len(stats.Failed) != 1 || stats.Failed[0] != bad {
+		t.Errorf("Failed = %v, want [%s]", stats.Failed, bad)
+	}
+	if stats.Upserted != 2 {
+		t.Errorf("Upserted = %d, want 2 (the unreadable file still syncs)", stats.Upserted)
+	}
+
+	var trackID any
+	if err := st.db.QueryRow(`SELECT track_id FROM local_files WHERE path = ?`, good).Scan(&trackID); err != nil {
+		t.Fatalf("query good row = %v", err)
+	}
+	if trackID == nil || trackID.(string) != tracked {
+		t.Errorf("good row track_id = %v, want preserved %q", trackID, tracked)
+	}
+
+	// The unreadable file's row was refreshed, so the prune keeps it.
+	var n int
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM local_files WHERE path = ?`, bad).Scan(&n); err != nil || n != 1 {
+		t.Errorf("bad file row survived prune = %d rows, %v; want 1", n, err)
+	}
+}
+
+func TestSyncLocalFilesSkipsUnchangedFiles(t *testing.T) {
+	root := t.TempDir()
+	st := newTestStore(t, root)
+	rootID := testRootID(t, st)
+
+	// Row matches the on-disk stat, so the scan must not re-read tags:
+	// making the file unreadable with the same size and mtime is invisible.
+	path := root + "/song.mp3"
+	junk := bytes.Repeat([]byte("j"), 200)
+	if err := os.WriteFile(path, junk, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mtime := fi.ModTime()
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(
+		`INSERT INTO local_files (root_id, path, size_bytes, mtime_ns, format_hint, scanned_at)
+		 VALUES (?, ?, ?, ?, 'mp3', '2024-01-01 00:00:00')`,
+		rootID, path, fi.Size(), mtime.UnixNano(),
+	); err != nil {
+		t.Fatalf("insert file = %v", err)
+	}
+
+	scanned := ScannedFile{
+		LibraryRoot: root, Path: path,
+		SizeBytes: fi.Size(), MtimeNs: mtime.UnixNano(), FormatHint: "mp3",
+	}
+	stats, err := st.SyncLocalFiles(ctx(), []ScannedFile{scanned}, "2024-06-01 00:00:00")
+	if err != nil {
+		t.Fatalf("SyncLocalFiles = %v", err)
+	}
+	if len(stats.Failed) != 0 {
+		t.Errorf("Failed = %v, want empty (unchanged file must skip the tag read)", stats.Failed)
+	}
+
+	// Control: make the file unreadable AND bump mtime, so the scan
+	// re-reads it — and reports the failure.
+	later := mtime.Add(time.Minute)
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	scanned.MtimeNs = later.UnixNano()
+	stats, err = st.SyncLocalFiles(ctx(), []ScannedFile{scanned}, "2024-06-02 00:00:00")
+	if err != nil {
+		t.Fatalf("SyncLocalFiles control = %v", err)
+	}
+	if len(stats.Failed) != 1 || stats.Failed[0] != path {
+		t.Errorf("control Failed = %v, want [%s]", stats.Failed, path)
 	}
 }
 
@@ -222,4 +347,29 @@ func TestCleanupOrphanCredits(t *testing.T) {
 		t.Fatalf("CleanupOrphanCredits = %v", err)
 	}
 	_ = n
+}
+
+func TestIsUniqueViolation(t *testing.T) {
+	root := t.TempDir()
+	st := newTestStore(t, root)
+	rootID := testRootID(t, st)
+	if _, err := st.db.Exec(
+		`INSERT INTO local_files (root_id, path, size_bytes, mtime_ns, format_hint, scanned_at)
+		 VALUES (?, '/root/a.mp3', 1, 1, 'mp3', '2024-01-01 00:00:00')`, rootID,
+	); err != nil {
+		t.Fatalf("insert = %v", err)
+	}
+	_, err := st.db.Exec(
+		`INSERT INTO local_files (root_id, path, size_bytes, mtime_ns, format_hint, scanned_at)
+		 VALUES (?, '/root/a.mp3', 1, 1, 'mp3', '2024-01-01 00:00:00')`, rootID,
+	)
+	if err == nil {
+		t.Fatal("duplicate insert = nil error, want a UNIQUE violation")
+	}
+	if !isUniqueViolation(err) {
+		t.Errorf("isUniqueViolation(%v) = false, want true (driver code mismatch)", err)
+	}
+	if isUniqueViolation(nil) || isUniqueViolation(errors.New("some other error")) {
+		t.Error("non-sqlite errors must not classify as unique violations")
+	}
 }

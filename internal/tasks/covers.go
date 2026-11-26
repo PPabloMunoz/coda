@@ -16,10 +16,27 @@ import (
 	"github.com/ppablomunoz/coda/internal/utils"
 )
 
+// coverFetchLocks serializes first fetches per release so concurrent
+// cache misses (GET handler vs background prefetch) fetch once and the
+// waiters reuse the winner's row instead of double-fetching the provider
+// chain. Entries are bounded by the number of releases ever missed.
+var coverFetchLocks sync.Map // releaseID -> *sync.Mutex
+
+// withCoverLock runs fn while holding the per-release fetch lock.
+func withCoverLock(releaseID string, fn func() error) error {
+	locked, _ := coverFetchLocks.LoadOrStore(releaseID, &sync.Mutex{})
+	mu := locked.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+	return fn()
+}
+
 // EnsureCover returns the cached cover row for a release, fetching it first
-// when missing. Artist/album feed the Deezer text fallback only. A nil
-// fetcher disables fetching (tests): the existing cache still serves, a
-// miss answers ErrNotFound.
+// when missing. Concurrent misses for one release collapse into a single
+// fetch: the first caller fetches, waiters re-check the cache and reuse
+// its row. Artist/album feed the Deezer text fallback only. A nil fetcher
+// disables fetching (tests): the existing cache still serves, a miss
+// answers ErrNotFound.
 func EnsureCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 	coverDir, releaseID, artist, album string,
 ) (*store.CoverParams, error) {
@@ -31,14 +48,30 @@ func EnsureCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 	if art == nil {
 		return nil, apperrors.ErrNotFound
 	}
-	res, err := art.Fetch(ctx, releaseID, artist, album)
+
+	var row *store.CoverParams
+	err := withCoverLock(releaseID, func() error {
+		// Another caller may have fetched while we waited.
+		if cached, err := st.GetCover(ctx, releaseID); err == nil {
+			row = cached
+			return nil
+		} else if !apperrors.Is(err, apperrors.ErrNotFound) {
+			return err
+		}
+		res, err := art.Fetch(ctx, releaseID, artist, album)
+		if err != nil {
+			return err
+		}
+		if err := SaveCover(ctx, st, coverDir, releaseID, res); err != nil {
+			return err
+		}
+		row, err = st.GetCover(ctx, releaseID)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	if err := SaveCover(ctx, st, coverDir, releaseID, res); err != nil {
-		return nil, err
-	}
-	return st.GetCover(ctx, releaseID)
+	return row, nil
 }
 
 // SaveCover writes fetched bytes to the cache dir (atomic tmp+rename,
@@ -67,7 +100,9 @@ func SaveCover(ctx context.Context, st *store.Store, coverDir, releaseID string,
 			fmt.Errorf("cover mkdir: %w", err),
 		)
 	}
-	tmp, err := os.CreateTemp(coverDir, releaseID+"-*.tmp")
+	// Hidden, glob-invisible temp name: removeCoverFiles globs
+	// <releaseID>.* and must never see an in-flight temp file.
+	tmp, err := os.CreateTemp(coverDir, ".coda-cover-"+releaseID+"-*.tmp")
 	if err != nil {
 		return apperrors.Wrap(
 			apperrors.ErrInternal,

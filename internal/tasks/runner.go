@@ -100,8 +100,8 @@ func (r *Runner) scanRoots(ctx context.Context) {
 	auto := r.autoLinkMoves(ctx)
 	r.cleanupCredits(ctx)
 	r.pruneArtists(ctx)
-	r.log.Infof("scan done: found=%d upserted=%d pruned=%d autolinked=%d moved=%d skipped=%d in %s",
-		stats.Found, stats.Upserted, stats.Pruned, auto.Linked, auto.Moved, auto.SkippedConflict, time.Since(start))
+	r.log.Infof("scan done: found=%d upserted=%d pruned=%d failed=%d autolinked=%d moved=%d skipped=%d in %s",
+		stats.Found, stats.Upserted, stats.Pruned, len(stats.Failed), auto.Linked, auto.Moved, auto.SkippedConflict, time.Since(start))
 }
 
 // importArtist imports an artist's discography, then prefetches covers in the
@@ -114,15 +114,13 @@ func (r *Runner) importArtist(ctx context.Context, t Task) {
 
 	start := time.Now()
 	r.log.Infof("importing artist discography %q", t.ID)
-	sctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
 
 	r.queue.markArtistImportRunning(t.ID)
 	art, err := r.st.GetArtistByID(ctx, t.ID)
 	if err != nil {
 		if apperrors.Is(err, apperrors.ErrNotFound) {
 			r.log.Infof("skipping discography import for inactive artist %q", t.ID)
-			r.queue.markArtistImportDone(t.ID)
+			r.queue.ForgetArtistImport(t.ID)
 			return
 		}
 		r.queue.markArtistImportFailed(t.ID, err)
@@ -134,7 +132,7 @@ func (r *Runner) importArtist(ctx context.Context, t Task) {
 		r.queue.markArtistImportDone(t.ID)
 		return
 	}
-	if err := r.importDiscography(sctx, t.ID); err != nil {
+	if err := r.importDiscography(ctx, t.ID); err != nil {
 		r.queue.markArtistImportFailed(t.ID, err)
 		r.log.Errorf("importing artist discography %q failed in %s: %v", t.ID, time.Since(start), err)
 		return
@@ -143,9 +141,9 @@ func (r *Runner) importArtist(ctx context.Context, t Task) {
 	// is concerned, and the serial task queue stays free for other work.
 	// Gaps are always backfilled lazily on first GET .../cover.
 	go r.prefetchCoversBG(ctx, t.ID)
-	r.prefetchArtistCover(sctx, t.ID, art.Name)
-	r.cleanupCredits(sctx)
-	r.pruneArtists(sctx)
+	go r.prefetchArtistCover(ctx, t.ID, art.Name)
+	r.cleanupCredits(ctx)
+	r.pruneArtists(ctx)
 	r.queue.markArtistImportDone(t.ID)
 	r.log.Infof("discography for %q saved in %s", t.ID, time.Since(start))
 }

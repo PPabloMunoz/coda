@@ -40,18 +40,72 @@ func TestAddRootDirsReplaces(t *testing.T) {
 	_ = newStoreAt(t, dbPath, rootA)
 	st2 := newStoreAt(t, dbPath, rootB)
 
+	// The removed root is soft-deactivated, keeping its rows and links
+	// for a future re-add.
+	var active int
+	if err := st2.db.QueryRow(`SELECT active FROM roots WHERE path = ?`, rootA).Scan(&active); err != nil {
+		t.Fatalf("query old root = %v", err)
+	}
+	if active != 0 {
+		t.Errorf("old root active = %d, want 0 (soft-deactivated)", active)
+	}
+	if err := st2.db.QueryRow(`SELECT active FROM roots WHERE path = ?`, rootB).Scan(&active); err != nil {
+		t.Fatalf("query new root = %v", err)
+	}
+	if active != 1 {
+		t.Errorf("new root active = %d, want 1", active)
+	}
+}
+
+// TestAddRootDirsSoftDeleteKeepsFiles checks the full soft-delete story:
+// removing a root keeps its file rows and links, hides them from lists,
+// stats and single GETs, and re-adding the root restores everything.
+func TestAddRootDirsSoftDeleteKeepsFiles(t *testing.T) {
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	st1 := newStoreAt(t, dbPath, rootA, rootB)
+	var rootAID int64
+	if err := st1.db.QueryRow(`SELECT id FROM roots WHERE path = ?`, rootA).Scan(&rootAID); err != nil {
+		t.Fatalf("query root = %v", err)
+	}
+	insertFile(t, st1, rootAID, rootA+"/a.mp3", nil)
+
+	st2 := newStoreAt(t, dbPath, rootB) // rootA removed from config
+
 	var n int
-	if err := st2.db.QueryRow(`SELECT COUNT(*) FROM roots WHERE path = ?`, rootA).Scan(&n); err != nil {
-		t.Fatalf("count = %v", err)
+	if err := st2.db.QueryRow(`SELECT COUNT(*) FROM local_files WHERE path = ?`, rootA+"/a.mp3").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("file row survived = %d rows, %v; want 1", n, err)
 	}
-	if n != 0 {
-		t.Errorf("old root still present, want deleted")
+
+	files, total, err := st2.ListFiles(ctx(), FileListOptions{PageOptions: PageOptions{Limit: 20}})
+	if err != nil {
+		t.Fatalf("ListFiles = %v", err)
 	}
-	if err := st2.db.QueryRow(`SELECT COUNT(*) FROM roots WHERE path = ?`, rootB).Scan(&n); err != nil {
-		t.Fatalf("count = %v", err)
+	if total != 0 || len(files) != 0 {
+		t.Errorf("ListFiles after root removal = %d items, want 0 (hidden)", total)
 	}
-	if n != 1 {
-		t.Errorf("new root missing")
+
+	stats, err := st2.GetLocalFilesStats(ctx())
+	if err != nil {
+		t.Fatalf("GetLocalFilesStats = %v", err)
+	}
+	if stats.Total != 0 || stats.Unlinked != 0 {
+		t.Errorf("stats after root removal = %+v, want zeros (hidden)", stats)
+	}
+
+	if _, err := st2.GetFile(ctx(), 1, false); !apperrors.Is(err, apperrors.ErrNotFound) {
+		t.Errorf("GetFile of hidden file err = %v, want NOT_FOUND", err)
+	}
+
+	// Re-adding the root reactivates it; the row (and any link) is intact.
+	st3 := newStoreAt(t, dbPath, rootA, rootB)
+	files, total, err = st3.ListFiles(ctx(), FileListOptions{PageOptions: PageOptions{Limit: 20}})
+	if err != nil {
+		t.Fatalf("ListFiles after re-add = %v", err)
+	}
+	if total != 1 || len(files) != 1 || files[0].Path != rootA+"/a.mp3" {
+		t.Errorf("ListFiles after re-add = %d items %+v, want the restored file", total, files)
 	}
 }
 

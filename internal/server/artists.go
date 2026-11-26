@@ -194,5 +194,8 @@ func (h *Handler) deleteArtist(c *gin.Context) {
 		return
 	}
 
+	// The artist is gone; its import status entry would linger forever.
+	h.queue.ForgetArtistImport(artistID)
+
 	c.JSON(http.StatusOK, map[string]int64{"pruned": pruned})
 }
