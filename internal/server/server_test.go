@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/ppablomunoz/coda/internal/artwork"
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
 	"github.com/ppablomunoz/coda/internal/store"
 	"github.com/ppablomunoz/coda/internal/tasks"
@@ -31,6 +32,11 @@ type testEnv struct {
 }
 
 func newTestEnv(t *testing.T, roots ...string) *testEnv {
+	t.Helper()
+	return newTestEnvWithArt(t, nil, roots...)
+}
+
+func newTestEnvWithArt(t *testing.T, art *artwork.Fetcher, roots ...string) *testEnv {
 	t.Helper()
 	log := utils.NewWithWriter(io.Discard)
 	st, err := store.NewStore(filepath.Join(t.TempDir(), "test.db"), roots, log)
@@ -57,7 +63,7 @@ func newTestEnv(t *testing.T, roots ...string) *testEnv {
 		t.Fatalf("mb New = %v", err)
 	}
 	coverDir := t.TempDir()
-	router := NewHandler(log, st, mb, q, nil, coverDir)
+	router := NewHandler(log, st, mb, q, art, coverDir)
 	return &testEnv{router: router, st: st, queue: q, mbSrv: srv, mbMux: mux, coverDir: coverDir}
 }
 

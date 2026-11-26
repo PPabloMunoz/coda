@@ -15,6 +15,7 @@ import (
 
 	"github.com/ppablomunoz/coda/internal/artwork"
 	"github.com/ppablomunoz/coda/internal/store"
+	"github.com/ppablomunoz/coda/internal/tasks"
 )
 
 // tinyPNG is a valid 1x1 PNG; the handler sniffs magic bytes, so the body
@@ -440,6 +441,166 @@ func TestArtistCoverMeta(t *testing.T) {
 	w = doRequest(t, env.router, "GET", "/api/v1/artists/00000000-0000-4000-8000-000000000000/cover/meta", nil)
 	if w.Code != http.StatusNotFound {
 		t.Errorf("unknown = %d, want 404", w.Code)
+	}
+}
+
+// newCoverTestFetcher builds a provider fetcher pointed at a test server
+// so refresh tests never touch the real network.
+func newCoverTestFetcher(t *testing.T, baseURL string) *artwork.Fetcher {
+	t.Helper()
+	f, err := artwork.New(artwork.Config{
+		UserAgent:      "coda-test",
+		CAABaseURL:     baseURL,
+		DeezerBaseURL:  baseURL,
+		ITunesBaseURL:  baseURL,
+		CommonsBaseURL: baseURL,
+	})
+	if err != nil {
+		t.Fatalf("artwork New = %v", err)
+	}
+	return f
+}
+
+func saveServerUploadCover(t *testing.T, env *testEnv) {
+	t.Helper()
+	if err := tasks.SaveCover(context.Background(), env.st, env.coverDir, uploadRelID, &artwork.Result{
+		Bytes: tinyPNG, MIME: "image/png", Source: artwork.SourceUpload,
+	}); err != nil {
+		t.Fatalf("SaveCover = %v", err)
+	}
+}
+
+func TestRefreshReleaseCoverSuccessSwapsAndEnqueuesEmbed(t *testing.T) {
+	bigger := append(append([]byte(nil), tinyPNG...), 0x00)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/release/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(bigger)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	env := newTestEnvWithArt(t, newCoverTestFetcher(t, srv.URL))
+	seedUploadRelease(t, env)
+	// Seed directly (not via PUT) so the queue starts empty: the embed
+	// task observed below can only come from the refresh.
+	saveServerUploadCover(t, env)
+
+	w := doRequest(t, env.router, "POST", "/api/v1/releases/"+uploadRelID+"/cover/refresh", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("refresh = %d %q, want 200", w.Code, w.Body.String())
+	}
+	if row := decodeCoverRow(t, w.Body.Bytes()); row["source"] == "upload" {
+		t.Errorf("source = upload, want provider art after refresh")
+	}
+
+	w = doRequest(t, env.router, "GET", "/api/v1/releases/"+uploadRelID+"/cover", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get after refresh = %d, want 200", w.Code)
+	}
+	if !bytes.Equal(w.Body.Bytes(), bigger) {
+		t.Error("get bytes are not the refreshed art")
+	}
+	if !env.queue.HasTask(tasks.TaskEmbedReleaseCover, uploadRelID) {
+		t.Error("no embed task queued after successful refresh")
+	}
+}
+
+func TestRefreshReleaseCoverFailureKeepsOldArt(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	env := newTestEnvWithArt(t, newCoverTestFetcher(t, srv.URL))
+	seedUploadRelease(t, env)
+	saveServerUploadCover(t, env)
+
+	w := doRequest(t, env.router, "POST", "/api/v1/releases/"+uploadRelID+"/cover/refresh", nil)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("refresh = %d %q, want 500", w.Code, w.Body.String())
+	}
+
+	w = doRequest(t, env.router, "GET", "/api/v1/releases/"+uploadRelID+"/cover", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get after failed refresh = %d, want 200 (old art survives)", w.Code)
+	}
+	if !bytes.Equal(w.Body.Bytes(), tinyPNG) {
+		t.Error("get bytes changed by failed refresh")
+	}
+	w = doRequest(t, env.router, "GET", "/api/v1/releases/"+uploadRelID+"/cover/meta", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("meta after failed refresh = %d, want 200", w.Code)
+	}
+	if row := decodeCoverRow(t, w.Body.Bytes()); row["source"] != "upload" {
+		t.Errorf("source = %v, want upload (old row survives)", row["source"])
+	}
+	if env.queue.HasTask(tasks.TaskEmbedReleaseCover, uploadRelID) {
+		t.Error("embed task queued by failed refresh, want none")
+	}
+}
+
+func TestRefreshReleaseCoverNotFoundKeepsOldArt(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	env := newTestEnvWithArt(t, newCoverTestFetcher(t, srv.URL))
+	seedUploadRelease(t, env)
+	saveServerUploadCover(t, env)
+
+	w := doRequest(t, env.router, "POST", "/api/v1/releases/"+uploadRelID+"/cover/refresh", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("refresh = %d %q, want 404", w.Code, w.Body.String())
+	}
+
+	w = doRequest(t, env.router, "GET", "/api/v1/releases/"+uploadRelID+"/cover", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get after no-art refresh = %d, want 200 (old art survives)", w.Code)
+	}
+	if !bytes.Equal(w.Body.Bytes(), tinyPNG) {
+		t.Error("get bytes changed by no-art refresh")
+	}
+	if env.queue.HasTask(tasks.TaskEmbedReleaseCover, uploadRelID) {
+		t.Error("embed task queued by no-art refresh, want none")
+	}
+}
+
+func TestRefreshArtistCoverFailureKeepsOldPhoto(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	env := newTestEnvWithArt(t, newCoverTestFetcher(t, srv.URL))
+	seedUploadRelease(t, env)
+
+	w := doRawRequest(t, env, "PUT", "/api/v1/artists/"+uploadArtistID+"/cover", tinyPNG, "image/png")
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload = %d, want 200", w.Code)
+	}
+
+	w = doRequest(t, env.router, "POST", "/api/v1/artists/"+uploadArtistID+"/cover/refresh", nil)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("refresh = %d %q, want 500", w.Code, w.Body.String())
+	}
+
+	w = doRequest(t, env.router, "GET", "/api/v1/artists/"+uploadArtistID+"/cover", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get after failed refresh = %d, want 200 (old photo survives)", w.Code)
+	}
+	if !bytes.Equal(w.Body.Bytes(), tinyPNG) {
+		t.Error("get bytes changed by failed refresh")
 	}
 }
 

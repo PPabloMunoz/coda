@@ -35,14 +35,73 @@ func EnsureArtistCover(ctx context.Context, st *store.Store, art *artwork.Fetche
 	if art == nil {
 		return nil, apperrors.ErrNotFound
 	}
-	res, err := art.FetchArtist(ctx, artistID, artistName)
+
+	var row *store.ArtistCoverParams
+	err := WithArtistCoverLock(artistID, func() error {
+		// Another caller may have fetched while we waited.
+		if cached, err := st.GetArtistCover(ctx, artistID); err == nil {
+			if cached.Removed {
+				return apperrors.ErrNotFound
+			}
+			row = cached
+			return nil
+		} else if !apperrors.Is(err, apperrors.ErrNotFound) {
+			return err
+		}
+		res, err := art.FetchArtist(ctx, artistID, artistName)
+		if err != nil {
+			return err
+		}
+		if err := SaveArtistCover(ctx, st, coverDir, artistID, res); err != nil {
+			return err
+		}
+		r, err := st.GetArtistCover(ctx, artistID)
+		if err != nil {
+			return err
+		}
+		row = r
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if err := SaveArtistCover(ctx, st, coverDir, artistID, res); err != nil {
+	return row, nil
+}
+
+// RefreshArtistCover fetches a provider photo first and only swaps the
+// cache on success, mirroring RefreshCover. A fetch failure or a no-photo
+// miss returns without touching the existing row or files, so the previous
+// upload or cached photo survives. The whole fetch+save holds the
+// per-artist lock so concurrent uploads, deletes, and refreshes serialize.
+func RefreshArtistCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
+	coverDir, artistID, artistName string,
+) (*store.ArtistCoverParams, error) {
+	if art == nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artist cover refresh unavailable"),
+		)
+	}
+	var row *store.ArtistCoverParams
+	err := WithArtistCoverLock(artistID, func() error {
+		res, err := art.FetchArtist(ctx, artistID, artistName)
+		if err != nil {
+			return err
+		}
+		if err := SaveArtistCover(ctx, st, coverDir, artistID, res); err != nil {
+			return err
+		}
+		r, err := st.GetArtistCover(ctx, artistID)
+		if err != nil {
+			return err
+		}
+		row = r
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
-	return st.GetArtistCover(ctx, artistID)
+	return row, nil
 }
 
 // SaveArtistCover writes fetched bytes to the cache dir (atomic tmp+rename,

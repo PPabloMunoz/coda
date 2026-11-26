@@ -209,6 +209,18 @@ func (q *Queue) EnqueueRelinkRelease(releaseID string) {
 	q.signal()
 }
 
+// HasTask reports whether a task with the given key and id is currently queued.
+func (q *Queue) HasTask(key TaskKey, id string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, t := range q.items {
+		if t.Key == key && t.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // ArtistImportStatus returns the current import state for id, or idle when unknown.
 func (q *Queue) ArtistImportStatus(id string) ArtistImportStatus {
 	q.mu.Lock()

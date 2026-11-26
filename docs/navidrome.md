@@ -24,8 +24,9 @@ writes only standard frames — see the full key list in
 - **Covers are embedded.** Linked files carry the release cover as their
   front cover picture, so Navidrome shows art without sidecar files.
   Uploading a new release cover in Coda re-embeds it into the release's
-  linked files in the background (and removing a cover clears it) —
-  rescan Navidrome afterwards to pick up the change.
+  linked files in the background (and removing a cover clears it), as does
+  a successful cover refresh — rescan Navidrome afterwards to pick up the
+  change.
 - **Multi-artist credits.** `ARTIST`/`ALBUMARTIST` keep a display string;
   `ARTISTS`/`ALBUMARTISTS` carry the per-artist lists. How a player
   combines them is up to the player.

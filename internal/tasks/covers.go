@@ -17,16 +17,32 @@ import (
 	"github.com/ppablomunoz/coda/internal/utils"
 )
 
-// coverFetchLocks serializes first fetches per release so concurrent
-// cache misses (GET handler vs background prefetch) fetch once and the
-// waiters reuse the winner's row instead of double-fetching the provider
-// chain. Entries are bounded by the number of releases ever missed.
-var coverFetchLocks sync.Map // releaseID -> *sync.Mutex
+// coverLocks serializes cover mutations per release/artist so concurrent
+// cache misses (GET handler vs background prefetch), uploads, deletions,
+// and refreshes never interleave on the same row/files. Uploads, deletes,
+// and refreshes share this lock; Ensure fetches hold it too so a first
+// fetch collapses into one provider call and waiters reuse the winner's
+// row. Keys are prefixed ("release:"+id, "artist:"+id) so the two ID
+// namespaces never collide. Entries are bounded by the number of releases
+// and artists ever touched.
+var coverLocks sync.Map // "release:<id>" | "artist:<id>" -> *sync.Mutex
 
-// withCoverLock runs fn while holding the per-release fetch lock.
-func withCoverLock(releaseID string, fn func() error) error {
-	locked, _ := coverFetchLocks.LoadOrStore(releaseID, &sync.Mutex{})
-	mu := locked.(*sync.Mutex)
+func withCoverMutex(key string) *sync.Mutex {
+	locked, _ := coverLocks.LoadOrStore(key, &sync.Mutex{})
+	return locked.(*sync.Mutex)
+}
+
+// WithReleaseCoverLock runs fn while holding the per-release cover lock.
+func WithReleaseCoverLock(releaseID string, fn func() error) error {
+	mu := withCoverMutex("release:" + releaseID)
+	mu.Lock()
+	defer mu.Unlock()
+	return fn()
+}
+
+// WithArtistCoverLock runs fn while holding the per-artist cover lock.
+func WithArtistCoverLock(artistID string, fn func() error) error {
+	mu := withCoverMutex("artist:" + artistID)
 	mu.Lock()
 	defer mu.Unlock()
 	return fn()
@@ -55,7 +71,7 @@ func EnsureCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 	}
 
 	var row *store.CoverParams
-	err := withCoverLock(releaseID, func() error {
+	err := WithReleaseCoverLock(releaseID, func() error {
 		// Another caller may have fetched while we waited.
 		if cached, err := st.GetCover(ctx, releaseID); err == nil {
 			if cached.Removed {
@@ -75,6 +91,44 @@ func EnsureCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 		}
 		row, err = st.GetCover(ctx, releaseID)
 		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+// RefreshCover fetches provider art first and only swaps the cache on
+// success: the new bytes are written (atomic tmp+rename) and the row is
+// upserted, clearing any removal tombstone. A fetch failure or a no-art
+// miss returns without touching the existing row or files, so the previous
+// upload, refresh, or cached art survives. Callers enqueue the re-embed
+// task after a successful return. The whole fetch+save holds the
+// per-release lock so concurrent uploads, deletes, and refreshes serialize.
+func RefreshCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
+	coverDir, releaseID, artist, album string,
+) (*store.CoverParams, error) {
+	if art == nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("cover refresh unavailable"),
+		)
+	}
+	var row *store.CoverParams
+	err := WithReleaseCoverLock(releaseID, func() error {
+		res, err := art.Fetch(ctx, releaseID, artist, album)
+		if err != nil {
+			return err
+		}
+		if err := SaveCover(ctx, st, coverDir, releaseID, res); err != nil {
+			return err
+		}
+		r, err := st.GetCover(ctx, releaseID)
+		if err != nil {
+			return err
+		}
+		row = r
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -321,7 +375,14 @@ func (r *Runner) embedReleaseCover(ctx context.Context, releaseID string) {
 	img, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			_ = r.st.DeleteCover(ctx, releaseID)
+			// Only drop the row we checked: a concurrent upload, refresh,
+			// or delete may have replaced it or recorded a tombstone while
+			// we were reading. Never drop a tombstone or a newer row.
+			if cur, gerr := r.st.GetCover(ctx, releaseID); gerr == nil &&
+				!cur.Removed && cur.MIME == row.MIME &&
+				cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
+				_ = r.st.DeleteCover(ctx, releaseID)
+			}
 		} else {
 			r.log.Warnf("embed cover release %q read: %v", releaseID, err)
 		}

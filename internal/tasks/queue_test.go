@@ -156,8 +156,8 @@ func TestMarkUnknownNoPanic(t *testing.T) {
 func TestWithCoverLockSerializesSameRelease(t *testing.T) {
 	const goroutines, perGoroutine = 8, 25
 
-	// Deliberately unlocked: only withCoverLock's serialization makes the
-	// read-modify-write lossless. Lost updates mean the lock leaked.
+	// Deliberately unlocked: only WithReleaseCoverLock's serialization makes
+	// the read-modify-write lossless. Lost updates mean the lock leaked.
 	counter := 0
 	var wg sync.WaitGroup
 	for g := 0; g < goroutines; g++ {
@@ -165,11 +165,11 @@ func TestWithCoverLockSerializesSameRelease(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
-				if err := withCoverLock("release-1", func() error {
+				if err := WithReleaseCoverLock("release-1", func() error {
 					counter++
 					return nil
 				}); err != nil {
-					t.Errorf("withCoverLock: %v", err)
+					t.Errorf("WithReleaseCoverLock: %v", err)
 				}
 			}
 		}()

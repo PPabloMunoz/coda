@@ -375,8 +375,11 @@ cached. When no provider yields usable art the answer is `404`; an
 upstream failure returns an error instead of a cached miss, so retries are
 possible.
 
-`POST /releases/:id/cover/refresh` and `POST /artists/:id/cover/refresh` drop
-the cached image and fetch again, returning `200` with the cover metadata row:
+`POST /releases/:id/cover/refresh` and `POST /artists/:id/cover/refresh`
+fetch provider art again and swap the cache only on success, returning
+`200` with the cover metadata row. A fetch failure or a no-art miss leaves
+the previously cached art untouched (the upload or earlier fetch survives);
+a successful refresh clears an upload or a removal tombstone:
 
 ```json
 {"release_id": "ab5a...", "source": "coverartarchive",
@@ -412,9 +415,10 @@ even when provider fetching is disabled. A later refresh discards the
 upload and fetches provider art again.
 
 Uploading a release cover also queues a background task that re-embeds the
-new art into every file already linked to the release. The upload itself
-succeeds first; embedding failures only log (check the server logs), so a
-file that can't be rewritten doesn't fail the upload.
+new art into every file already linked to the release. A successful
+refresh queues the same task. The upload or refresh itself succeeds first;
+embedding failures only log (check the server logs), so a
+file that can't be rewritten doesn't fail the upload or refresh.
 
 ### Removing covers
 
