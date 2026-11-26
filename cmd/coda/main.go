@@ -195,7 +195,7 @@ func main() {
 	wg.Go(func() { runner.Start(ctx) })
 	wg.Go(func() { scheduler.Start(ctx) })
 
-	queue.EnqueueScan()
+	queue.EnqueueScan(false)
 
 	// Graceful shutdown
 	select {

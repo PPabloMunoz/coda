@@ -101,3 +101,60 @@ func TestExecPrune(t *testing.T) {
 	r, _, _ := newTestRunner(t)
 	r.exec(context.Background(), Task{Key: TaskPruneArtists})
 }
+
+func TestScanRootsGuardsPrune(t *testing.T) {
+	log := utils.NewWithWriter(io.Discard)
+	rootGood := t.TempDir() // exists but empty: complete walk, zero files
+	rootMissing := filepath.Join(t.TempDir(), "gone")
+
+	st, err := store.NewStore(filepath.Join(t.TempDir(), "test.db"), []string{rootGood, rootMissing}, log)
+	if err != nil {
+		t.Fatalf("NewStore = %v", err)
+	}
+	t.Cleanup(st.Close)
+	if err := st.AddRootDirs(context.Background()); err != nil {
+		t.Fatalf("AddRootDirs = %v", err)
+	}
+	srv := httptest.NewServer(http.NewServeMux())
+	t.Cleanup(srv.Close)
+	mb, err := musicbrainz.New(musicbrainz.Config{UserAgent: "coda-test", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("mb New = %v", err)
+	}
+	q := NewQueue(log)
+	r := NewRunner(st, mb, log, q, nil, "")
+
+	// Seed one row per root. The files don't exist on disk, so the tag
+	// read fails but the rows still sync (existing links preserved).
+	if _, err := st.SyncLocalFiles(context.Background(), []store.ScannedFile{
+		{LibraryRoot: rootGood, Path: filepath.Join(rootGood, "old.mp3"), SizeBytes: 100, MtimeNs: 123, FormatHint: "mp3"},
+		{LibraryRoot: rootMissing, Path: filepath.Join(rootMissing, "old.mp3"), SizeBytes: 100, MtimeNs: 123, FormatHint: "mp3"},
+	}, "2024-01-01 00:00:00", store.SyncOptions{ForcePrune: true}); err != nil {
+		t.Fatalf("seed SyncLocalFiles = %v", err)
+	}
+
+	// Normal scan: the empty root keeps its rows (unexpected empty) and
+	// the missing root keeps its rows (incomplete walk).
+	r.scanRoots(context.Background(), false)
+	files, total, err := st.ListFiles(context.Background(), store.FileListOptions{PageOptions: store.PageOptions{Limit: 20}})
+	if err != nil {
+		t.Fatalf("ListFiles = %v", err)
+	}
+	if total != 2 || len(files) != 2 {
+		t.Fatalf("after guarded scan total = %d, want 2 (both roots kept)", total)
+	}
+
+	// Forced scan: the empty-but-readable root prunes, the missing root
+	// still keeps its rows.
+	r.scanRoots(context.Background(), true)
+	files, total, err = st.ListFiles(context.Background(), store.FileListOptions{PageOptions: store.PageOptions{Limit: 20}})
+	if err != nil {
+		t.Fatalf("ListFiles = %v", err)
+	}
+	if total != 1 || len(files) != 1 {
+		t.Fatalf("after force scan total = %d files=%v, want 1 (missing root only)", total, files)
+	}
+	if got := files[0].Path; got != filepath.Join(rootMissing, "old.mp3") {
+		t.Errorf("remaining path = %q, want missing-root row", got)
+	}
+}

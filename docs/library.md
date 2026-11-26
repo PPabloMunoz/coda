@@ -11,6 +11,12 @@ Coda scans your roots at startup, every 6 hours, and whenever you ask:
 curl -X POST localhost:8687/api/v1/scan   # 202, runs in the background
 ```
 
+Force a full clear after deleting every file in a root:
+
+```sh
+curl -X POST 'localhost:8687/api/v1/scan?force_prune=true'
+```
+
 A scan:
 
 - Walks each root and records every supported audio file. Symlinks are
@@ -20,6 +26,13 @@ A scan:
   Rows for files that vanished from disk are pruned, and their links go
   with them. A file you moved outside Coda re-appears at its new path and,
   if its tags still carry the release-track MBID, is auto-linked again.
+- Fails safe on missing or unreadable roots: a root whose walk did not
+  complete never prunes, and a root whose complete walk suddenly yields
+  zero files keeps its rows (with a warning in the logs) instead of
+  wiping links for an unmounted drive, emptied mount point, or permission
+  change. Deleting individual files still prunes those rows. Pass
+  `?force_prune=true` when you really deleted everything and want the
+  empty root cleared.
 - Tolerates unreadable files: logged, counted in the scan stats, existing
   link preserved.
 - Auto-links exactly-identifiable files: a file whose tags carry a

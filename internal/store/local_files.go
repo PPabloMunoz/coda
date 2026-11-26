@@ -426,10 +426,31 @@ type SyncStats struct {
 	// synced (keeping any existing track link) but never link by MBID,
 	// and they don't fail the sync.
 	Failed []string
+	// KeptRoots lists root paths whose prune was skipped by a fail-safe
+	// guard (incomplete walk or unexpected empty result).
+	KeptRoots []string
+}
+
+// SyncOptions controls prune guards in SyncLocalFiles.
+type SyncOptions struct {
+	// IncompleteRoots lists root paths whose filesystem walk did not
+	// complete (missing/unreadable root or subdirectory). Those roots
+	// are never pruned, even when ForcePrune is set.
+	IncompleteRoots []string
+	// ForcePrune allows pruning a root whose complete walk yielded zero
+	// files but still has rows. It never overrides IncompleteRoots.
+	ForcePrune bool
 }
 
 // SyncLocalFiles upserts scanned files by path (preserving track_id), links
 // tracks via on-disk MBIDs, and prunes rows with scanned_at older than scanStart.
+//
+// Pruning is guarded per root: a root whose walk was incomplete never
+// prunes, and a root whose complete walk unexpectedly yields zero files
+// keeps its rows (with a warning) unless ForcePrune is set, so an
+// unmounted drive, emptied mount point, or permission change cannot wipe
+// link data. Normal pruning (individual files genuinely removed) is
+// unaffected.
 //
 // Tag reads happen before the transaction: with the store's single SQLite
 // connection, holding a write tx across per-file filesystem I/O would stall
@@ -437,7 +458,7 @@ type SyncStats struct {
 // scan (same size and mtime) skip the tag parse entirely, so rescanning a
 // settled library is DB-cheap.
 func (st *Store) SyncLocalFiles(ctx context.Context,
-	files []ScannedFile, scanStart string,
+	files []ScannedFile, scanStart string, opts SyncOptions,
 ) (SyncStats, error) {
 	if len(st.rootPaths) == 0 {
 		return SyncStats{}, nil
@@ -491,13 +512,14 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 	// Phase 1: on-disk state as of the previous scan, so unchanged files
 	// can skip the tag parse.
 	known := make(map[string][2]int64, len(files)) // path -> {mtime_ns, size}
+	existingCounts := make(map[int64]int64, len(rootIDs))
 	ph = placeholders(len(rootIDs))
 	ids := make([]any, 0, len(rootIDs))
 	for _, id := range rootIDs {
 		ids = append(ids, id)
 	}
 	krows, err := st.db.QueryContext(ctx,
-		"SELECT path, mtime_ns, size_bytes FROM local_files WHERE root_id IN ("+ph+")",
+		"SELECT root_id, path, mtime_ns, size_bytes FROM local_files WHERE root_id IN ("+ph+")",
 		ids...,
 	)
 	if err != nil {
@@ -507,9 +529,10 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 		)
 	}
 	for krows.Next() {
+		var rootID int64
 		var path string
 		var mtime, size int64
-		if err := krows.Scan(&path, &mtime, &size); err != nil {
+		if err := krows.Scan(&rootID, &path, &mtime, &size); err != nil {
 			_ = krows.Close()
 			return SyncStats{}, apperrors.Wrap(
 				apperrors.ErrInternal,
@@ -517,6 +540,7 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 			)
 		}
 		known[path] = [2]int64{mtime, size}
+		existingCounts[rootID]++
 	}
 	if err := krows.Err(); err != nil {
 		_ = krows.Close()
@@ -631,7 +655,27 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 		stats.Upserted++
 	}
 
-	for _, id := range rootIDs {
+	// Per-root found counts for the empty-root guard.
+	foundCounts := make(map[string]int, len(files))
+	for _, f := range files {
+		foundCounts[f.LibraryRoot]++
+	}
+	incomplete := make(map[string]struct{}, len(opts.IncompleteRoots))
+	for _, r := range opts.IncompleteRoots {
+		incomplete[r] = struct{}{}
+	}
+
+	for rootPath, id := range rootIDs {
+		if _, ok := incomplete[rootPath]; ok {
+			st.log.Warnf("scan sync root=%q walk incomplete: keeping %d rows, skipping prune", rootPath, existingCounts[id])
+			stats.KeptRoots = append(stats.KeptRoots, rootPath)
+			continue
+		}
+		if foundCounts[rootPath] == 0 && existingCounts[id] > 0 && !opts.ForcePrune {
+			st.log.Warnf("scan sync root=%q yielded 0 files but has %d rows: keeping rows, skipping prune (use force prune to clear)", rootPath, existingCounts[id])
+			stats.KeptRoots = append(stats.KeptRoots, rootPath)
+			continue
+		}
 		res, err := tx.ExecContext(ctx,
 			"DELETE FROM local_files WHERE root_id = ? AND scanned_at < ?",
 			id,
@@ -647,6 +691,7 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 			stats.Pruned += n
 		}
 	}
+	sort.Strings(stats.KeptRoots)
 
 	if err := tx.Commit(); err != nil {
 		return SyncStats{}, apperrors.Wrap(

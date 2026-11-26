@@ -63,10 +63,13 @@ state keeps serving.
 
 ## Scan pipeline
 
-1. `library.Scan` walks each root (symlinks never followed).
+1. `library.Scan` walks each root (symlinks never followed) and reports
+   per-root walk completeness.
 2. `store.SyncLocalFiles` upserts by absolute path, preserving `track_id`;
    tags are read before the write transaction; unchanged files (size +
-   mtime) are skipped; rows for vanished files are pruned.
+   mtime) are skipped; rows for vanished files are pruned, except roots
+   with an incomplete walk (never prune) and roots whose complete walk
+   yields zero files (kept unless the scan was force-pruned).
 3. The auto-link pass (`tasks/autolink.go`) links every file whose on-disk
    release-track MBID resolves to a known track through the same shared
    no-replace link pipeline as manual link: move first, then tags, cover,

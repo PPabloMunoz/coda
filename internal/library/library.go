@@ -29,14 +29,32 @@ type File struct {
 	FormatHint  string // "mp3", no ".mp3"
 }
 
+// RootStatus reports how completely a single root was walked. Walked is
+// false when the root itself was missing/unreadable or any entry under it
+// could not be read; WalkErr holds the first walk error encountered.
+// Files counts the audio files yielded for the root.
+type RootStatus struct {
+	Root    string
+	Files   int
+	Walked  bool
+	WalkErr error
+}
+
 // Scan walks rootPaths and calls fn for each supported audio file, skipping
 // symlinks, non-regular files, and unreadable entries. It never follows symlinks.
-func Scan(ctx context.Context, rootPaths []string, fn func(File) error) error {
+//
+// A per-root status is returned alongside the error: a missing/unreadable
+// root or subdirectory marks that root Walked=false (recording the first
+// walk error) and continues with the remaining roots instead of failing the
+// scan. Callback errors and context cancellation still abort the whole scan.
+func Scan(ctx context.Context, rootPaths []string, fn func(File) error) ([]RootStatus, error) {
 	if len(rootPaths) == 0 {
-		return nil
+		return nil, nil
 	}
 
+	statuses := make([]RootStatus, 0, len(rootPaths))
 	for _, r := range rootPaths {
+		status := RootStatus{Root: r, Walked: true}
 		err := filepath.WalkDir(r, func(path string, d fs.DirEntry, err error) error {
 			select {
 			case <-ctx.Done():
@@ -44,7 +62,11 @@ func Scan(ctx context.Context, rootPaths []string, fn func(File) error) error {
 			default:
 			}
 
-			if err != nil { // skip unreadable file/dir
+			if err != nil { // skip unreadable file/dir, mark root incomplete
+				status.Walked = false
+				if status.WalkErr == nil {
+					status.WalkErr = err
+				}
 				return nil
 			}
 
@@ -70,20 +92,26 @@ func Scan(ctx context.Context, rootPaths []string, fn func(File) error) error {
 				return nil
 			}
 
-			return fn(File{
+			if err := fn(File{
 				LibraryRoot: r,
 				Path:        path,
 				SizeBytes:   info.Size(),
 				MtimeNs:     info.ModTime().UnixNano(),
 				FormatHint:  ext,
-			})
+			}); err != nil {
+				return err
+			}
+			status.Files++
+			return nil
 		})
 		if err != nil {
-			return fmt.Errorf("library: walk root %q: %w", r, err)
+			statuses = append(statuses, status)
+			return statuses, fmt.Errorf("library: walk root %q: %w", r, err)
 		}
+		statuses = append(statuses, status)
 	}
 
-	return nil
+	return statuses, nil
 }
 
 type Target struct {

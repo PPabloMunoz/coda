@@ -8,8 +8,8 @@ import (
 
 func TestEnqueueScanDedup(t *testing.T) {
 	q := NewQueue(nil)
-	q.EnqueueScan()
-	q.EnqueueScan()
+	q.EnqueueScan(false)
+	q.EnqueueScan(false)
 	q.mu.Lock()
 	n := 0
 	for _, item := range q.items {
@@ -21,6 +21,34 @@ func TestEnqueueScanDedup(t *testing.T) {
 	q.mu.Unlock()
 	if n != 1 {
 		t.Errorf("scan tasks = %d, want 1 (depth=%d)", n, depth)
+	}
+}
+
+func TestEnqueueScanForceUpgradesPending(t *testing.T) {
+	q := NewQueue(nil)
+	q.EnqueueScan(false)
+	q.EnqueueScan(true)
+	q.mu.Lock()
+	if len(q.items) != 1 {
+		q.mu.Unlock()
+		t.Fatalf("tasks = %d, want 1 (force upgrades, not duplicates)", len(q.items))
+	}
+	forced := q.items[0].ForcePrune
+	q.mu.Unlock()
+	if !forced {
+		t.Error("pending scan not upgraded to force prune")
+	}
+
+	// Force first, then normal: stays forced, still a single task.
+	q2 := NewQueue(nil)
+	q2.EnqueueScan(true)
+	q2.EnqueueScan(false)
+	q2.mu.Lock()
+	if len(q2.items) != 1 || !q2.items[0].ForcePrune {
+		q2.mu.Unlock()
+		t.Errorf("force-then-normal should stay a single forced scan")
+	} else {
+		q2.mu.Unlock()
 	}
 }
 
