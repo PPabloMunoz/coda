@@ -127,7 +127,10 @@ commits with the temp's owner. Extended attributes and ACLs are not
 preserved; the new file inherits the directory defaults. Linking runs one shared
 pipeline (manual link, refresh, and scan auto-link): the file moves to its
 canonical path first with no-replace semantics, then tags and cover are
-written and the database link is recorded. Each run holds a per-file
+written and the database link is recorded. Same-filesystem moves keep the
+file's inode (owner included); the copy fallback for cross-device or
+no-hard-link filesystems preserves the permission bits and, on Unix, the
+uid/gid best effort, like tag writes do. Each run holds a per-file
 operation lock across move, tag write, cover embed, and database link, plus
 a per-destination lock, so concurrent links to the same file or the same
 destination cannot overwrite each other. A failed move leaves tags and the

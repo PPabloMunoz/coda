@@ -27,8 +27,11 @@ before upgrading and back up your database (see
   now copies the source uid/gid onto the replacement (Unix; Windows keeps
   the process owner) alongside the permission bits, so linking, unlinking,
   and cover updates no longer silently hand files to the Coda user when it
-  runs as root or as a different user than the library owner. A chown the
-  process is not permitted to make only warns and the write still commits.
+  runs as root or as a different user than the library owner. The
+  copy-fallback library move (cross-device or no-hard-link filesystems;
+  same-filesystem moves keep the inode and were never affected) preserves
+  ownership the same way. A chown the process is not permitted to make
+  only warns and the write or move still commits.
 - Library moves are non-overwriting and serialized: manual link, refresh,
   and scan auto-link share one pipeline that moves with no-replace
   semantics (hard link plus an `O_EXCL` copy fallback for filesystems
