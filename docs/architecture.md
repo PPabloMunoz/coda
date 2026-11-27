@@ -74,18 +74,29 @@ the store closes only after background workers stop.
 ## Scan pipeline
 
 1. `library.Scan` walks each root (symlinks never followed) and reports
-   per-root walk completeness.
-2. `store.SyncLocalFiles` upserts by absolute path, preserving `track_id`;
-   tags are read before the write transaction; unchanged files (size +
-   mtime) are skipped; rows for vanished files are pruned, except roots
-   with an incomplete walk (never prune) and roots whose complete walk
-   yields zero files (kept unless the scan was force-pruned).
-3. The auto-link pass (`tasks/autolink.go`) links every file whose on-disk
-   release-track MBID resolves to a known track through the same shared
-   no-replace link pipeline as manual link: move first, then tags, cover,
-   and database link. Occupied destinations are skipped and reported, never
-   overwritten.
-4. Orphan credits and trackless collaborators are cleaned up.
+   per-root walk completeness. The walk streams into the sync in bounded
+   chunks (500 files) so large libraries never materialize; each chunk is
+   one short write tx.
+2. `store.SyncLocalFiles` upserts by absolute path, preserving `track_id`,
+   and stores tag evidence (`mb_track_id` + `tags_read_at`). Tags are read
+   outside any write tx; settled files (same size+mtime with evidence)
+   skip the parse, failed reads clear `tags_read_at` so the next scan
+   retries, and upserts are batched multi-row statements. Linking is not
+   done here — the auto-link pass links via stored evidence. Rows for
+   vanished files are pruned afterwards, except roots with an incomplete
+   walk (never prune) and roots whose complete walk yields zero files
+   (kept unless the scan was force-pruned).
+3. The auto-link pass (`tasks/autolink.go`) pages DB candidates whose
+   stored tag MBID resolves to a known track but whose link differs
+   (unlinked or changed, including newly imported tracks) through the same
+   shared no-replace link pipeline as manual link: move first, then tags,
+   cover, and database link. No tags are re-read here; settled rescans do
+   zero tag parses in this pass. Occupied destinations are skipped and
+   reported, never overwritten.
+4. Orphan credits and trackless collaborators are cleaned up. Per-phase
+   timings (`walk_ms`, `sync_ms`, `tag_read_ms`, `autolink_ms`) and
+   incremental counters (`tag_reads`, `unchanged`) are logged and exposed
+   in the scan status.
 
 ## Data model
 
@@ -97,7 +108,9 @@ table, and the background-task intent tables (`artist_imports`,
 `pending_release_tasks`). The split is deliberate: credits are normalized
 (`artist_credits`), recording MBIDs live on `tracks`, and
 `local_files.track_id` is the single link between the filesystem and music
-metadata. One saved release per release-group. `ignored` holds permanently
+metadata; `local_files.mb_track_id` + `tags_read_at` is the stored tag
+evidence that makes rescans incremental. One saved release per
+release-group. `ignored` holds permanently
 deleted artist and release-group MBIDs so imports skip them until removed.
 
 ## Conventions worth knowing

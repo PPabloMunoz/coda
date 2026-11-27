@@ -44,7 +44,9 @@ const MaxScanFailedFiles = 50
 // diagnostics. Only terminal states (done/failed) persist across restarts;
 // queued/running live in memory. Timestamps describe the current lifecycle;
 // counters describe the last completed run (zero when none has completed),
-// preserved while a new run is queued/running until it finishes.
+// preserved while a new run is queued/running until it finishes. WalkMs,
+// SyncMs, TagReadMs, and AutolinkMs are per-phase timings; TagReads counts
+// tag parses and Unchanged counts settled files that skipped the tag read.
 type ScanStatus struct {
 	State           ScanState  `json:"state"`
 	QueuedAt        *time.Time `json:"queued_at,omitempty"`
@@ -62,4 +64,10 @@ type ScanStatus struct {
 	KeptRoots       []string   `json:"kept_roots,omitempty"`
 	IncompleteRoots []string   `json:"incomplete_roots,omitempty"`
 	Error           string     `json:"error,omitempty"`
+	WalkMs          int64      `json:"walk_ms,omitempty"`
+	SyncMs          int64      `json:"sync_ms,omitempty"`
+	TagReadMs       int64      `json:"tag_read_ms,omitempty"`
+	AutolinkMs      int64      `json:"autolink_ms,omitempty"`
+	TagReads        int        `json:"tag_reads,omitempty"`
+	Unchanged       int        `json:"unchanged,omitempty"`
 }

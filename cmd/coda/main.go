@@ -74,6 +74,10 @@ func main() {
 		)
 		fmt.Fprintf(
 			flag.CommandLine.Output(),
+			"  CODA_SCAN_TIMEOUT  scan bound as Go duration (e.g. 15m, default 10m)\n",
+		)
+		fmt.Fprintf(
+			flag.CommandLine.Output(),
 			"  CODA_DEBUG   1/true/yes/on enables debug logs\n",
 		)
 		fmt.Fprintf(
@@ -144,6 +148,7 @@ func main() {
 		for _, h := range cfg.AllowedHosts {
 			fmt.Printf("  - %s\n", h)
 		}
+		fmt.Printf("scan_timeout: %s\n", cfg.ScanTimeout)
 		fmt.Printf("db: %s\n", dbPath)
 		fmt.Printf("covers: %s\n", config.CoverDirFromDBPath(dsn))
 		return
@@ -184,6 +189,7 @@ func main() {
 
 	queue := tasks.NewQueue(log, st)
 	runner := tasks.NewRunner(st, mb, log, queue, art, coverDir)
+	runner.SetScanTimeout(cfg.ScanTimeout)
 	scheduler := tasks.NewScheduler(queue, log)
 
 	// Recover durable intent from before a restart: interrupted imports go
