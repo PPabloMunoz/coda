@@ -85,18 +85,6 @@ function initFilePage() {
       body.append(trackLine);
     }
 
-    if (track?.group?.id) {
-      const panelActions = el('div', 'link-panel__actions');
-      panelActions.append(
-        link(
-          `/release-group?id=${encodeURIComponent(track.group.id)}`,
-          'Open release group',
-          'btn btn--secondary',
-        ),
-      );
-      body.append(panelActions);
-    }
-
     panel.append(body);
     linkPanel.replaceChildren(panel);
   }
