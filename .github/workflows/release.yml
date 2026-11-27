@@ -51,7 +51,7 @@ jobs:
             "./dist/coda-${GOOS}-${GOARCH}" --version
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coda-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/coda-${{ matrix.goos }}-${{ matrix.goarch }}
