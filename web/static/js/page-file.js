@@ -246,12 +246,17 @@ function initFilePage() {
         );
       }
 
-      // Linked files show stats only; the detail table and link panel below
-      // repeat the same data, so they stay for unlinked files.
+      // The detail table renders for every file; only the link status
+      // text and the Track MBID value change with link state. The link
+      // panel stays unlinked-only since it is a link CTA.
       const linked = Boolean(file.track_id);
-      byId('detail-wrap').hidden = linked;
+      byId('detail-wrap').hidden = false;
       linkPanel.hidden = linked;
-      if (!linked) renderLinkPanel(file);
+      if (linked) {
+        linkPanel.replaceChildren();
+      } else {
+        renderLinkPanel(file);
+      }
       status.hidden = true;
       content.hidden = false;
     } catch (error) {
