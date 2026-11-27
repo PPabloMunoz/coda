@@ -56,6 +56,43 @@ func TestPermanentReleaseGroupDeleteSurvivesRefresh(t *testing.T) {
 	}
 }
 
+func TestRemoveIgnoredReactivatesArtistAsCollaborator(t *testing.T) {
+	st := newTestStore(t)
+	_ = st.CreateArtist(ctx(), Artist{ID: testArtistID, Name: "Main"})
+	p := testRelease(testTrackID, testRelID, testGroupID)
+	p.Group.Credit = []CreditEntry{
+		{ArtistID: testArtistID, Name: "Main", CreditedName: "Main"},
+		{ArtistID: testArtistB, Name: "Guest", CreditedName: "Guest"},
+	}
+	p.Credit = p.Group.Credit
+	p.Tracks[0].Credit = p.Group.Credit
+	if err := st.SaveDiscography(ctx(), []FullReleaseParams{p}); err != nil {
+		t.Fatalf("SaveDiscography = %v", err)
+	}
+
+	// Permanently delete the guest: the shared group survives because the
+	// library artist is still credited.
+	if _, err := st.DeleteArtist(ctx(), testArtistB, true); err != nil {
+		t.Fatalf("DeleteArtist guest permanent = %v", err)
+	}
+	if _, err := st.GetArtistByID(ctx(), testArtistB); !apperrors.Is(err, apperrors.ErrNotFound) {
+		t.Fatalf("deleted guest GetArtistByID = %v, want NOT_FOUND", err)
+	}
+
+	// Allowing again reactivates the row as collaboration-only: the artist
+	// page can offer Add to library instead of 404ing.
+	if err := st.RemoveIgnored(ctx(), testArtistB); err != nil {
+		t.Fatalf("RemoveIgnored = %v", err)
+	}
+	got, err := st.GetArtistByID(ctx(), testArtistB)
+	if err != nil {
+		t.Fatalf("GetArtistByID after restore = %v", err)
+	}
+	if got.Active != 1 || got.InLibrary != 0 {
+		t.Errorf("restored guest = active %d in_library %d, want 1/0", got.Active, got.InLibrary)
+	}
+}
+
 func TestNormalReleaseGroupDeleteDoesNotIgnore(t *testing.T) {
 	st := newTestStore(t)
 	_ = st.CreateArtist(ctx(), Artist{ID: testArtistID, Name: "Test Artist"})

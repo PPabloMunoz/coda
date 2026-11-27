@@ -61,6 +61,10 @@ before upgrading and back up your database (see
   artists block `POST /artists` with `403` until allowed again, ignored
   collaborators never reactivate, and deleting an artist during an
   in-flight import cancels the import instead of resurrecting anything.
+  Allowing a permanently deleted artist again reactivates a surviving
+  soft-deleted row as a collaborator, so its page offers Add to library
+  instead of 404ing when it is still credited on a shared release;
+  membership still requires an explicit re-add.
 - Scans ignore hidden files and directories (names starting with `.`),
   so a leftover `.coda-tag-*` tag-write temp copy from a crash can never
   be indexed or auto-linked; each scan also deletes `.coda-tag-*` files

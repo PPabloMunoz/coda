@@ -182,8 +182,10 @@ in the metadata row.
   delete (`?permanent=true`) also tombstones the artist so later imports
   and re-adds cannot bring it back; deleting an artist during an in-flight
   import cancels the import instead of resurrecting anything. Tombstones
-  live under Permanently deleted in the navbar until removed — removing one
-  only allows the entity again, it never refreshes eagerly.
+  live under Permanently deleted in the navbar until removed — removing an
+  artist tombstone also reactivates a surviving soft-deleted row as a
+  collaborator, so its page offers Add to library even when the artist is
+  still credited on a shared release; either way, nothing refreshes eagerly.
 - Deleting a release group removes its release and tracks. A permanent
   delete tombstones the group so the next artist refresh or import skips
   it until allowed again.

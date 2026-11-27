@@ -51,8 +51,10 @@ func (h *Handler) getIgnored(c *gin.Context) {
 }
 
 // deleteIgnored removes a tombstone so the entity can be added again.
-// Nothing refreshes eagerly: a group returns on the next artist refresh,
-// an artist can be re-added from POST /artists.
+// Removing an artist tombstone also reactivates a surviving soft-deleted
+// row as a collaborator, so its page can offer Add to library; membership
+// still requires POST /artists. Nothing refreshes eagerly: a group returns
+// on the next artist refresh, an artist import starts on re-add.
 func (h *Handler) deleteIgnored(c *gin.Context) {
 	id, err := requireMBID(c.Param("id"))
 	if err != nil {

@@ -178,7 +178,7 @@ function initRemovedPage() {
       }
       toast(
         entry.type === 'artist'
-          ? `"${entry.name}" allowed again. Add the artist from Artists to import it.`
+          ? `"${entry.name}" allowed again. Open the artist page to add it and import.`
           : `"${entry.name}" allowed again. Refresh its artist to import it.`,
         'ok',
       );
