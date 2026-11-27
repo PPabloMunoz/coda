@@ -19,7 +19,7 @@ the scope check in the template. Security issues go through
 
 ## Development setup
 
-- [Go](https://go.dev) 1.27.3 (see `go.mod`). No cgo; no other toolchain.
+- [Go](https://go.dev) 1.27.4 (see `go.mod`). No cgo; no other toolchain.
 - [just](https://just.systems/) wraps the common commands.
 - [golangci-lint](https://golangci-lint.run) for vet/lint/fmt.
 

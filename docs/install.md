@@ -119,7 +119,7 @@ equivalent to what the installer writes (env-only config: `CODA_HOST`,
 
 ## Build from source
 
-Requires [Go](https://go.dev) (developed with 1.27.3) — no cgo, no
+Requires [Go](https://go.dev) (developed with 1.27.4) — no cgo, no
 toolchain beyond Go:
 
 ```sh
