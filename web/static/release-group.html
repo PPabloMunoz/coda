@@ -192,6 +192,66 @@
           </div>
         </form>
       </dialog>
+
+      <dialog id="link-dialog" class="wizard" aria-labelledby="link-title">
+        <div class="wizard__shell">
+          <header class="wizard__head">
+            <div>
+              <p class="eyebrow">Link file</p>
+              <h2 id="link-title">Link a file</h2>
+            </div>
+            <button
+              class="icon-btn"
+              id="link-close"
+              type="button"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </header>
+
+          <div class="wizard__file">
+            <div class="file-row__format" id="link-track-format">
+              TRK
+            </div>
+            <div>
+              <p class="wizard__file-name" id="link-track-title"></p>
+              <p class="wizard__file-path" id="link-track-meta"></p>
+            </div>
+          </div>
+
+          <div class="wizard__body">
+            <div class="picker">
+              <label class="picker__search">
+                <input
+                  id="link-search"
+                  name="q"
+                  type="search"
+                  placeholder="Filter by file name or folder…"
+                  autocomplete="off"
+                  aria-label="Filter unlinked files by name or folder"
+                />
+              </label>
+              <div class="picker__list" id="link-list"></div>
+            </div>
+          </div>
+
+          <footer class="wizard__foot">
+            <button class="btn btn--ghost" id="link-cancel" type="button">
+              Cancel
+            </button>
+            <span class="form-status" id="link-status" role="status"></span>
+            <button
+              class="btn btn--primary"
+              id="link-submit"
+              type="button"
+              disabled
+            >
+              Link file
+            </button>
+          </footer>
+        </div>
+      </dialog>
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
