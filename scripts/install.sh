@@ -8,7 +8,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/PPabloMunoz/coda/main/scripts/install.sh | sudo sh
 # With options (note the `-s --` separator when piping):
 #   curl -fsSL .../scripts/install.sh | sudo sh -s -- --roots /mnt/music --port 8687
-#   sudo ./scripts/install.sh --version 0.1.2 --roots /mnt/music:/mnt/other
+#   sudo ./scripts/install.sh --version 0.3.0 --roots /mnt/music:/mnt/other
 #
 # What it does: downloads the release binary + checksums.txt, verifies the
 # checksum, installs to /usr/local/bin/coda, creates a service user, writes a

@@ -9,6 +9,18 @@ before upgrading and back up your database (see
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-27
+
+### Breaking
+
+- Requests whose `Host` header is not allowlisted now answer `421
+  INVALID_HOST`: configure `allowed_hosts` (`CODA_ALLOWED_HOSTS`) when
+  serving behind a reverse proxy, and see `operations.md`
+  (421 troubleshooting).
+- `POST /artists` for an artist already in the library now returns `200`
+  with the existing artist instead of `304`, which clients treat as a
+  cache response.
+
 ### Security
 
 - HTTP hardening: `ReadTimeout`/`WriteTimeout` 90s, `IdleTimeout` 120s,
@@ -166,6 +178,11 @@ before upgrading and back up your database (see
   plus the first 50 failed paths. The last completed run persists, so it
   survives a restart; the Rescan button polls the endpoint and reports
   queued/running/done/failed instead of a one-shot toast.
+- Link unlinked files from release-group track rows: each unlinked track
+  row offers a file picker so the link happens in context, and linked
+  tracks read as links to their file.
+- Linked-track panel on the file page: linked files show their track
+  context with a link back to the release group.
 - Operational guardrails: single-instance lock (`coda.db.lock` next to the
   database — a second process on the same data dir exits immediately
   instead of scanning, moving, and tagging concurrently); automatic
@@ -220,7 +237,8 @@ before upgrading and back up your database (see
   writes, cover art and artist photos, embedded web UI, background task
   queue and scheduler, release automation.
 
-[Unreleased]: https://github.com/PPabloMunoz/coda/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/PPabloMunoz/coda/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/PPabloMunoz/coda/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/PPabloMunoz/coda/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/PPabloMunoz/coda/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/PPabloMunoz/coda/compare/v0.1.0...v0.1.1
