@@ -36,8 +36,17 @@ type ArtistCoverParams struct {
 // fetched_at is always refreshed to now (millisecond precision, so two
 // rapid updates never share an ETag) and any removal tombstone is cleared;
 // the caller writes the image bytes to config.ArtistCoverPath separately.
+// A recorded miss is cleared in the same transaction.
 func (st *Store) UpsertArtistCover(ctx context.Context, p ArtistCoverParams) error {
-	if _, err := st.db.ExecContext(ctx, `
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("upsert artist cover start tx: %w", err),
+		)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO artist_covers
 			(artist_id, source, source_url, mime, size_bytes, fetched_at, removed)
 		VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 0)
@@ -53,6 +62,20 @@ func (st *Store) UpsertArtistCover(ctx context.Context, p ArtistCoverParams) err
 		return apperrors.Wrap(
 			apperrors.ErrInternal,
 			fmt.Errorf("upsert artist cover: %w", err),
+		)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM artist_cover_misses WHERE artist_id = ?`, p.ArtistID,
+	); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("clear artist cover miss: %w", err),
+		)
+	}
+	if err := tx.Commit(); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("upsert artist cover commit: %w", err),
 		)
 	}
 	return nil
@@ -90,9 +113,18 @@ func (st *Store) GetArtistCover(ctx context.Context, artistID string) (*ArtistCo
 // MarkArtistCoverRemoved records a user-deleted photo without deleting the
 // row, so later GETs stay 404 instead of lazy-fetching provider art again.
 // Idempotent. The placeholder source/mime satisfy the NOT NULL row shape;
-// Removed keeps the row from ever being served.
+// Removed keeps the row from ever being served. Any recorded miss is cleared
+// in the same transaction: the tombstone alone suppresses fetches.
 func (st *Store) MarkArtistCoverRemoved(ctx context.Context, artistID string) error {
-	if _, err := st.db.ExecContext(ctx, `
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("remove artist cover start tx: %w", err),
+		)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO artist_covers
 			(artist_id, source, source_url, mime, size_bytes, fetched_at, removed)
 		VALUES (?, 'upload', NULL, 'image/jpeg', 0, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 1)
@@ -106,19 +138,56 @@ func (st *Store) MarkArtistCoverRemoved(ctx context.Context, artistID string) er
 			fmt.Errorf("remove artist cover: %w", err),
 		)
 	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM artist_cover_misses WHERE artist_id = ?`, artistID,
+	); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("clear artist cover miss: %w", err),
+		)
+	}
+	if err := tx.Commit(); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("remove artist cover commit: %w", err),
+		)
+	}
 	return nil
 }
 
 // DeleteArtistCover removes the cover row for an artist. It is idempotent:
 // deleting an artist with no cached photo is a no-op. File removal happens
-// in the caller.
+// in the caller. Any recorded miss is cleared too so the next GET retries
+// providers.
 func (st *Store) DeleteArtistCover(ctx context.Context, artistID string) error {
-	if _, err := st.db.ExecContext(ctx,
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete artist cover start tx: %w", err),
+		)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM artist_covers WHERE artist_id = ?`, artistID,
 	); err != nil {
 		return apperrors.Wrap(
 			apperrors.ErrInternal,
 			fmt.Errorf("delete artist cover: %w", err),
+		)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM artist_cover_misses WHERE artist_id = ?`, artistID,
+	); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("clear artist cover miss: %w", err),
+		)
+	}
+	if err := tx.Commit(); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete artist cover commit: %w", err),
 		)
 	}
 	return nil

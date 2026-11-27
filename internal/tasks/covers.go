@@ -48,9 +48,101 @@ func WithArtistCoverLock(artistID string, fn func() error) error {
 	return fn()
 }
 
+// coverMissInitialTTL is the retry delay after the first provider miss; each
+// further miss doubles it up to coverMissMaxTTL.
+const (
+	coverMissInitialTTL = 6 * time.Hour
+	coverMissMaxTTL     = 7 * 24 * time.Hour
+)
+
+// coverMissBackoff returns the retry delay for the given 1-based strike count.
+func coverMissBackoff(misses int) time.Duration {
+	if misses < 1 {
+		misses = 1
+	}
+	d := coverMissInitialTTL
+	for i := 1; i < misses; i++ {
+		d *= 2
+		if d >= coverMissMaxTTL {
+			return coverMissMaxTTL
+		}
+	}
+	if d > coverMissMaxTTL {
+		return coverMissMaxTTL
+	}
+	return d
+}
+
+// isReleaseMissActive reports whether a recorded provider miss still
+// suppresses fetches for a release. Expired misses stay stored (their strike
+// count drives the next backoff) but no longer suppress.
+func isReleaseMissActive(ctx context.Context, st *store.Store, releaseID string) (bool, error) {
+	m, err := st.GetReleaseCoverMiss(ctx, releaseID)
+	if err != nil {
+		if apperrors.Is(err, apperrors.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return m.Active(time.Now()), nil
+}
+
+// recordReleaseCoverMiss increments the miss strike count for a release and
+// pushes its retry time out by the backoff. Best-effort: a persistence
+// failure only logs, so a miss that cannot be recorded simply refetches.
+func recordReleaseCoverMiss(ctx context.Context, st *store.Store, art *artwork.Fetcher, releaseID string) {
+	misses := 0
+	if m, err := st.GetReleaseCoverMiss(ctx, releaseID); err == nil {
+		misses = m.Misses
+	} else if !apperrors.Is(err, apperrors.ErrNotFound) {
+		return
+	}
+	misses++
+	now := time.Now()
+	if err := st.UpsertReleaseCoverMiss(ctx, releaseID, misses, now, now.Add(coverMissBackoff(misses))); err != nil {
+		return
+	}
+	if art != nil {
+		art.Debugf("artwork: no art for release %s, miss %d cached", releaseID, misses)
+	}
+}
+
+// isArtistMissActive reports whether a recorded provider miss still
+// suppresses photo fetches for an artist.
+func isArtistMissActive(ctx context.Context, st *store.Store, artistID string) (bool, error) {
+	m, err := st.GetArtistCoverMiss(ctx, artistID)
+	if err != nil {
+		if apperrors.Is(err, apperrors.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return m.Active(time.Now()), nil
+}
+
+// recordArtistCoverMiss increments the miss strike count for an artist.
+// Best-effort: persistence failures only log.
+func recordArtistCoverMiss(ctx context.Context, st *store.Store, art *artwork.Fetcher, artistID string) {
+	misses := 0
+	if m, err := st.GetArtistCoverMiss(ctx, artistID); err == nil {
+		misses = m.Misses
+	} else if !apperrors.Is(err, apperrors.ErrNotFound) {
+		return
+	}
+	misses++
+	now := time.Now()
+	if err := st.UpsertArtistCoverMiss(ctx, artistID, misses, now, now.Add(coverMissBackoff(misses))); err != nil {
+		return
+	}
+	if art != nil {
+		art.Debugf("artwork: no photo for artist %s, miss %d cached", artistID, misses)
+	}
+}
+
 // EnsureCover returns the cached cover row for a release, fetching it first
 // when missing. A user-removed cover (tombstone) answers ErrNotFound without
-// fetching, so a deletion is never undone by a later GET. Concurrent misses
+// fetching, so a deletion is never undone by a later GET; a recorded
+// provider miss does the same until its retry time. Concurrent misses
 // for one release collapse into a single fetch: the first caller fetches,
 // waiters re-check the cache and reuse its row. Artist/album feed the Deezer
 // text fallback only. A nil fetcher disables fetching (tests): the existing
@@ -62,9 +154,20 @@ func EnsureCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 		if row.Removed {
 			return nil, apperrors.ErrNotFound
 		}
+		if art != nil {
+			art.Debugf("artwork: cover cache hit release %s", releaseID)
+		}
 		return row, nil
 	} else if !apperrors.Is(err, apperrors.ErrNotFound) {
 		return nil, err
+	}
+	if active, err := isReleaseMissActive(ctx, st, releaseID); err != nil {
+		return nil, err
+	} else if active {
+		if art != nil {
+			art.Debugf("artwork: cover miss cache hit release %s", releaseID)
+		}
+		return nil, apperrors.ErrNotFound
 	}
 	if art == nil {
 		return nil, apperrors.ErrNotFound
@@ -77,13 +180,25 @@ func EnsureCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 			if cached.Removed {
 				return apperrors.ErrNotFound
 			}
+			if art != nil {
+				art.Debugf("artwork: cover cache hit release %s", releaseID)
+			}
 			row = cached
 			return nil
 		} else if !apperrors.Is(err, apperrors.ErrNotFound) {
 			return err
 		}
+		if active, err := isReleaseMissActive(ctx, st, releaseID); err != nil {
+			return err
+		} else if active {
+			art.Debugf("artwork: cover miss cache hit release %s", releaseID)
+			return apperrors.ErrNotFound
+		}
 		res, err := art.Fetch(ctx, releaseID, artist, album)
 		if err != nil {
+			if apperrors.Is(err, apperrors.ErrNotFound) {
+				recordReleaseCoverMiss(ctx, st, art, releaseID)
+			}
 			return err
 		}
 		if err := SaveCover(ctx, st, coverDir, releaseID, res); err != nil {
@@ -118,6 +233,14 @@ func RefreshCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 	err := WithReleaseCoverLock(releaseID, func() error {
 		res, err := art.Fetch(ctx, releaseID, artist, album)
 		if err != nil {
+			if apperrors.Is(err, apperrors.ErrNotFound) {
+				// Record the miss only when nothing is cached: an
+				// existing upload or tombstone already determines the
+				// next GET, so it must survive the refresh.
+				if _, gerr := st.GetCover(ctx, releaseID); apperrors.Is(gerr, apperrors.ErrNotFound) {
+					recordReleaseCoverMiss(ctx, st, art, releaseID)
+				}
+			}
 			return err
 		}
 		if err := SaveCover(ctx, st, coverDir, releaseID, res); err != nil {
@@ -305,6 +428,12 @@ func (r *Runner) coverJobs(ctx context.Context, artistID string) ([]coverJob, er
 				continue
 			} else if !apperrors.Is(err, apperrors.ErrNotFound) {
 				r.log.Warnf("cover prefetch release %q check: %v", g.Release.ID, err)
+				continue
+			}
+			if active, err := isReleaseMissActive(ctx, r.st, g.Release.ID); err != nil {
+				r.log.Warnf("cover prefetch release %q miss check: %v", g.Release.ID, err)
+				continue
+			} else if active {
 				continue
 			}
 			jobs = append(jobs, coverJob{

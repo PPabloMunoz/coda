@@ -16,10 +16,10 @@ import (
 
 // EnsureArtistCover returns the cached photo row for an artist, fetching it
 // first when missing. A user-removed photo (tombstone) answers ErrNotFound
-// without fetching, so a deletion is never undone by a later GET. A nil
-// fetcher disables fetching: the existing cache still serves, a miss
-// answers ErrNotFound. Display-only: artist photos are never embedded into
-// audio files.
+// without fetching, so a deletion is never undone by a later GET; a recorded
+// provider miss does the same until its retry time. A nil fetcher disables
+// fetching: the existing cache still serves, a miss answers ErrNotFound.
+// Display-only: artist photos are never embedded into audio files.
 func EnsureArtistCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 	coverDir, artistID, artistName string,
 ) (*store.ArtistCoverParams, error) {
@@ -27,9 +27,20 @@ func EnsureArtistCover(ctx context.Context, st *store.Store, art *artwork.Fetche
 		if row.Removed {
 			return nil, apperrors.ErrNotFound
 		}
+		if art != nil {
+			art.Debugf("artwork: artist cover cache hit %s", artistID)
+		}
 		return row, nil
 	} else if !apperrors.Is(err, apperrors.ErrNotFound) {
 		return nil, err
+	}
+	if active, err := isArtistMissActive(ctx, st, artistID); err != nil {
+		return nil, err
+	} else if active {
+		if art != nil {
+			art.Debugf("artwork: artist miss cache hit %s", artistID)
+		}
+		return nil, apperrors.ErrNotFound
 	}
 	if art == nil {
 		return nil, apperrors.ErrNotFound
@@ -42,13 +53,23 @@ func EnsureArtistCover(ctx context.Context, st *store.Store, art *artwork.Fetche
 			if cached.Removed {
 				return apperrors.ErrNotFound
 			}
+			art.Debugf("artwork: artist cover cache hit %s", artistID)
 			row = cached
 			return nil
 		} else if !apperrors.Is(err, apperrors.ErrNotFound) {
 			return err
 		}
+		if active, err := isArtistMissActive(ctx, st, artistID); err != nil {
+			return err
+		} else if active {
+			art.Debugf("artwork: artist miss cache hit %s", artistID)
+			return apperrors.ErrNotFound
+		}
 		res, err := art.FetchArtist(ctx, artistID, artistName)
 		if err != nil {
+			if apperrors.Is(err, apperrors.ErrNotFound) {
+				recordArtistCoverMiss(ctx, st, art, artistID)
+			}
 			return err
 		}
 		if err := SaveArtistCover(ctx, st, coverDir, artistID, res); err != nil {
@@ -85,6 +106,14 @@ func RefreshArtistCover(ctx context.Context, st *store.Store, art *artwork.Fetch
 	err := WithArtistCoverLock(artistID, func() error {
 		res, err := art.FetchArtist(ctx, artistID, artistName)
 		if err != nil {
+			if apperrors.Is(err, apperrors.ErrNotFound) {
+				// Record the miss only when nothing is cached: an
+				// existing upload or tombstone already determines the
+				// next GET, so it must survive the refresh.
+				if _, gerr := st.GetArtistCover(ctx, artistID); apperrors.Is(gerr, apperrors.ErrNotFound) {
+					recordArtistCoverMiss(ctx, st, art, artistID)
+				}
+			}
 			return err
 		}
 		if err := SaveArtistCover(ctx, st, coverDir, artistID, res); err != nil {
@@ -192,6 +221,12 @@ func (r *Runner) prefetchArtistCover(ctx context.Context, artistID, artistName s
 		return
 	} else if !apperrors.Is(err, apperrors.ErrNotFound) {
 		r.log.Warnf("artist cover prefetch artist %q check: %v", artistID, err)
+		return
+	}
+	if active, err := isArtistMissActive(ctx, r.st, artistID); err != nil {
+		r.log.Warnf("artist cover prefetch artist %q miss check: %v", artistID, err)
+		return
+	} else if active {
 		return
 	}
 	if _, err := EnsureArtistCover(ctx, r.st, r.art, r.coverDir, artistID, artistName); err != nil {

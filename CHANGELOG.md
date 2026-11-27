@@ -98,6 +98,16 @@ before upgrading and back up your database (see
 
 ### Added
 
+- Cover-art miss negative cache with backoff: when no provider has art for
+  a release or artist, the miss is recorded (`release_cover_misses` /
+  `artist_cover_misses`) and later cover `GET`s stay `404` without provider
+  calls until the retry time (6h after the first miss, doubling up to 7
+  days). Removal tombstones stay separate and always win, uploads and
+  successful fetches clear the miss, explicit `POST …/cover/refresh`
+  always fetches immediately, and prefetch skips known gaps. Provider work
+  is bounded process-wide (8 concurrent cover fetches, 20s total deadline
+  per fetch) and cache hits, miss hits, and provider fetches log at debug
+  level.
 - Cover and artist-photo uploads (`PUT /releases/:id/cover`,
   `PUT /artists/:id/cover`, plus hover-overlay "Upload cover"/"Upload
   photo" actions on the hero image in the web UI). Release uploads replace

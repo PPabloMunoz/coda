@@ -26,7 +26,7 @@ fully static (`CGO_ENABLED=0`).
 | `internal/errors` | the error vocabulary: `AppError{Code, Message, Cause}` and sentinels |
 | `internal/library` | filesystem walk (symlink-skipping) and canonical library paths |
 | `internal/tags` | tag read/write via go.senan.xyz/taglib; atomic writes; link key set |
-| `internal/artwork` | cover/artist-photo fetcher with provider fallback |
+| `internal/artwork` | cover/artist-photo fetcher with provider fallback, shared concurrency cap and per-fetch deadline |
 | `internal/musicbrainz` | rate-limited WS/2 client (~1 req/1.1s, retries, mandatory User-Agent) |
 | `internal/server` | Gin handlers, `/api/v1` routes, embedded UI serving, error→status mapping |
 | `internal/tasks` | serial FIFO task queue: scans, imports, prunes; scheduler ticks |
@@ -90,9 +90,11 @@ the store closes only after background workers stop.
 ## Data model
 
 `artists / artist_credits / artist_credit_items / release_groups /
-releases / tracks / local_files / roots`, plus cover tables, the
-`ignored` tombstone table, and the background-task intent tables
-(`artist_imports`, `pending_release_tasks`). The split is deliberate: credits are normalized
+releases / tracks / local_files / roots`, plus cover tables, the cover
+miss tables (`release_cover_misses`, `artist_cover_misses`) that suppress
+re-fetching known gaps until their retry time, the `ignored` tombstone
+table, and the background-task intent tables (`artist_imports`,
+`pending_release_tasks`). The split is deliberate: credits are normalized
 (`artist_credits`), recording MBIDs live on `tracks`, and
 `local_files.track_id` is the single link between the filesystem and music
 metadata. One saved release per release-group. `ignored` holds permanently

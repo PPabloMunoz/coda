@@ -164,6 +164,10 @@ in the metadata row.
   release cover also queues a background task that clears the embedded
   front cover from its linked files; the pending clear survives a restart
   too.
+- When no provider has art, the miss is remembered instead of retried on
+  every page load: later cover requests stay `404` without provider calls
+  until the retry time (6h at first, doubling up to 7 days). Refreshing the
+  cover bypasses the wait and fetches immediately.
 - Artist photos are display-only and are never written into audio files.
 - Fetching provider art again ("Refresh cover"/"Refresh photo") fetches
   first and swaps the cache only on success: a failed refresh or a no-art

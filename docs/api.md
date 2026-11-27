@@ -467,9 +467,15 @@ bytes after an upload or refresh. Misses (unknown id, no art, removed art)
 also answer `no-cache` so a deleted cover never sticks in the browser. On
 a cache miss the cover is fetched (release covers from Cover Art Archive,
 then Deezer and iTunes; artist photos from Deezer, then Wikimedia) and
-cached. When no provider yields usable art the answer is `404`; an
-upstream failure returns an error instead of a cached miss, so retries are
-possible.
+cached. When no provider yields usable art the answer is `404` and the
+miss is remembered: later `GET`s stay `404` without calling providers again
+until the retry time (6h after the first miss, doubling to 12h, 24h, … up to
+7 days). An upstream failure returns an error instead of a cached miss, so
+retries are possible. A removal tombstone always wins over a miss, and an
+explicit `POST …/cover/refresh` always fetches immediately, bypassing the
+miss. Provider work is bounded: at most 8 cover fetches run at once
+(prefetch and lazy `GET`s share the budget) and one fetch never runs longer
+than 20s in total.
 
 `POST /releases/:id/cover/refresh` and `POST /artists/:id/cover/refresh`
 fetch provider art again and swap the cache only on success, returning
