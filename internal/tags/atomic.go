@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/ppablomunoz/coda/internal/utils"
 )
 
 // fileLocks serializes mutating tag operations per cleaned path. The
@@ -23,12 +25,25 @@ func lockFor(path string) *sync.Mutex {
 	return m.(*sync.Mutex)
 }
 
+// tagLog reports best-effort ownership preservation failures. Tag writes
+// are package-level functions with no handler to return warnings through,
+// so a failed chown only warns here and the write still commits.
+var tagLog = utils.New()
+
+// preserveOwnership copies the original owner onto the temp file. It is a
+// variable so tests can stub the platform helper to simulate a chown
+// failure without changing file ownership.
+var preserveOwnership = copyOwnership
+
 // mutate applies write to a same-directory temporary copy of path and
 // renames the copy over path, so a crash or error mid-write leaves the
 // original file untouched. The rename is the single atomic commit point;
 // everything before it only touches the temp file. Callers serialize on
 // the per-path lock, making scan-time and handler-time writes mutually
-// exclusive.
+// exclusive. The replacement keeps the original mode and, on Unix, the
+// original uid/gid (best effort: a failed chown warns and the write still
+// commits). xattrs/ACLs are not preserved; the new file inherits the
+// directory defaults.
 func mutate(path string, write func(tmp string) error) error {
 	mu := lockFor(path)
 	mu.Lock()
@@ -67,6 +82,14 @@ func mutate(path string, write func(tmp string) error) error {
 	if err := write(tmp.Name()); err != nil {
 		_ = os.Remove(tmp.Name())
 		return err
+	}
+
+	// Best effort: keep the original owner on the replacement inode so
+	// a library owned by another user (or Coda running as root) does not
+	// silently change hands. A failure only warns; the tag write still
+	// commits with the temp's owner.
+	if err := preserveOwnership(tmp.Name(), info); err != nil {
+		tagLog.Warnf("tags: preserve ownership for %q: %v", path, err)
 	}
 
 	if err := syncFile(tmp.Name()); err != nil {

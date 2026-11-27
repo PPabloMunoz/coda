@@ -119,7 +119,12 @@ so a crash mid-write cannot corrupt a file. The temp copy is hidden
 (`.coda-tag-*` plus the original extension, which taglib needs to detect
 the file type) and is removed on handled errors; a crash leftover is
 skipped by the scan like any other hidden file, and deleted once older
-than 24 hours. Linking runs one shared
+than 24 hours. The replacement keeps the original permission bits and, on
+Unix, the original uid/gid, so files owned by another user (or written
+while Coda runs as root) do not silently change hands. A chown that the
+process is not permitted to make only warns and the tag write still
+commits with the temp's owner. Extended attributes and ACLs are not
+preserved; the new file inherits the directory defaults. Linking runs one shared
 pipeline (manual link, refresh, and scan auto-link): the file moves to its
 canonical path first with no-replace semantics, then tags and cover are
 written and the database link is recorded. Each run holds a per-file

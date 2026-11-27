@@ -23,6 +23,12 @@ before upgrading and back up your database (see
 
 ### Fixed
 
+- Tag rewrites keep the original file owner: the atomic temp-copy write
+  now copies the source uid/gid onto the replacement (Unix; Windows keeps
+  the process owner) alongside the permission bits, so linking, unlinking,
+  and cover updates no longer silently hand files to the Coda user when it
+  runs as root or as a different user than the library owner. A chown the
+  process is not permitted to make only warns and the write still commits.
 - Library moves are non-overwriting and serialized: manual link, refresh,
   and scan auto-link share one pipeline that moves with no-replace
   semantics (hard link plus an `O_EXCL` copy fallback for filesystems
