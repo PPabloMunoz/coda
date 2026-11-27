@@ -74,6 +74,7 @@ func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tas
 	v1.GET("/health", handler.health)
 	v1.GET("/stats", handler.libraryStats)
 	v1.POST("/scan", handler.postScan)
+	v1.GET("/scan/status", handler.getScanStatus)
 
 	// Local Files
 	v1.GET("/files", handler.getLocalFiles)

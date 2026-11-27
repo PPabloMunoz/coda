@@ -129,6 +129,7 @@ func (r *Runner) scanRoots(ctx context.Context, forcePrune bool) {
 
 	start := time.Now()
 	scanStart := time.Now().UTC().Format("2006-01-02 15:04:05")
+	r.queue.markScanRunning()
 
 	roots := r.st.RootPaths()
 	files := []store.ScannedFile{}
@@ -146,6 +147,11 @@ func (r *Runner) scanRoots(ctx context.Context, forcePrune bool) {
 			return nil
 		})
 		if err != nil {
+			if ctx.Err() != nil || r.shuttingDown() {
+				r.log.Warnf("scan interrupted by shutdown, will resume on restart: %v", err)
+				return
+			}
+			r.queue.markScanFailed(err, time.Since(start))
 			r.log.Errorf("scan failed in %s: %v", time.Since(start), err)
 			return
 		}
@@ -162,12 +168,28 @@ func (r *Runner) scanRoots(ctx context.Context, forcePrune bool) {
 		ForcePrune:      forcePrune,
 	})
 	if err != nil {
+		if ctx.Err() != nil || r.shuttingDown() {
+			r.log.Warnf("scan interrupted by shutdown, will resume on restart: %v", err)
+			return
+		}
+		r.queue.markScanFailed(err, time.Since(start))
 		r.log.Errorf("scan failed in %s: %v", time.Since(start), err)
 		return
 	}
 	auto := r.autoLinkMoves(ctx)
 	r.cleanupCredits(ctx)
 	r.pruneArtists(ctx)
+	r.queue.markScanDone(ScanResult{
+		Found:           stats.Found,
+		Upserted:        stats.Upserted,
+		Pruned:          stats.Pruned,
+		AutoLinked:      auto.Linked,
+		Moved:           auto.Moved,
+		SkippedConflict: auto.SkippedConflict,
+		Failed:          stats.Failed,
+		KeptRoots:       stats.KeptRoots,
+		IncompleteRoots: incomplete,
+	}, time.Since(start))
 	r.log.Infof("scan done: found=%d upserted=%d pruned=%d failed=%d kept_roots=%d autolinked=%d moved=%d skipped=%d in %s",
 		stats.Found, stats.Upserted, stats.Pruned, len(stats.Failed), len(stats.KeptRoots), auto.Linked, auto.Moved, auto.SkippedConflict, time.Since(start))
 }

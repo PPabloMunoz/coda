@@ -331,6 +331,7 @@ export const api = {
       `/api/v1/files/${fileID}/suggestions?limit=${limit}${artistID ? `&artist=${encodeURIComponent(artistID)}` : ''}`,
     ),
   scan: () => fetch('/api/v1/scan', { method: 'POST' }),
+  scanStatus: () => request('/api/v1/scan/status'),
   unlink: (fileID) =>
     fetch(`/api/v1/files/${fileID}/link`, { method: 'DELETE' }),
   refreshFile: (fileID) =>

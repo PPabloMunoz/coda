@@ -120,6 +120,41 @@ func TestPostScan(t *testing.T) {
 	}
 }
 
+func TestGetScanStatus(t *testing.T) {
+	env := newTestEnv(t)
+	w := doRequest(t, env.router, "GET", "/api/v1/scan/status", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var idle struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &idle); err != nil {
+		t.Fatalf("decode idle = %v", err)
+	}
+	if idle.State != "idle" {
+		t.Errorf("state = %q, want idle", idle.State)
+	}
+
+	w = doRequest(t, env.router, "POST", "/api/v1/scan", nil)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("scan = %d, want 202", w.Code)
+	}
+	w = doRequest(t, env.router, "GET", "/api/v1/scan/status", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status after enqueue = %d, want 200", w.Code)
+	}
+	var queued struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &queued); err != nil {
+		t.Fatalf("decode queued = %v", err)
+	}
+	if queued.State != "queued" {
+		t.Errorf("state = %q, want queued", queued.State)
+	}
+}
+
 func TestParseLimitAndOffset(t *testing.T) {
 	env := newTestEnv(t)
 	w := doRequest(t, env.router, "GET", "/api/v1/artists?limit=0", nil)

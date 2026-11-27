@@ -43,11 +43,36 @@ function initLayout() {
       /* counts are optional */
     });
 
-  rescan?.addEventListener('click', async () => {
-    const button = rescan;
-    setBusy(button, true, 'Scanning…');
-    try {
-      const response = await api.scan();
+  rescan?.addEventListener('click', () => void startRescan(rescan));
+
+  // If a scan is already queued/running (another tab, the scheduler, or
+  // the startup scan), reflect it instead of looking idle.
+  api
+    .scanStatus()
+    .then((status) => {
+      if (
+        status &&
+        (status.state === 'queued' || status.state === 'running') &&
+        rescan
+      ) {
+        watchScan(rescan);
+      }
+    })
+    .catch(() => {
+      /* status is optional */
+    });
+
+  initTopbarSearch();
+}
+
+// startRescan enqueues a scan, then polls /scan/status until it reaches a
+// terminal state. The button stays busy while queued/running so duplicate
+// triggers are disabled; the backend still dedups queued scans.
+function startRescan(button) {
+  setBusy(button, true, 'Scan queued…');
+  api
+    .scan()
+    .then(async (response) => {
       if (!response.ok) {
         let message = response.statusText;
         try {
@@ -56,19 +81,84 @@ function initLayout() {
           /* keep status text */
         }
         toast(`Could not queue scan: ${message}`, 'error');
+        setBusy(button, false);
         return;
       }
-      toast('Scan queued. New files will appear shortly.', 'ok');
-    } catch (error) {
+      watchScan(button);
+    })
+    .catch((error) => {
       const message =
         error instanceof Error ? error.message : String(error);
       toast(`Could not queue scan: ${message}`, 'error');
-    } finally {
+      setBusy(button, false);
+    });
+}
+
+// watchScan polls the scan status and reports the terminal outcome. It
+// stops on done/failed, on repeated status failures, or after ~3 minutes.
+function watchScan(button) {
+  let polls = 0;
+  let failures = 0;
+  const timer = window.setInterval(async () => {
+    polls += 1;
+    let status = null;
+    try {
+      status = await api.scanStatus();
+      failures = 0;
+    } catch {
+      failures += 1;
+      if (failures >= 3 || polls >= 120) {
+        window.clearInterval(timer);
+        setBusy(button, false);
+        toast('Scan status unavailable. Check the logs.', 'error');
+      }
+      return;
+    }
+    if (!status) {
+      if (polls >= 120) {
+        window.clearInterval(timer);
+        setBusy(button, false);
+      }
+      return;
+    }
+    if (status.state === 'queued') {
+      setBusy(button, true, 'Scan queued…');
+    } else if (status.state === 'running') {
+      setBusy(button, true, 'Scanning…');
+    } else if (status.state === 'done' || status.state === 'failed') {
+      window.clearInterval(timer);
+      setBusy(button, false);
+      if (status.state === 'done') {
+        const found = status.found ?? 0;
+        const linked = status.autolinked ?? 0;
+        const pruned = status.pruned ?? 0;
+        toast(
+          `Scan finished: ${found} found, ${linked} linked, ${pruned} removed.`,
+          'ok',
+        );
+      } else {
+        toast(`Scan failed: ${status.error || 'unknown error'}`, 'error');
+      }
+      api
+        .getStats()
+        .then((stats) => {
+          if (!stats) return;
+          setStat('artists', stats.artists);
+          setStat('release_groups', stats.release_groups);
+          setStat('ignored', stats.ignored ?? 0);
+          setStat('unlinked_files', stats.files.unlinked);
+          setStat('total_files', stats.files.total);
+        })
+        .catch(() => {
+          /* counts are optional */
+        });
+      return;
+    }
+    if (polls >= 120) {
+      window.clearInterval(timer);
       setBusy(button, false);
     }
-  });
-
-  initTopbarSearch();
+  }, 1500);
 }
 
 function initTopbarSearch() {

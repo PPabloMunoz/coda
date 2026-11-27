@@ -77,6 +77,10 @@ off by default; enable with `CODA_DEBUG=1` (or `CODA_LOG_LEVEL=debug`).
 - `coda --check-config` prints the resolved listen address, port, roots, DB and covers
   paths and exits without starting — the first thing to run when config
   seems off.
+- `GET /api/v1/scan/status` reports the scan lifecycle
+  (`idle`/`queued`/`running`/`done`/`failed`) with timestamps, duration,
+  sync/auto-link counters, and the last failure plus the first 50 failed
+  paths. The last `done`/`failed` run survives a restart.
 
 ## Troubleshooting
 
@@ -116,10 +120,15 @@ and restart; verify with `coda --check-config`. Behind a reverse proxy,
 list the public hostname. Direct-IP access never needs listing.
 
 **UI seems stale.** A failed scan keeps serving the last good data. Check
-the logs, fix the cause, and trigger a rescan (`POST /api/v1/scan`).
+`GET /api/v1/scan/status` first: it reports `queued`/`running` while work
+is in flight and `done`/`failed` with counters, duration, and (on
+failure) the error once finished. Then check the logs, fix the cause, and
+trigger a rescan (`POST /api/v1/scan`).
 
 **Restart during an import or cover update.** Queued and running imports
 resume after the restart instead of resetting to idle, and pending
 cover-embed, cover-clear, and release-relink jobs are re-enqueued; `done`
-and `failed` import states stay visible. Scans and periodic prunes are not
-resumed — the startup scan and the scheduler re-enqueue them.
+and `failed` import states stay visible. The last completed scan (`done`
+or `failed`) also stays visible via `GET /api/v1/scan/status`; an
+interrupted scan itself is not resumed — the startup scan and the
+scheduler re-enqueue it, as do periodic prunes.
