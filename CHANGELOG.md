@@ -124,6 +124,12 @@ before upgrading and back up your database (see
   configuration, library, navidrome, api, operations, architecture), a
   CONTRIBUTING guide, a security policy, a code of conduct, and this
   changelog.
+- Scan status and last-run diagnostics (`GET /api/v1/scan/status`):
+  the scan lifecycle (`idle`/`queued`/`running`/`done`/`failed`) with
+  timestamps, duration, sync/auto-link counters, and the last failure
+  plus the first 50 failed paths. The last completed run persists, so it
+  survives a restart; the Rescan button polls the endpoint and reports
+  queued/running/done/failed instead of a one-shot toast.
 
 ## [0.2.0] - 2026-11-26
 

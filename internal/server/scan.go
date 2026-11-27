@@ -34,3 +34,10 @@ func (h *Handler) postScan(c *gin.Context) {
 	h.queue.EnqueueScan(force)
 	c.JSON(http.StatusAccepted, nil)
 }
+
+// getScanStatus returns the queued/running/done/failed scan lifecycle plus
+// the last completed run's counters. Terminal states persist, so the last
+// run survives a restart; queued/running are memory-only.
+func (h *Handler) getScanStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, h.queue.ScanStatus())
+}

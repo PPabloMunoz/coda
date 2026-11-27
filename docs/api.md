@@ -86,10 +86,11 @@ integers; other values are `INVALID_ID` (400).
 
 ## Health & scan
 
-| Method | Path     | Purpose                        |
-|--------|----------|--------------------------------|
-| GET    | `/health`| Liveness                       |
-| POST   | `/scan`  | Enqueue a library rescan       |
+| Method | Path           | Purpose                        |
+|--------|----------------|--------------------------------|
+| GET    | `/health`      | Liveness                       |
+| POST   | `/scan`        | Enqueue a library rescan       |
+| GET    | `/scan/status` | Scan lifecycle and last run    |
 
 `GET /health` returns `200` with the plain text `ok` (not JSON).
 
@@ -100,6 +101,40 @@ already running. `?force_prune=true` allows pruning a root whose complete
 walk yields zero files; without it the empty root keeps its rows, and
 incomplete walks never prune even with force. An invalid `force_prune`
 value is `400 INVALID_INPUT`.
+
+`GET /scan/status` returns `200` with the scan lifecycle:
+
+```json
+{
+  "state": "done",
+  "queued_at": "2026-11-27T12:00:00Z",
+  "started_at": "2026-11-27T12:00:01Z",
+  "finished_at": "2026-11-27T12:00:05Z",
+  "duration_ms": 4000,
+  "found": 120,
+  "upserted": 118,
+  "pruned": 2,
+  "autolinked": 30,
+  "moved": 12,
+  "skipped_conflict": 0,
+  "failed_count": 1,
+  "failed_files": ["/music/broken.mp3"],
+  "kept_roots": [],
+  "incomplete_roots": []
+}
+```
+
+`state` is `idle` (no scan queued yet), `queued`, `running`, `done`, or
+`failed` (with an `error` message). Timestamps describe the current
+lifecycle; counters come from the last completed run's sync pass
+(`found`, `upserted`, `pruned`) and auto-link pass (`autolinked`,
+`moved`, `skipped_conflict`) and stay visible while a new run is
+queued/running until it finishes. `failed_files` keeps the first 50
+failed paths while `failed_count` is the full count. `kept_roots` lists
+roots whose prune was skipped by a fail-safe guard, `incomplete_roots`
+lists roots whose walk did not complete. Only `done`/`failed` runs
+persist, so the last completed run survives a restart; `queued`/`running`
+are memory-only.
 
 ```sh
 curl -X POST http://localhost:8687/api/v1/scan

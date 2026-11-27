@@ -14,8 +14,12 @@ type Queue struct {
 	items         []Task
 	notify        chan struct{}
 	artistImports map[string]*ArtistImportStatus
-	st            *store.Store // nil disables persistence (tests)
-	log           *utils.Logger
+	// scan is the observable library-scan lifecycle. Queued/running live
+	// here only; terminal states (done/failed) also persist via scan_runs
+	// so the last run survives a restart.
+	scan *ScanStatus
+	st   *store.Store // nil disables persistence (tests)
+	log  *utils.Logger
 }
 
 // NewQueue returns an empty serial FIFO queue with artist-import tracking.
@@ -107,8 +111,11 @@ func (q *Queue) afterExec(ctx context.Context, t Task) {
 // EnqueueScan queues a library scan unless one is already pending. A pending
 // scan is upgraded to a force prune when force is requested.
 // ForcePrune allows pruning roots whose complete walk yields zero files;
-// incomplete walks never prune. Scans are periodic (plus one at startup),
-// so they are not persisted: a restart simply scans again.
+// incomplete walks never prune. The scan status moves to queued unless a
+// scan is already running (the running run stays visible until it finishes;
+// the newly queued run marks itself queued when it starts). Scans are
+// periodic (plus one at startup), so queued work is not persisted: a restart
+// simply scans again, while the last completed run hydrates via Recover.
 func (q *Queue) EnqueueScan(force bool) {
 	q.mu.Lock()
 	for i, t := range q.items {
@@ -123,6 +130,21 @@ func (q *Queue) EnqueueScan(force bool) {
 	}
 	q.items = append(q.items, Task{Key: TaskScanRoots, ForcePrune: force})
 	depth := len(q.items)
+	if q.scan == nil || q.scan.State != ScanRunning {
+		// Fresh lifecycle timestamps, but keep the last completed run's
+		// counters until the new run finishes (zero when no run has
+		// completed yet).
+		now := time.Now().UTC()
+		if q.scan == nil {
+			q.scan = &ScanStatus{}
+		}
+		q.scan.State = ScanQueued
+		q.scan.QueuedAt = &now
+		q.scan.StartedAt = nil
+		q.scan.FinishedAt = nil
+		q.scan.DurationMs = 0
+		q.scan.Error = ""
+	}
 	q.mu.Unlock()
 	q.debugf("task scan-roots queued (depth=%d force=%v)", depth, force)
 	q.signal()
@@ -286,12 +308,22 @@ func (q *Queue) HasTask(key TaskKey, id string) bool {
 // Recover re-enqueues durable intent after a restart: interrupted imports
 // (queued/running) go back on the queue as queued, pending release file
 // jobs return in FIFO order, and terminal import states (done/failed) are
-// hydrated so the status is not silently reset to idle. File jobs are
+// hydrated so the status is not silently reset to idle. The last completed
+// scan run hydrates too (queued/running states are never persisted, so an
+// interrupted scan simply resumes via the startup scan). File jobs are
 // enqueued before imports: they finish in seconds while an import can hold
 // the serial queue for up to 30 minutes.
 func (q *Queue) Recover(ctx context.Context) error {
 	if q.st == nil {
 		return nil
+	}
+
+	if run, err := q.st.GetScanRun(ctx); err == nil {
+		q.mu.Lock()
+		q.scan = scanStatusFromRow(run)
+		q.mu.Unlock()
+	} else {
+		q.debugf("recover: no completed scan run yet (%v)", err)
 	}
 
 	pending, err := q.st.ListPendingReleaseTasks(ctx)
@@ -381,6 +413,161 @@ func (q *Queue) ArtistImportStatus(id string) ArtistImportStatus {
 		return *status
 	}
 	return ArtistImportStatus{ArtistID: id, State: ArtistImportIdle}
+}
+
+// ScanStatus returns the current scan lifecycle, or idle when no scan has
+// ever been queued.
+func (q *Queue) ScanStatus() ScanStatus {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.scan != nil {
+		return *q.scan
+	}
+	return ScanStatus{State: ScanIdle}
+}
+
+// markScanRunning moves the scan to running with a start timestamp. A scan
+// re-queued behind a running one keeps showing running until the current
+// run finishes; the next run re-marks itself when it starts.
+func (q *Queue) markScanRunning() {
+	q.mu.Lock()
+	now := time.Now().UTC()
+	if q.scan == nil {
+		q.scan = &ScanStatus{}
+	}
+	q.scan.State = ScanRunning
+	q.scan.StartedAt = &now
+	q.scan.FinishedAt = nil
+	q.scan.DurationMs = 0
+	q.scan.Error = ""
+	q.mu.Unlock()
+}
+
+// ScanResult carries the counters a finished scan reports.
+type ScanResult struct {
+	Found           int
+	Upserted        int
+	Pruned          int64
+	AutoLinked      int
+	Moved           int
+	SkippedConflict int
+	Failed          []string
+	KeptRoots       []string
+	IncompleteRoots []string
+}
+
+// markScanDone records a completed scan with its counters and persists the
+// run so it survives a restart.
+func (q *Queue) markScanDone(res ScanResult, duration time.Duration) {
+	q.mu.Lock()
+	now := time.Now().UTC()
+	if q.scan == nil {
+		q.scan = &ScanStatus{}
+	}
+	failed := append([]string(nil), res.Failed...)
+	if len(failed) > MaxScanFailedFiles {
+		failed = failed[:MaxScanFailedFiles]
+	}
+	q.scan.State = ScanDone
+	q.scan.FinishedAt = &now
+	q.scan.DurationMs = duration.Milliseconds()
+	q.scan.Found = res.Found
+	q.scan.Upserted = res.Upserted
+	q.scan.Pruned = res.Pruned
+	q.scan.AutoLinked = res.AutoLinked
+	q.scan.Moved = res.Moved
+	q.scan.SkippedConflict = res.SkippedConflict
+	q.scan.FailedCount = len(res.Failed)
+	q.scan.FailedFiles = failed
+	q.scan.KeptRoots = append([]string(nil), res.KeptRoots...)
+	q.scan.IncompleteRoots = append([]string(nil), res.IncompleteRoots...)
+	q.scan.Error = ""
+	cp := *q.scan
+	q.mu.Unlock()
+	q.persistScan(cp)
+}
+
+// markScanFailed records a failed scan with the error message and persists
+// the run so the failure survives a restart. Counters reset: a failed run
+// produced no reliable counts.
+func (q *Queue) markScanFailed(err error, duration time.Duration) {
+	if err == nil {
+		return
+	}
+	q.mu.Lock()
+	now := time.Now().UTC()
+	if q.scan == nil {
+		q.scan = &ScanStatus{}
+	}
+	q.scan.State = ScanFailed
+	q.scan.FinishedAt = &now
+	q.scan.DurationMs = duration.Milliseconds()
+	q.scan.Found = 0
+	q.scan.Upserted = 0
+	q.scan.Pruned = 0
+	q.scan.AutoLinked = 0
+	q.scan.Moved = 0
+	q.scan.SkippedConflict = 0
+	q.scan.FailedCount = 0
+	q.scan.FailedFiles = nil
+	q.scan.KeptRoots = nil
+	q.scan.IncompleteRoots = nil
+	q.scan.Error = err.Error()
+	cp := *q.scan
+	q.mu.Unlock()
+	q.persistScan(cp)
+}
+
+// persistScan mirrors a completed scan to the store. Best-effort: a
+// persistence failure only logs; the in-memory status keeps working and
+// the next completed scan retries.
+func (q *Queue) persistScan(status ScanStatus) {
+	if q.st == nil {
+		return
+	}
+	if err := q.st.UpsertScanRun(context.Background(), store.ScanRun{
+		State:           string(status.State),
+		QueuedAt:        status.QueuedAt,
+		StartedAt:       status.StartedAt,
+		FinishedAt:      status.FinishedAt,
+		DurationMs:      status.DurationMs,
+		Found:           status.Found,
+		Upserted:        status.Upserted,
+		Pruned:          status.Pruned,
+		AutoLinked:      status.AutoLinked,
+		Moved:           status.Moved,
+		SkippedConflict: status.SkippedConflict,
+		FailedCount:     status.FailedCount,
+		FailedFiles:     status.FailedFiles,
+		KeptRoots:       status.KeptRoots,
+		IncompleteRoots: status.IncompleteRoots,
+		Error:           status.Error,
+	}); err != nil {
+		q.debugf("scan persist %s: %v", status.State, err)
+	}
+}
+
+// scanStatusFromRow converts a stored scan run to its queue status.
+func scanStatusFromRow(run *store.ScanRun) *ScanStatus {
+	return &ScanStatus{
+		State:           ScanState(run.State),
+		QueuedAt:        run.QueuedAt,
+		StartedAt:       run.StartedAt,
+		FinishedAt:      run.FinishedAt,
+		DurationMs:      run.DurationMs,
+		Found:           run.Found,
+		Upserted:        run.Upserted,
+		Pruned:          run.Pruned,
+		AutoLinked:      run.AutoLinked,
+		Moved:           run.Moved,
+		SkippedConflict: run.SkippedConflict,
+		FailedCount:     run.FailedCount,
+		FailedFiles:     append([]string(nil), run.FailedFiles...),
+		KeptRoots:       append([]string(nil), run.KeptRoots...),
+		IncompleteRoots: append([]string(nil), run.IncompleteRoots...),
+		Error:           run.Error,
+	}
 }
 
 // markArtistImportRunning marks an import as running with a start timestamp.
