@@ -49,6 +49,10 @@ before upgrading and back up your database (see
   upload/delete/refresh serialize per release or artist so concurrent
   operations can't overwrite each other. Artist-photo refreshes follow the
   same fetch-before-swap rule.
+- Link actions return the real error code instead of masking missing
+  entities as 500: link, unlink, refresh, and suggestions on a missing
+  file, an unknown track, or a file under a removed root answer `404
+  NOT_FOUND`, while an occupied destination still answers `409`.
 
 ### Changed
 
