@@ -479,6 +479,19 @@ func (st *Store) ReplaceRelease(ctx context.Context, groupID string, p FullRelea
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	var groupIgnored bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM ignored WHERE id = ? AND type = 'release_group')`, groupID,
+	).Scan(&groupIgnored); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("check ignored group: %w", err),
+		)
+	}
+	if groupIgnored {
+		return apperrors.ErrNotFound
+	}
+
 	type oldLink struct {
 		fileID int64
 		rec    string
@@ -565,6 +578,10 @@ func (st *Store) ReplaceRelease(ctx context.Context, groupID string, p FullRelea
 	}
 
 	if err := st.SaveFullRelease(ctx, tx, p); err != nil {
+		return err
+	}
+
+	if err := suppressIgnoredCollaboratorsTx(ctx, tx); err != nil {
 		return err
 	}
 

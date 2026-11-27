@@ -173,7 +173,7 @@ func TestDeleteArtist(t *testing.T) {
 		t.Fatalf("SaveDiscography = %v", err)
 	}
 
-	pruned, err := st.DeleteArtist(ctx(), testArtistID)
+	pruned, err := st.DeleteArtist(ctx(), testArtistID, false)
 	if err != nil {
 		t.Fatalf("DeleteArtist = %v", err)
 	}
@@ -186,10 +186,10 @@ func TestDeleteArtist(t *testing.T) {
 		t.Errorf("release should cascade-delete: %v", err)
 	}
 
-	if _, err := st.DeleteArtist(ctx(), testArtistID); !apperrors.Is(err, apperrors.ErrNotFound) {
+	if _, err := st.DeleteArtist(ctx(), testArtistID, false); !apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Errorf("second delete = %v, want NOT_FOUND", err)
 	}
-	if _, err := st.DeleteArtist(ctx(), "00000000-0000-4000-8000-000000000000"); !apperrors.Is(err, apperrors.ErrNotFound) {
+	if _, err := st.DeleteArtist(ctx(), "00000000-0000-4000-8000-000000000000", false); !apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Errorf("missing delete = %v, want NOT_FOUND", err)
 	}
 }
@@ -215,7 +215,58 @@ func TestPruneOrphanCollaborators(t *testing.T) {
 	}
 
 	// Delete the library artist cascades the release; guest becomes trackless.
-	if _, err := st.DeleteArtist(ctx(), testArtistID); err != nil {
+	if _, err := st.DeleteArtist(ctx(), testArtistID, false); err != nil {
 		t.Fatalf("DeleteArtist = %v", err)
+	}
+}
+
+func TestDeleteArtistKeepsSharedGroups(t *testing.T) {
+	for _, permanent := range []bool{false, true} {
+		st := newTestStore(t)
+		_ = st.CreateArtist(ctx(), Artist{ID: testArtistID, Name: "Main"})
+		_ = st.CreateArtist(ctx(), Artist{ID: testArtistB, Name: "Other"})
+		shared := testRelease(testTrackID, testRelID, testGroupID)
+		shared.Group.Credit = []CreditEntry{
+			{ArtistID: testArtistID, Name: "Main", CreditedName: "Main"},
+			{ArtistID: testArtistB, Name: "Other", CreditedName: "Other", JoinPhrase: " & "},
+		}
+		shared.Credit = shared.Group.Credit
+		shared.Tracks[0].Credit = shared.Group.Credit
+		solo := testRelease(testTrackID2, testRelID2, testGroupEP)
+		solo.Group.Title = "Solo Group"
+		solo.Title = "Solo Release"
+		if err := st.SaveDiscography(ctx(), []FullReleaseParams{shared, solo}); err != nil {
+			t.Fatalf("permanent=%v SaveDiscography = %v", permanent, err)
+		}
+
+		if _, err := st.DeleteArtist(ctx(), testArtistID, permanent); err != nil {
+			t.Fatalf("permanent=%v DeleteArtist = %v", permanent, err)
+		}
+
+		if got, err := st.GetReleaseGroup(ctx(), testGroupID); err != nil {
+			t.Errorf("permanent=%v shared group gone: %v", permanent, err)
+		} else if len(got.Credit) != 2 {
+			t.Errorf("permanent=%v shared credit = %+v, want both artists", permanent, got.Credit)
+		}
+		groups, _, err := st.ListReleaseGroups(ctx(), ReleaseGroupListOptions{
+			PageOptions: PageOptions{Limit: 20},
+			ArtistID:    testArtistB,
+		})
+		if err != nil {
+			t.Fatalf("permanent=%v ListReleaseGroups = %v", permanent, err)
+		}
+		found := false
+		for _, g := range groups {
+			if g.ID == testGroupID {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("permanent=%v shared group missing from other artist groups=%+v", permanent, groups)
+		}
+
+		if _, err := st.GetReleaseGroup(ctx(), testGroupEP); err == nil {
+			t.Errorf("permanent=%v solo group should be deleted", permanent)
+		}
 	}
 }

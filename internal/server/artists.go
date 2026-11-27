@@ -184,6 +184,8 @@ func (h *Handler) postArtist(c *gin.Context) {
 }
 
 // deleteArtist removes an artist's primary/guest-only groups and returns pruned collaborators.
+// ?permanent=true also tombstones the artist so imports and re-adds cannot
+// resurrect it until the tombstone is removed from /ignored.
 func (h *Handler) deleteArtist(c *gin.Context) {
 	ctx := c.Request.Context()
 	artistID, err := requireMBID(c.Param("id"))
@@ -192,7 +194,16 @@ func (h *Handler) deleteArtist(c *gin.Context) {
 		return
 	}
 
-	pruned, err := h.st.DeleteArtist(ctx, artistID)
+	permanent, err := parseOptionalBool(c.Query("permanent"))
+	if err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("invalid 'permanent' parameter: must be a boolean"),
+		))
+		return
+	}
+
+	pruned, err := h.st.DeleteArtist(ctx, artistID, permanent != nil && *permanent)
 	if err != nil {
 		h.writeAppError(c, err)
 		return

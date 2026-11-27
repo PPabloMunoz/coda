@@ -240,10 +240,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
     }),
-  deleteArtist: (id) =>
-    fetch(`/api/v1/artists/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    }),
+  deleteArtist: (id, permanent = false) =>
+    fetch(
+      `/api/v1/artists/${encodeURIComponent(id)}${permanent ? '?permanent=true' : ''}`,
+      {
+        method: 'DELETE',
+      },
+    ),
 
   listReleaseGroups: listReleaseGroupsPage,
   listAllReleaseGroups: (options = {}) =>
@@ -252,10 +255,13 @@ export const api = {
     ),
   getReleaseGroup: (id) =>
     request(`/api/v1/release-groups/${encodeURIComponent(id)}`),
-  deleteReleaseGroup: (id) =>
-    fetch(`/api/v1/release-groups/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    }),
+  deleteReleaseGroup: (id, permanent = false) =>
+    fetch(
+      `/api/v1/release-groups/${encodeURIComponent(id)}${permanent ? '?permanent=true' : ''}`,
+      {
+        method: 'DELETE',
+      },
+    ),
   updateReleaseGroup: (groupId, newReleaseId) =>
     fetch(`/api/v1/release-groups/${encodeURIComponent(groupId)}/update`, {
       method: 'PUT',
@@ -329,4 +335,31 @@ export const api = {
     fetch(`/api/v1/files/${fileID}/link`, { method: 'DELETE' }),
   refreshFile: (fileID) =>
     fetch(`/api/v1/files/${fileID}/refresh`, { method: 'POST' }),
+
+  listIgnored: (limit, offset, options = {}) => {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
+    if (options.query) params.set('q', options.query);
+    if (options.type) params.set('type', options.type);
+    if (options.sort) params.set('sort', options.sort);
+    if (options.order) params.set('order', options.order);
+    return request(`/api/v1/ignored?${params.toString()}`);
+  },
+  listAllIgnored: (options = {}) =>
+    collectAll((limit, offset) =>
+      request(
+        `/api/v1/ignored?${new URLSearchParams({
+          limit: String(limit),
+          offset: String(offset),
+          ...(options.query ? { q: options.query } : {}),
+          ...(options.type ? { type: options.type } : {}),
+        }).toString()}`,
+      ),
+    ),
+  removeIgnored: (id) =>
+    fetch(`/api/v1/ignored/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
 };

@@ -80,10 +80,12 @@ state keeps serving.
 ## Data model
 
 `artists / artist_credits / artist_credit_items / release_groups /
-releases / tracks / local_files / roots`, plus cover tables. The split is
-deliberate: credits are normalized (`artist_credits`), recording MBIDs
-live on `tracks`, and `local_files.track_id` is the single link between
-the filesystem and music metadata. One saved release per release-group.
+releases / tracks / local_files / roots`, plus cover tables and the
+`ignored` tombstone table. The split is deliberate: credits are normalized
+(`artist_credits`), recording MBIDs live on `tracks`, and
+`local_files.track_id` is the single link between the filesystem and music
+metadata. One saved release per release-group. `ignored` holds permanently
+deleted artist and release-group MBIDs so imports skip them until removed.
 
 ## Conventions worth knowing
 

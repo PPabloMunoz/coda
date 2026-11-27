@@ -46,6 +46,14 @@ type FileListOptions struct {
 	Format       string
 }
 
+type IgnoredListOptions struct {
+	SearchOptions
+	SortOptions
+	PageOptions
+	// Type filters to "artist" or "release_group"; empty means all.
+	Type string
+}
+
 // likePattern escapes LIKE wildcards and wraps value for unaccent substring match.
 func likePattern(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)

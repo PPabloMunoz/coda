@@ -1927,6 +1927,26 @@ dialog[open] {
 	color: var(--ok);
 }
 
+.delete-dialog__permanent {
+	display: flex;
+	gap: 0.6rem;
+	align-items: flex-start;
+	padding: 0.7rem 0.8rem;
+	border: 1px solid var(--line-soft);
+	border-radius: 10px;
+	background: var(--panel-2);
+	color: var(--muted);
+	font-size: 0.82rem;
+	line-height: 1.4;
+	cursor: pointer;
+}
+
+.delete-dialog__permanent input {
+	margin-top: 0.2rem;
+	accent-color: var(--danger);
+	flex: none;
+}
+
 .wizard {
 	width: min(780px, calc(100vw - 1.5rem));
 }

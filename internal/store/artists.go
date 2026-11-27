@@ -132,8 +132,31 @@ func (st *Store) GetArtistByID(ctx context.Context, id string) (*Artist, error) 
 }
 
 // CreateArtist inserts an artist or reactivates it as active/in_library on conflict.
+// A permanent-deletion tombstone blocks the insert with ErrForbidden.
 func (st *Store) CreateArtist(ctx context.Context, art Artist) error {
-	stmt, err := st.db.PrepareContext(ctx, `
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("start tx: %w", err),
+		)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var ignored bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM ignored WHERE id = ? AND type = 'artist')`, art.ID,
+	).Scan(&ignored); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("check ignored: %w", err),
+		)
+	}
+	if ignored {
+		return apperrors.ErrForbidden
+	}
+
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO artists (id, name, sort_name, disambiguation, active, in_library)
 		VALUES (?, ?, ?, ?, 1, 1)
 		ON CONFLICT(id) DO UPDATE SET
@@ -141,29 +164,32 @@ func (st *Store) CreateArtist(ctx context.Context, art Artist) error {
 			sort_name=excluded.sort_name,
 			disambiguation=excluded.disambiguation,
 			active=1,
-			in_library=1`)
-	if err != nil {
-		return apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("prepare query: %w", err),
-		)
-	}
-	defer func() { _ = stmt.Close() }()
-
-	_, err = stmt.ExecContext(ctx, art.ID, art.Name, art.SortName, art.Disambiguation)
-	if err != nil {
+			in_library=1`,
+		art.ID, art.Name, art.SortName, art.Disambiguation,
+	); err != nil {
 		return apperrors.Wrap(
 			apperrors.ErrInternal,
 			fmt.Errorf("insert artist: %w", err),
 		)
 	}
 
+	if err := tx.Commit(); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("commit create artist: %w", err),
+		)
+	}
+
 	return nil
 }
 
-// DeleteArtist removes primary release groups for id, guest-only groups with no
-// surviving library artist, soft-deletes the artist, and prunes orphan collaborators.
-func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
+// DeleteArtist removes groups where id appears and no other active library
+// artist remains credited, soft-deletes the artist, and prunes orphan
+// collaborators. Groups shared with a surviving library artist are kept so
+// they still show in the other artist's "appears in".
+// When permanent is true the artist MBID is also tombstoned in ignored so
+// later imports and re-adds cannot resurrect it until the row is removed.
+func (st *Store) DeleteArtist(ctx context.Context, id string, permanent bool) (int64, error) {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, apperrors.Wrap(
@@ -186,30 +212,13 @@ func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
 		return 0, apperrors.ErrNotFound
 	}
 
-	// Release groups where the artist is the primary credit (position 0).
-	// Groups where the artist is only a guest (position > 0) are handled
-	// below. Releases and tracks cascade-delete; linked files auto-unlink
-	// via ON DELETE SET NULL.
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM release_groups WHERE id IN (
-			SELECT rg.id
-			FROM release_groups rg
-			JOIN artist_credit_items aci
-			  ON aci.artist_credit_id = rg.artist_credit_id
-			WHERE aci.artist_id = ? AND aci.position = 0
-		)`, id,
-	); err != nil {
-		return 0, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("delete release groups: %w", err),
-		)
-	}
-
-	// Guest groups left with no active library artist behind (the deleted
-	// artist appears, but nobody else in the credits is still in the
-	// library). Groups shared with a surviving library artist are kept with
-	// their credits intact. The deleted id is excluded explicitly so this
-	// works regardless of statement order within the tx.
+	// Delete groups where the artist appears but no other active library
+	// artist remains credited. Groups shared with a surviving library
+	// artist are kept with their credits intact so they keep showing in
+	// the other artist's "appears in". Releases and tracks cascade-delete;
+	// linked files auto-unlink via ON DELETE SET NULL. The deleted id is
+	// excluded explicitly so this works regardless of statement order
+	// within the tx.
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM release_groups WHERE id IN (
 			SELECT rg.id
@@ -253,6 +262,29 @@ func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
 	}
 	if n == 0 {
 		return 0, apperrors.ErrNotFound
+	}
+
+	if permanent {
+		var name string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT name FROM artists WHERE id = ?`, id,
+		).Scan(&name); err != nil {
+			return 0, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("read artist name: %w", err),
+			)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO ignored (id, name, type)
+			VALUES (?, ?, 'artist')
+			ON CONFLICT(id) DO UPDATE SET name=excluded.name, type='artist'`,
+			id, name,
+		); err != nil {
+			return 0, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("ignore artist: %w", err),
+			)
+		}
 	}
 
 	// Collect credits orphaned by the deletes above (also reclaims rows

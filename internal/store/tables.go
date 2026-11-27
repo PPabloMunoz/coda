@@ -120,3 +120,13 @@ type ReleaseGroupRef struct {
 	Title string `json:"title"`
 	Type  string `json:"type"`
 }
+
+// IgnoredEntry is a permanently deleted artist or release group.
+// The row blocks discography imports from recreating the entity until
+// it is removed; restoring never auto-refreshes anything.
+type IgnoredEntry struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"` // artist | release_group
+	DeletedAt string `json:"deleted_at"`
+}

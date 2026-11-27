@@ -470,3 +470,71 @@ export function emptyState(title, body, action) {
   if (action) wrap.append(link(action.href, action.label, 'btn btn--secondary'));
   return wrap;
 }
+
+/**
+ * Shared permanent-delete dialog. Replaces window.confirm for artist and
+ * release-group removes: an unchecked "Permanently delete" checkbox plus
+ * Cancel / Remove actions. Resolves {confirmed, permanent} and removes
+ * itself; Escape or backdrop click cancels.
+ */
+export function openDeleteDialog({ title, copy, permanentHint }) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.setAttribute('aria-label', title);
+    const form = el('form', 'dialog__panel');
+    form.method = 'dialog';
+
+    const head = el('div', 'dialog__head');
+    const headText = el('div');
+    headText.append(el('p', 'eyebrow', 'Remove'), el('h2', '', title));
+    const close = el('button', 'icon-btn', '×');
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Close');
+    head.append(headText, close);
+
+    const body = el('p', 'dialog__copy', copy);
+
+    const permanentLabel = el('label', 'delete-dialog__permanent');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.name = 'permanent';
+    const hint = el('span', '', permanentHint);
+    permanentLabel.append(checkbox, hint);
+
+    const status = el('p', 'form-status');
+    status.setAttribute('role', 'status');
+
+    const actions = el('div', 'dialog__actions');
+    const cancel = el('button', 'btn btn--ghost', 'Cancel');
+    cancel.type = 'button';
+    const confirm = el('button', 'btn btn--danger', 'Remove');
+    confirm.type = 'submit';
+    actions.append(cancel, confirm);
+
+    form.append(head, body, permanentLabel, status, actions);
+    dialog.append(form);
+    document.body.append(dialog);
+
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+
+    close.addEventListener('click', () => done({ confirmed: false }));
+    cancel.addEventListener('click', () => done({ confirmed: false }));
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) done({ confirmed: false });
+    });
+    dialog.addEventListener('cancel', () => done({ confirmed: false }));
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      done({ confirmed: true, permanent: checkbox.checked });
+    });
+
+    dialog.showModal();
+  });
+}

@@ -53,6 +53,14 @@ before upgrading and back up your database (see
   entities as 500: link, unlink, refresh, and suggestions on a missing
   file, an unknown track, or a file under a removed root answer `404
   NOT_FOUND`, while an occupied destination still answers `409`.
+- Artist and release-group deletes are durable: `DELETE /artists/:id` and
+  `DELETE /release-groups/:id` accept `?permanent=true`, which tombstones
+  the MBID in a new `ignored` table so later discography imports skip it.
+  Artist deletes keep groups shared with a surviving library artist so
+  they still show in that artist's "appears in". Permanently deleted
+  artists block `POST /artists` with `403` until allowed again, ignored
+  collaborators never reactivate, and deleting an artist during an
+  in-flight import cancels the import instead of resurrecting anything.
 - Scans ignore hidden files and directories (names starting with `.`),
   so a leftover `.coda-tag-*` tag-write temp copy from a crash can never
   be indexed or auto-linked; each scan also deletes `.coda-tag-*` files
@@ -84,6 +92,10 @@ before upgrading and back up your database (see
 - Hero source badge: the web UI shows where cached art came from ("From
   Cover Art Archive", "Uploaded", …) via new `GET …/cover/meta` endpoints
   that read the cached metadata without fetching.
+- Permanently deleted list (`GET /ignored`, `DELETE /ignored/:id`, plus a
+  Permanently deleted navbar tab). Delete dialogs offer an unchecked
+  Permanently delete checkbox; permanent deletes tombstone the MBID so
+  refreshes and imports skip it until allowed again from the new page.
 - Configurable listen address: `host` in `config.yaml` (or `CODA_HOST`),
   resolved with the port into the HTTP listen address (`coda
   --check-config` shows `host`/`listen`). Docker Compose now publishes on

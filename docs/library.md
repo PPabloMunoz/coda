@@ -171,8 +171,18 @@ in the metadata row.
 
 - Removing a root from the config hides its files; rows and links are kept
   and come back when the root is re-added.
-- Deleting an artist removes its release groups from the database, unlinks
-  its files, and leaves the audio files and their tags alone.
+- Deleting an artist removes its groups with no other library artist from
+  the database, unlinks its files, and leaves the audio files and their
+  tags alone. Groups shared with another library artist are kept so they
+  still show in that artist's "appears in". A permanent
+  delete (`?permanent=true`) also tombstones the artist so later imports
+  and re-adds cannot bring it back; deleting an artist during an in-flight
+  import cancels the import instead of resurrecting anything. Tombstones
+  live under Permanently deleted in the navbar until removed — removing one
+  only allows the entity again, it never refreshes eagerly.
+- Deleting a release group removes its release and tracks. A permanent
+  delete tombstones the group so the next artist refresh or import skips
+  it until allowed again.
 - Background jobs: a daily prune of collaboration-only artists left
   trackless, and a weekly purge of soft-deleted artists with no remaining
   credits. See [operations.md](operations.md) for what runs when.

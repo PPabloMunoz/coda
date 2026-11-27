@@ -130,13 +130,13 @@ func TestDeleteReleaseGroup(t *testing.T) {
 	if err := st.SaveDiscography(ctx(), []FullReleaseParams{testRelease(testTrackID, testRelID, testGroupID)}); err != nil {
 		t.Fatalf("SaveDiscography = %v", err)
 	}
-	if err := st.DeleteReleaseGroup(ctx(), testGroupID); err != nil {
+	if err := st.DeleteReleaseGroup(ctx(), testGroupID, false); err != nil {
 		t.Fatalf("DeleteReleaseGroup = %v", err)
 	}
 	if _, err := st.GetReleaseGroup(ctx(), testGroupID); !apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Errorf("group should be gone: %v", err)
 	}
-	if err := st.DeleteReleaseGroup(ctx(), testGroupID); !apperrors.Is(err, apperrors.ErrNotFound) {
+	if err := st.DeleteReleaseGroup(ctx(), testGroupID, false); !apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Errorf("second delete = %v, want NOT_FOUND", err)
 	}
 }

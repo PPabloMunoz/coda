@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="theme-color" content="#14151a" />
+    <meta
+      name="description"
+      content="Coda keeps a local music library linked to MusicBrainz, with tags Navidrome can read."
+    />
+    <title>Permanently deleted · Coda</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body data-page="removed">
+    <a class="skip-link" href="#main">
+      Skip to content
+    </a>
+
+    <header class="mast" aria-label="Site">
+      <div class="mast__inner">
+        <a class="mast__brand" href="/" aria-label="Coda home">
+          <img
+            src="/logo.png"
+            alt=""
+            width="36"
+            height="36"
+            aria-hidden="true"
+          />
+          <span class="mast__word" translate="no">Coda</span>
+        </a>
+
+        <div class="mast__search" id="topbar-search">
+          <label class="search">
+            <input
+              id="artist-search"
+              name="artist-search"
+              type="search"
+              placeholder="Search your library…"
+              autocomplete="off"
+              aria-label="Search artists in your library"
+              role="combobox"
+              aria-expanded="false"
+              aria-controls="artist-search-results"
+              aria-autocomplete="list"
+            />
+          </label>
+          <div
+            class="mast__results topbar__results"
+            id="artist-search-results"
+            role="listbox"
+            aria-label="Matching artists in your library"
+            hidden
+          ></div>
+          <kbd class="mast__kbd topbar__kbd" aria-hidden="true">
+            ⌘&nbsp;K
+          </kbd>
+        </div>
+
+        <button
+          class="btn btn--secondary btn--sm mast__rescan"
+          id="rescan"
+          type="button"
+          title="Scan root folders for new or removed files"
+        >
+          Rescan
+        </button>
+      </div>
+      <div class="mast__tabs">
+        <nav class="mast__tabs-inner" aria-label="Library sections">
+          <a href="/">
+            Artists<span class="mast__tabs-count" data-stat="artists"></span>
+          </a>
+          <a href="/link">
+            Unlinked<span class="mast__tabs-count" data-stat="unlinked_files"></span>
+          </a>
+          <a href="/files">
+            All files<span class="mast__tabs-count" data-stat="total_files"></span>
+          </a>
+          <a href="/removed" aria-current="page">
+            Permanently deleted<span class="mast__tabs-count" data-stat="ignored"></span>
+          </a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page" id="main" tabindex="-1">
+      <header class="lib-head">
+        <div>
+          <h1>Permanently deleted</h1>
+          <p class="lib-head__desc">Artists and release groups that will not return on refresh. Allow one again to re-add or re-import it.</p>
+        </div>
+      </header>
+
+      <div class="toolbar">
+        <label class="search">
+          <input
+            id="filter"
+            name="q"
+            type="search"
+            placeholder="Search deleted names…"
+            autocomplete="off"
+            aria-label="Search permanently deleted names"
+          />
+        </label>
+        <label class="inline-field">
+          <span>Type</span>
+          <select id="type" name="type">
+            <option value="" selected>All</option>
+            <option value="artist">Artists</option>
+            <option value="release_group">Release groups</option>
+          </select>
+        </label>
+        <span class="toolbar__count" id="status">
+          Loading…
+        </span>
+        <label class="inline-field">
+          <span>Per page</span>
+          <select id="limit" name="limit">
+            <option value="25">25</option>
+            <option value="50" selected>
+              50
+            </option>
+            <option value="100">100</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="file-list" id="list" aria-live="polite"></div>
+      <div id="empty" hidden></div>
+
+      <div class="toolbar toolbar--after">
+        <button class="btn btn--secondary" id="prev" type="button">
+          Previous
+        </button>
+        <span class="toolbar__count" id="page-info"></span>
+        <button class="btn btn--secondary" id="next" type="button">
+          Next
+        </button>
+      </div>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="/js/layout.js"></script>
+    <script type="module" src="/js/page-removed.js"></script>
+  </body>
+</html>

@@ -464,7 +464,7 @@ func TestCleanupOrphanCredits(t *testing.T) {
 	if err := st.SaveDiscography(ctx(), []FullReleaseParams{testRelease(testTrackID, testRelID, testGroupID)}); err != nil {
 		t.Fatalf("SaveDiscography = %v", err)
 	}
-	if err := st.DeleteReleaseGroup(ctx(), testGroupID); err != nil {
+	if err := st.DeleteReleaseGroup(ctx(), testGroupID, false); err != nil {
 		t.Fatalf("DeleteReleaseGroup = %v", err)
 	}
 	n, err := st.CleanupOrphanCredits(ctx())
