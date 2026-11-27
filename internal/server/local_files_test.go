@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/ppablomunoz/coda/internal/store"
+	"github.com/ppablomunoz/coda/internal/utils"
 )
 
 const (
@@ -195,6 +199,139 @@ func TestLinkMissingEntitiesAre404(t *testing.T) {
 		map[string]string{"track_id": "00000000-0000-4000-8000-000000000000"})
 	if w.Code != http.StatusNotFound {
 		t.Errorf("missing track = %d, want 404", w.Code)
+	}
+}
+
+// assertAPIError checks the HTTP status and the JSON "code" field of an
+// error response.
+func assertAPIError(t *testing.T, w *httptest.ResponseRecorder, wantStatus int, wantCode string) {
+	t.Helper()
+	if w.Code != wantStatus {
+		t.Errorf("status = %d, want %d (body %q)", w.Code, wantStatus, w.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Errorf("body is not a JSON error object: %v (body %q)", err, w.Body.String())
+		return
+	}
+	if body.Code != wantCode {
+		t.Errorf("code = %q, want %q (body %q)", body.Code, wantCode, w.Body.String())
+	}
+}
+
+// deactivateAllRoots soft-deactivates every root in env's database by opening
+// the same DB with an empty root set, mirroring a root removed from config.
+func deactivateAllRoots(t *testing.T, env *testEnv) {
+	t.Helper()
+	st2, err := store.NewStore(env.dbPath, nil, utils.NewWithWriter(io.Discard))
+	if err != nil {
+		t.Fatalf("NewStore = %v", err)
+	}
+	t.Cleanup(st2.Close)
+	if err := st2.AddRootDirs(context.Background()); err != nil {
+		t.Fatalf("AddRootDirs = %v", err)
+	}
+}
+
+// TestFileActionsMissingEntitiesAre404 is the table-driven guard for issue
+// #37: every file action on a missing file, and linking to an unknown
+// track, must answer 404 NOT_FOUND, never 500.
+func TestFileActionsMissingEntitiesAre404(t *testing.T) {
+	root := t.TempDir()
+	env := newTestEnv(t, root)
+	seedLinkRelease(t, env.st)
+	id, _ := syncLinkWav(t, env.st, root, "a.wav")
+
+	const unknownTrackID = "00000000-0000-4000-8000-000000000000"
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   any
+	}{
+		{"get file", "GET", "/api/v1/files/999999", nil},
+		{"suggestions", "GET", "/api/v1/files/999999/suggestions", nil},
+		{"link", "POST", "/api/v1/files/999999/link", map[string]string{"track_id": linkTestTrackID}},
+		{"unlink", "DELETE", "/api/v1/files/999999/link", nil},
+		{"refresh", "POST", "/api/v1/files/999999/refresh", nil},
+		{"link unknown track", "POST", "/api/v1/files/" + itoa(id) + "/link", map[string]string{"track_id": unknownTrackID}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := doRequest(t, env.router, tc.method, tc.path, tc.body)
+			assertAPIError(t, w, http.StatusNotFound, "NOT_FOUND")
+		})
+	}
+}
+
+// TestFileActionsInactiveRootAre404 removes the root from config (rows and
+// links are kept but hidden) and checks every file action answers 404
+// NOT_FOUND for the now-hidden file.
+func TestFileActionsInactiveRootAre404(t *testing.T) {
+	root := t.TempDir()
+	env := newTestEnv(t, root)
+	seedLinkRelease(t, env.st)
+	id, _ := syncLinkWav(t, env.st, root, "a.wav")
+	deactivateAllRoots(t, env)
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   any
+	}{
+		{"get file", "GET", "/api/v1/files/" + itoa(id), nil},
+		{"suggestions", "GET", "/api/v1/files/" + itoa(id) + "/suggestions", nil},
+		{"link", "POST", "/api/v1/files/" + itoa(id) + "/link", map[string]string{"track_id": linkTestTrackID}},
+		{"unlink", "DELETE", "/api/v1/files/" + itoa(id) + "/link", nil},
+		{"refresh", "POST", "/api/v1/files/" + itoa(id) + "/refresh", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := doRequest(t, env.router, tc.method, tc.path, tc.body)
+			assertAPIError(t, w, http.StatusNotFound, "NOT_FOUND")
+		})
+	}
+}
+
+// TestLinkOccupiedDestinationIs409 links one file to a track, then links a
+// second file to the same track: the second call must fail 409
+// ALREADY_EXISTS with the source file untouched.
+func TestLinkOccupiedDestinationIs409(t *testing.T) {
+	root := t.TempDir()
+	env := newTestEnv(t, root)
+	seedLinkRelease(t, env.st)
+	idA, _ := syncLinkWav(t, env.st, root, "a.wav")
+	idB, pathB := syncLinkWav(t, env.st, root, "b.wav")
+
+	// Occupy the canonical destination with the first file.
+	w := doRequest(t, env.router, "POST", "/api/v1/files/"+itoa(idA)+"/link",
+		map[string]string{"track_id": linkTestTrackID})
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("first link = %d, want 204", w.Code)
+	}
+
+	w = doRequest(t, env.router, "POST",
+		"/api/v1/files/"+itoa(idB)+"/link",
+		map[string]string{"track_id": linkTestTrackID})
+	assertAPIError(t, w, http.StatusConflict, "ALREADY_EXISTS")
+
+	// The loser is untouched at its source path with its DB row unlinked.
+	rowB, err := env.st.GetFile(context.Background(), idB, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rowB.TrackID != nil {
+		t.Errorf("loser TrackID = %v, want nil (unlinked)", *rowB.TrackID)
+	}
+	if rowB.Path != pathB {
+		t.Errorf("loser path = %q, want untouched %q", rowB.Path, pathB)
+	}
+	if _, err := os.Stat(pathB); err != nil {
+		t.Errorf("loser file missing at %q: %v", pathB, err)
 	}
 }
 

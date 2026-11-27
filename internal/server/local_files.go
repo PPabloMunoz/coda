@@ -294,10 +294,7 @@ func (h *Handler) getFileSuggestions(c *gin.Context) {
 
 	root, err := h.st.GetRoot(ctx, file.RootID)
 	if err != nil {
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("suggest file=%d load root -> %w", localFileID, err)),
-		)
+		h.writeAppError(c, fmt.Errorf("suggest file=%d load root: %w", localFileID, err))
 		return
 	}
 

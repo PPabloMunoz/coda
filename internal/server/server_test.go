@@ -29,6 +29,7 @@ type testEnv struct {
 	mbSrv    *httptest.Server
 	mbMux    *http.ServeMux
 	coverDir string
+	dbPath   string
 }
 
 func newTestEnv(t *testing.T, roots ...string) *testEnv {
@@ -44,7 +45,8 @@ func newTestEnvWithArt(t *testing.T, art *artwork.Fetcher, roots ...string) *tes
 func newTestEnvWithArtAndOptions(t *testing.T, art *artwork.Fetcher, opts Options, roots ...string) *testEnv {
 	t.Helper()
 	log := utils.NewWithWriter(io.Discard)
-	st, err := store.NewStore(filepath.Join(t.TempDir(), "test.db"), roots, log)
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	st, err := store.NewStore(dbPath, roots, log)
 	if err != nil {
 		t.Fatalf("NewStore = %v", err)
 	}
@@ -69,7 +71,7 @@ func newTestEnvWithArtAndOptions(t *testing.T, art *artwork.Fetcher, opts Option
 	}
 	coverDir := t.TempDir()
 	router := NewHandler(log, st, mb, q, art, coverDir, opts)
-	return &testEnv{router: router, st: st, queue: q, mbSrv: srv, mbMux: mux, coverDir: coverDir}
+	return &testEnv{router: router, st: st, queue: q, mbSrv: srv, mbMux: mux, coverDir: coverDir, dbPath: dbPath}
 }
 
 func doRequest(t *testing.T, router *gin.Engine, method, path string, body any) *httptest.ResponseRecorder {

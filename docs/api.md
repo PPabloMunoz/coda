@@ -199,15 +199,18 @@ writes tags or moves files.
 `track_id` is the release-track MBID (`tracks.id`), not the recording MBID.
 On success (`204`, empty body) Coda writes standard tags, embeds the cached
 release cover, and moves the file to `<root>/<Artist>/<Album>/NN_Title.ext`.
-If the destination is occupied the call fails `409` and the source file is
-untouched. See `library.md` for the exact tag set.
+A missing file, an unknown `track_id`, or a file under a removed root
+answers `404 NOT_FOUND`. If the destination is occupied the call fails `409`
+and the source file is untouched. See `library.md` for the exact tag set.
 
 ### `DELETE /files/:id/link`
 
 `204` on success. Clears the link-written tags and the embedded cover and
-removes the DB link; the file stays where it is. `POST
+removes the DB link; the file stays where it is. A missing file or a file
+under a removed root answers `404 NOT_FOUND`. `POST
 /files/:id/refresh` re-applies tags, cover, and the move for the file's
-current link (`204`; `400` if the file is not linked).
+current link (`204`; `404` for a missing file or a file under a removed
+root, `400` if the file is not linked).
 
 ## Artists
 
