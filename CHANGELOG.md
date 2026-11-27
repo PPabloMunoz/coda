@@ -56,10 +56,11 @@ before upgrading and back up your database (see
 - Artist and release-group deletes are durable: `DELETE /artists/:id` and
   `DELETE /release-groups/:id` accept `?permanent=true`, which tombstones
   the MBID in a new `ignored` table so later discography imports skip it.
-  Permanently deleted artists block `POST /artists` with `403` until
-  allowed again, ignored collaborators never reactivate, and deleting an
-  artist during an in-flight import cancels the import instead of
-  resurrecting anything.
+  Artist deletes keep groups shared with a surviving library artist so
+  they still show in that artist's "appears in". Permanently deleted
+  artists block `POST /artists` with `403` until allowed again, ignored
+  collaborators never reactivate, and deleting an artist during an
+  in-flight import cancels the import instead of resurrecting anything.
 - Scans ignore hidden files and directories (names starting with `.`),
   so a leftover `.coda-tag-*` tag-write temp copy from a crash can never
   be indexed or auto-linked; each scan also deletes `.coda-tag-*` files

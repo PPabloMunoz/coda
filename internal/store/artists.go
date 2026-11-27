@@ -183,8 +183,10 @@ func (st *Store) CreateArtist(ctx context.Context, art Artist) error {
 	return nil
 }
 
-// DeleteArtist removes primary release groups for id, guest-only groups with no
-// surviving library artist, soft-deletes the artist, and prunes orphan collaborators.
+// DeleteArtist removes groups where id appears and no other active library
+// artist remains credited, soft-deletes the artist, and prunes orphan
+// collaborators. Groups shared with a surviving library artist are kept so
+// they still show in the other artist's "appears in".
 // When permanent is true the artist MBID is also tombstoned in ignored so
 // later imports and re-adds cannot resurrect it until the row is removed.
 func (st *Store) DeleteArtist(ctx context.Context, id string, permanent bool) (int64, error) {
@@ -210,30 +212,13 @@ func (st *Store) DeleteArtist(ctx context.Context, id string, permanent bool) (i
 		return 0, apperrors.ErrNotFound
 	}
 
-	// Release groups where the artist is the primary credit (position 0).
-	// Groups where the artist is only a guest (position > 0) are handled
-	// below. Releases and tracks cascade-delete; linked files auto-unlink
-	// via ON DELETE SET NULL.
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM release_groups WHERE id IN (
-			SELECT rg.id
-			FROM release_groups rg
-			JOIN artist_credit_items aci
-			  ON aci.artist_credit_id = rg.artist_credit_id
-			WHERE aci.artist_id = ? AND aci.position = 0
-		)`, id,
-	); err != nil {
-		return 0, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("delete release groups: %w", err),
-		)
-	}
-
-	// Guest groups left with no active library artist behind (the deleted
-	// artist appears, but nobody else in the credits is still in the
-	// library). Groups shared with a surviving library artist are kept with
-	// their credits intact. The deleted id is excluded explicitly so this
-	// works regardless of statement order within the tx.
+	// Delete groups where the artist appears but no other active library
+	// artist remains credited. Groups shared with a surviving library
+	// artist are kept with their credits intact so they keep showing in
+	// the other artist's "appears in". Releases and tracks cascade-delete;
+	// linked files auto-unlink via ON DELETE SET NULL. The deleted id is
+	// excluded explicitly so this works regardless of statement order
+	// within the tx.
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM release_groups WHERE id IN (
 			SELECT rg.id

@@ -457,7 +457,7 @@ function initArtistPage() {
     const name = artist.name;
     const choice = await openDeleteDialog({
       title: `Remove ${name}?`,
-      copy: 'The saved discography is deleted and linked files become unlinked. Audio files are kept.',
+      copy: 'Groups with no other library artist are deleted and their linked files become unlinked. Groups shared with another library artist are kept so they still show in that artist\u2019s \u201cappears in\u201d. Audio files are kept.',
       permanentHint:
         'Permanently delete: never import this artist again until allowed from Permanently deleted.',
     });

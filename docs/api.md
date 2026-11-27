@@ -276,6 +276,9 @@ from `/ignored`.
 `error` are omitted when not set. `POST /artists/:id/refresh` returns `202`
 with the same object. Both return 404 for artists not in the library.
 `DELETE /artists/:id` returns `200` with `{"pruned": <collaborator count>}`.
+Groups with no other library artist are deleted; groups shared with a
+surviving library artist are kept so they still show in that artist's
+"appears in".
 `?permanent=true` also tombstones the artist so later imports and re-adds
 cannot resurrect it; an invalid `permanent` value is `400`. A permanently
 deleted artist also cancels an in-flight import instead of resurrecting it.
