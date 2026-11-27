@@ -35,9 +35,18 @@ type CoverParams struct {
 // UpsertCover inserts or replaces the cover row for a release. fetched_at
 // is always refreshed to now (millisecond precision, so two rapid updates
 // never share an ETag) and any removal tombstone is cleared; the caller
-// writes the image bytes to config.CoverPath separately.
+// writes the image bytes to config.CoverPath separately. A recorded miss is
+// cleared in the same transaction so the fresh art is served.
 func (st *Store) UpsertCover(ctx context.Context, p CoverParams) error {
-	if _, err := st.db.ExecContext(ctx, `
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("upsert cover start tx: %w", err),
+		)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO release_covers
 			(release_id, source, source_url, mime, size_bytes, fetched_at, removed)
 		VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 0)
@@ -53,6 +62,20 @@ func (st *Store) UpsertCover(ctx context.Context, p CoverParams) error {
 		return apperrors.Wrap(
 			apperrors.ErrInternal,
 			fmt.Errorf("upsert cover: %w", err),
+		)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM release_cover_misses WHERE release_id = ?`, p.ReleaseID,
+	); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("clear release cover miss: %w", err),
+		)
+	}
+	if err := tx.Commit(); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("upsert cover commit: %w", err),
 		)
 	}
 	return nil
@@ -91,9 +114,19 @@ func (st *Store) GetCover(ctx context.Context, releaseID string) (*CoverParams, 
 // so later GETs stay 404 instead of lazy-fetching provider art again.
 // Idempotent: removing an already-removed or never-cached cover is a no-op.
 // The placeholder source/mime satisfy the NOT NULL row shape; Removed
-// keeps the row from ever being served or embedded.
+// keeps the row from ever being served or embedded. Any recorded miss is
+// cleared in the same transaction: the tombstone alone suppresses fetches,
+// so the miss row is redundant.
 func (st *Store) MarkCoverRemoved(ctx context.Context, releaseID string) error {
-	if _, err := st.db.ExecContext(ctx, `
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("remove cover start tx: %w", err),
+		)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO release_covers
 			(release_id, source, source_url, mime, size_bytes, fetched_at, removed)
 		VALUES (?, 'upload', NULL, 'image/jpeg', 0, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 1)
@@ -107,18 +140,56 @@ func (st *Store) MarkCoverRemoved(ctx context.Context, releaseID string) error {
 			fmt.Errorf("remove cover: %w", err),
 		)
 	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM release_cover_misses WHERE release_id = ?`, releaseID,
+	); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("clear release cover miss: %w", err),
+		)
+	}
+	if err := tx.Commit(); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("remove cover commit: %w", err),
+		)
+	}
 	return nil
 }
 
 // DeleteCover removes the cover row for a release. It is idempotent: deleting
 // a release with no cached art is a no-op. File removal happens in the caller.
+// Any recorded miss is cleared too so the next GET retries providers instead
+// of serving a stale negative result for a row that no longer exists.
 func (st *Store) DeleteCover(ctx context.Context, releaseID string) error {
-	if _, err := st.db.ExecContext(ctx,
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete cover start tx: %w", err),
+		)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM release_covers WHERE release_id = ?`, releaseID,
 	); err != nil {
 		return apperrors.Wrap(
 			apperrors.ErrInternal,
 			fmt.Errorf("delete cover: %w", err),
+		)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM release_cover_misses WHERE release_id = ?`, releaseID,
+	); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("clear release cover miss: %w", err),
+		)
+	}
+	if err := tx.Commit(); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("delete cover commit: %w", err),
 		)
 	}
 	return nil

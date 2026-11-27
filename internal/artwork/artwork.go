@@ -31,6 +31,14 @@ const (
 	DefaultiTunesBaseURL  = "https://itunes.apple.com"
 	DefaultCommonsBaseURL = "https://commons.wikimedia.org"
 	defaultTimeout        = 15 * time.Second
+	// DefaultFetchConcurrency bounds concurrent provider chains across the
+	// whole process. The background prefetch uses 4 workers, so 8 leaves
+	// headroom for lazy GETs while keeping total outbound pressure bounded.
+	DefaultFetchConcurrency = 8
+	// DefaultFetchTimeout is the total deadline for one cover fetch
+	// (all providers together), so one missing cover cannot hold a request
+	// for the sum of every per-request HTTP timeout.
+	DefaultFetchTimeout = 20 * time.Second
 	// DefaultMaxBytes caps a single cached image at 15MB so a rogue
 	// response can't blow up the cache. The upload handlers reuse the
 	// same limit so cached bytes never exceed what the fetcher can write.
@@ -57,18 +65,28 @@ type Config struct {
 	CommonsBaseURL string
 	Timeout        time.Duration
 	MaxBytes       int64
-	Logger         *utils.Logger // optional; transient failures log at Warn
+	// Concurrency bounds concurrent provider chains (prefetch + lazy GETs
+	// share one Fetcher, so one semaphore). <=0 defaults.
+	Concurrency int
+	// FetchTimeout is the total deadline for one Fetch/FetchArtist call,
+	// covering the whole provider chain. <=0 defaults.
+	FetchTimeout time.Duration
+	Logger       *utils.Logger // optional; transient failures log at Warn
 }
 
 type Fetcher struct {
-	caaBase     string
-	deezerBase  string
-	itunesBase  string
-	commonsBase string
-	http        *http.Client
-	ua          string
-	maxBytes    int64
-	log         *utils.Logger
+	caaBase      string
+	deezerBase   string
+	itunesBase   string
+	commonsBase  string
+	http         *http.Client
+	ua           string
+	maxBytes     int64
+	fetchTimeout time.Duration
+	// sem bounds concurrent provider chains process-wide; every Fetch and
+	// FetchArtist holds one slot for its whole chain.
+	sem chan struct{}
+	log *utils.Logger
 }
 
 // errImageTooLarge is a control-flow signal, not an API error: download
@@ -115,16 +133,44 @@ func New(cfg Config) (*Fetcher, error) {
 	if cfg.MaxBytes <= 0 {
 		cfg.MaxBytes = DefaultMaxBytes
 	}
+	if cfg.Concurrency <= 0 {
+		cfg.Concurrency = DefaultFetchConcurrency
+	}
+	if cfg.FetchTimeout <= 0 {
+		cfg.FetchTimeout = DefaultFetchTimeout
+	}
 	return &Fetcher{
-		caaBase:     strings.TrimRight(cfg.CAABaseURL, "/"),
-		deezerBase:  strings.TrimRight(cfg.DeezerBaseURL, "/"),
-		itunesBase:  strings.TrimRight(cfg.ITunesBaseURL, "/"),
-		commonsBase: strings.TrimRight(cfg.CommonsBaseURL, "/"),
-		http:        &http.Client{Timeout: cfg.Timeout},
-		ua:          cfg.UserAgent,
-		maxBytes:    cfg.MaxBytes,
-		log:         cfg.Logger,
+		caaBase:      strings.TrimRight(cfg.CAABaseURL, "/"),
+		deezerBase:   strings.TrimRight(cfg.DeezerBaseURL, "/"),
+		itunesBase:   strings.TrimRight(cfg.ITunesBaseURL, "/"),
+		commonsBase:  strings.TrimRight(cfg.CommonsBaseURL, "/"),
+		http:         &http.Client{Timeout: cfg.Timeout},
+		ua:           cfg.UserAgent,
+		maxBytes:     cfg.MaxBytes,
+		fetchTimeout: cfg.FetchTimeout,
+		sem:          make(chan struct{}, cfg.Concurrency),
+		log:          cfg.Logger,
 	}, nil
+}
+
+// Debugf logs at debug level; tasks use it for cache hit/miss lines so
+// cache behavior is visible with CODA_DEBUG=1 without a metrics subsystem.
+func (f *Fetcher) Debugf(format string, args ...any) {
+	f.debugf(format, args...)
+}
+
+// acquire holds one provider-chain slot until release is called. It honors
+// ctx so a shutting-down request never waits forever for a slot.
+func (f *Fetcher) acquire(ctx context.Context) (release func(), err error) {
+	select {
+	case f.sem <- struct{}{}:
+		return func() { <-f.sem }, nil
+	case <-ctx.Done():
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artwork: wait for provider slot: %w", ctx.Err()),
+		)
+	}
 }
 
 // Fetch returns the release cover, trying providers in order (CAA, Deezer,
@@ -135,9 +181,18 @@ func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) 
 	if err := utils.ValidateMBID(releaseMBID); err != nil {
 		return nil, apperrors.ErrInvalidID
 	}
+	ctx, cancel := context.WithTimeout(ctx, f.fetchTimeout)
+	defer cancel()
+	release, err := f.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	f.debugf("artwork: fetch release %s", releaseMBID)
 
 	var caaErr, deezerErr, itunesErr error
 	if res, err := f.fetchCAA(ctx, releaseMBID); err == nil {
+		f.debugf("artwork: fetched release %s from %s", releaseMBID, res.Source)
 		return res, nil
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
 		f.debugf("artwork: no CAA art for release %s", releaseMBID)
@@ -149,6 +204,7 @@ func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) 
 	}
 
 	if res, err := f.fetchDeezer(ctx, artist, album); err == nil {
+		f.debugf("artwork: fetched release %s from %s", releaseMBID, res.Source)
 		return res, nil
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
 		f.debugf("artwork: no Deezer art for release %s", releaseMBID)
@@ -160,6 +216,7 @@ func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) 
 	}
 
 	if res, err := f.fetchiTunes(ctx, artist, album); err == nil {
+		f.debugf("artwork: fetched release %s from %s", releaseMBID, res.Source)
 		return res, nil
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
 		f.debugf("artwork: no iTunes art for release %s", releaseMBID)
@@ -181,6 +238,7 @@ func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) 
 	if itunesErr != nil {
 		return nil, itunesErr
 	}
+	f.debugf("artwork: no art for release %s", releaseMBID)
 	return nil, apperrors.ErrNotFound
 }
 
@@ -193,9 +251,18 @@ func (f *Fetcher) FetchArtist(ctx context.Context, artistMBID, artistName string
 	if err := utils.ValidateMBID(artistMBID); err != nil {
 		return nil, apperrors.ErrInvalidID
 	}
+	ctx, cancel := context.WithTimeout(ctx, f.fetchTimeout)
+	defer cancel()
+	release, err := f.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	f.debugf("artwork: fetch artist %s", artistMBID)
 
 	var deezerErr, wikiErr error
 	if res, err := f.fetchDeezerArtist(ctx, artistName); err == nil {
+		f.debugf("artwork: fetched artist %s from %s", artistMBID, res.Source)
 		return res, nil
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
 		f.debugf("artwork: no Deezer photo for artist %s", artistMBID)
@@ -207,6 +274,7 @@ func (f *Fetcher) FetchArtist(ctx context.Context, artistMBID, artistName string
 	}
 
 	if res, err := f.fetchWikimedia(ctx, artistName); err == nil {
+		f.debugf("artwork: fetched artist %s from %s", artistMBID, res.Source)
 		return res, nil
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
 		f.debugf("artwork: no Wikimedia photo for artist %s", artistMBID)
@@ -223,6 +291,7 @@ func (f *Fetcher) FetchArtist(ctx context.Context, artistMBID, artistName string
 	if wikiErr != nil {
 		return nil, wikiErr
 	}
+	f.debugf("artwork: no photo for artist %s", artistMBID)
 	return nil, apperrors.ErrNotFound
 }
 

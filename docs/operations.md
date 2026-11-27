@@ -110,8 +110,10 @@ about one request per 1.1s and retries with backoff; try again later.
 
 **Cover art missing.** Covers are fetched lazily from Cover Art Archive →
 Deezer → iTunes (artist photos: Deezer → Wikimedia Commons). If no
-provider has art, the UI shows a generated placeholder; refresh endpoints
-exist per artist, release group and release (see [api.md](api.md)).
+provider has art, the UI shows a generated placeholder and the miss is
+remembered (6h at first, doubling up to 7 days) so pages stop hammering
+providers; refresh endpoints exist per artist, release group and release
+(see [api.md](api.md)) and always fetch immediately, bypassing the wait.
 
 **HTTP 421 host not allowed.** The `Host` header is not localhost, an IP
 literal, the configured `host`, or a name in `allowed_hosts`. Add the name
