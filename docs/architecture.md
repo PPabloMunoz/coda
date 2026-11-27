@@ -61,6 +61,16 @@ every 24h, delete-inactive-artists weekly. A scan gets 10 minutes, a
 discography import 30. Scan failures are logged and the previous database
 state keeps serving.
 
+Import lifecycles and pending release file jobs (cover embeds/clears,
+relinks) are durable: they persist in `artist_imports` and
+`pending_release_tasks` and are re-enqueued at startup, so a restart
+resumes an interrupted import instead of resetting its status to idle,
+and a promised cover embed still reaches linked files. Scans and periodic
+prunes are not persisted — the startup scan and the scheduler re-enqueue
+them. Detached cover prefetch work derives from the runner context and
+`Start` waits for it, so shutdown cancels it within the grace period and
+the store closes only after background workers stop.
+
 ## Scan pipeline
 
 1. `library.Scan` walks each root (symlinks never followed) and reports
@@ -80,8 +90,9 @@ state keeps serving.
 ## Data model
 
 `artists / artist_credits / artist_credit_items / release_groups /
-releases / tracks / local_files / roots`, plus cover tables and the
-`ignored` tombstone table. The split is deliberate: credits are normalized
+releases / tracks / local_files / roots`, plus cover tables, the
+`ignored` tombstone table, and the background-task intent tables
+(`artist_imports`, `pending_release_tasks`). The split is deliberate: credits are normalized
 (`artist_credits`), recording MBIDs live on `tracks`, and
 `local_files.track_id` is the single link between the filesystem and music
 metadata. One saved release per release-group. `ignored` holds permanently

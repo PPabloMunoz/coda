@@ -376,10 +376,11 @@ pagination (`limit`, `offset`, `order`):
 | `sort` | `name` (default), `deleted_at`                     |
 
 Items are `{"id": "...", "name": "...", "type": "artist",
-"deleted_at": "..."}`. `DELETE /ignored/:id` returns `204`; removing a
-row only deletes the tombstone — a group returns on the next artist
-refresh or import, and an artist can be re-added from `POST /artists`.
-Nothing refreshes eagerly.
+"deleted_at": "..."}`. `DELETE /ignored/:id` returns `204`; removing an
+artist tombstone also reactivates a surviving soft-deleted row as a
+collaboration-only entry, so its page offers Add instead of 404ing —
+membership still requires `POST /artists`. A group returns on the next
+artist refresh or import. Nothing refreshes eagerly.
 
 ## Releases
 
@@ -501,3 +502,10 @@ that runs in a serial background queue. Progress is only observable for
 artist imports (`GET /artists/:id/import`); a scan is visible through
 `/stats` and `/files` once it has synced. See `operations.md` for the
 scheduler's periodic jobs.
+
+Import statuses and pending cover-embed, cover-clear, and release-relink
+jobs survive restarts: they persist in the database and are re-enqueued at
+startup, so an interrupted import resumes instead of resetting to `idle`
+and a promised file update still runs. Terminal states (`done`, `failed`)
+stay visible too. Scans and periodic prunes are not persisted — the
+startup scan and the scheduler re-enqueue them.

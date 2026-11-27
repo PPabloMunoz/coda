@@ -19,6 +19,13 @@ type Runner struct {
 	mb       *musicbrainz.Client // same instance as server, don't make two (rate limiter is per-client)
 	art      *artwork.Fetcher    // nil disables cover prefetch
 	coverDir string
+	// baseCtx is the queue-run context from Start. Detached cover work
+	// derives from it (not from the finished import task) so it survives
+	// the task but still cancels on shutdown.
+	baseCtx context.Context
+	// bgWg tracks detached cover runs so Start returns only after they
+	// stop and the store is never closed while they still use it.
+	bgWg sync.WaitGroup
 	// coverPrefetch tracks background cover runs; the import task never
 	// waits for art, so overlapping refreshes must not stack duplicate runs.
 	coverMu       sync.Mutex
@@ -40,9 +47,44 @@ func NewRunner(st *store.Store, mb *musicbrainz.Client, l *utils.Logger, q *Queu
 	}
 }
 
-// Start runs queued tasks serially until ctx is canceled.
+// Start runs queued tasks serially until ctx is canceled, then waits for
+// detached cover work so the store is never closed while it still runs.
 func (r *Runner) Start(ctx context.Context) {
+	r.baseCtx = ctx
 	r.queue.run(ctx, r.exec)
+	r.bgWg.Wait()
+}
+
+// detachedBase returns the context detached cover work derives from: the
+// queue-run context when Start has set it, Background otherwise (tests
+// driving exec directly).
+func (r *Runner) detachedBase() context.Context {
+	if r.baseCtx != nil {
+		return r.baseCtx
+	}
+	return context.Background()
+}
+
+// shuttingDown reports whether the runner is stopping. Failures observed
+// during shutdown are interruptions to resume on restart, not import
+// failures to record.
+func (r *Runner) shuttingDown() bool {
+	return r.baseCtx != nil && r.baseCtx.Err() != nil
+}
+
+// spawnPrefetch runs fn detached from the finished import task with its own
+// bound, canceling on runner shutdown. Start waits for all spawned runs.
+func (r *Runner) spawnPrefetch(fn func(context.Context), timeout time.Duration) {
+	if r.art == nil {
+		return
+	}
+	bctx, cancel := context.WithTimeout(r.detachedBase(), timeout)
+	r.bgWg.Add(1)
+	go func() {
+		defer cancel()
+		defer r.bgWg.Done()
+		fn(bctx)
+	}()
 }
 
 // exec dispatches a task with per-kind timeouts (10m scan, 30m import).
@@ -149,6 +191,10 @@ func (r *Runner) importArtist(ctx context.Context, t Task) {
 			r.queue.ForgetArtistImport(t.ID)
 			return
 		}
+		if r.shuttingDown() {
+			r.log.Warnf("importing artist discography %q interrupted by shutdown, will resume on restart", t.ID)
+			return
+		}
 		r.queue.markArtistImportFailed(t.ID, err)
 		r.log.Errorf("importing artist discography %q failed in %s: %v", t.ID, time.Since(start), err)
 		return
@@ -167,15 +213,21 @@ func (r *Runner) importArtist(ctx context.Context, t Task) {
 			r.queue.ForgetArtistImport(t.ID)
 			return
 		}
+		if r.shuttingDown() {
+			r.log.Warnf("importing artist discography %q interrupted by shutdown, will resume on restart", t.ID)
+			return
+		}
 		r.queue.markArtistImportFailed(t.ID, err)
 		r.log.Errorf("importing artist discography %q failed in %s: %v", t.ID, time.Since(start), err)
 		return
 	}
 	// Covers fill in in the background: the import is done as far as status
 	// is concerned, and the serial task queue stays free for other work.
-	// Gaps are always backfilled lazily on first GET .../cover.
-	go r.prefetchCoversBG(ctx, t.ID)
-	go r.prefetchArtistCover(ctx, t.ID, art.Name)
+	// Gaps are always backfilled lazily on first GET .../cover. The runs
+	// derive from the runner context (not the finished task) so they
+	// survive the task but still cancel on shutdown; Start waits for them.
+	r.spawnPrefetch(func(bctx context.Context) { r.prefetchCoversBG(bctx, t.ID) }, 30*time.Minute)
+	r.spawnPrefetch(func(bctx context.Context) { r.prefetchArtistCover(bctx, t.ID, art.Name) }, 5*time.Minute)
 	r.cleanupCredits(ctx)
 	r.pruneArtists(ctx)
 	r.queue.markArtistImportDone(t.ID)

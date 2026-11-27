@@ -1,5 +1,11 @@
 // Package tasks runs background jobs (root scans, discography imports) through a serial FIFO queue with per-artist import state.
 //
+// Import lifecycles and pending release file jobs (cover embeds/clears,
+// relinks) persist in the store so a restart recovers them instead of
+// silently resetting import statuses to idle or dropping promised file
+// work; scans and periodic prunes are not persisted (the scheduler and the
+// startup scan re-enqueue them).
+//
 // Scans sync the DB by path and prune missing files. They also auto-link
 // exactly-identifiable files: a file whose on-disk MBReleaseTrackID resolves
 // to a known track gets the full link treatment (tag rewrite + cover embed +

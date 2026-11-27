@@ -7,7 +7,7 @@ import (
 )
 
 func TestEnqueueScanDedup(t *testing.T) {
-	q := NewQueue(nil)
+	q := NewQueue(nil, nil)
 	q.EnqueueScan(false)
 	q.EnqueueScan(false)
 	q.mu.Lock()
@@ -25,7 +25,7 @@ func TestEnqueueScanDedup(t *testing.T) {
 }
 
 func TestEnqueueScanForceUpgradesPending(t *testing.T) {
-	q := NewQueue(nil)
+	q := NewQueue(nil, nil)
 	q.EnqueueScan(false)
 	q.EnqueueScan(true)
 	q.mu.Lock()
@@ -40,7 +40,7 @@ func TestEnqueueScanForceUpgradesPending(t *testing.T) {
 	}
 
 	// Force first, then normal: stays forced, still a single task.
-	q2 := NewQueue(nil)
+	q2 := NewQueue(nil, nil)
 	q2.EnqueueScan(true)
 	q2.EnqueueScan(false)
 	q2.mu.Lock()
@@ -53,7 +53,7 @@ func TestEnqueueScanForceUpgradesPending(t *testing.T) {
 }
 
 func TestEnqueuePruneDedup(t *testing.T) {
-	q := NewQueue(nil)
+	q := NewQueue(nil, nil)
 	q.EnqueuePrune()
 	q.EnqueuePrune()
 	q.mu.Lock()
@@ -70,7 +70,7 @@ func TestEnqueuePruneDedup(t *testing.T) {
 }
 
 func TestEnqueueRefreshArtistDedup(t *testing.T) {
-	q := NewQueue(nil)
+	q := NewQueue(nil, nil)
 	first := q.EnqueueRefreshArtist("artist-1")
 	if first.State != ArtistImportQueued {
 		t.Errorf("state = %q, want queued", first.State)
@@ -97,7 +97,7 @@ func TestEnqueueRefreshArtistDedup(t *testing.T) {
 }
 
 func TestArtistImportStatusIdle(t *testing.T) {
-	q := NewQueue(nil)
+	q := NewQueue(nil, nil)
 	got := q.ArtistImportStatus("missing")
 	if got.State != ArtistImportIdle {
 		t.Errorf("state = %q, want idle", got.State)
@@ -108,7 +108,7 @@ func TestArtistImportStatusIdle(t *testing.T) {
 }
 
 func TestMarkTransitions(t *testing.T) {
-	q := NewQueue(nil)
+	q := NewQueue(nil, nil)
 	q.EnqueueRefreshArtist("a1")
 
 	q.markArtistImportRunning("a1")
@@ -147,7 +147,7 @@ func TestMarkTransitions(t *testing.T) {
 }
 
 func TestMarkUnknownNoPanic(t *testing.T) {
-	q := NewQueue(nil)
+	q := NewQueue(nil, nil)
 	q.markArtistImportRunning("nope")
 	q.markArtistImportDone("nope")
 	q.markArtistImportFailed("nope", errors.New("x"))

@@ -57,7 +57,7 @@ func TestImportArtistDeletedMidFetchDoesNotResurrect(t *testing.T) {
 		t.Fatalf("mb New = %v", err)
 	}
 
-	q := NewQueue(log)
+	q := NewQueue(log, st)
 	r := NewRunner(st, mb, log, q, nil, "")
 	q.EnqueueRefreshArtist(artistID)
 	r.exec(context.Background(), Task{Key: TaskImportDiscography, ID: artistID})

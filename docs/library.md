@@ -132,7 +132,8 @@ back without replacing anything.
 Switching the saved release for a release group preserves links by
 recording MBID plus disc/position: matching files stay linked (remapped
 synchronously) and a background task rewrites their tags, cover, and paths;
-non-matching files unlink. Discography refreshes keep a switched release
+non-matching files unlink. The pending rewrite survives a restart.
+Discography refreshes keep a switched release
 and reconcile changed tracklists instead of aborting the import.
 
 ## Custom covers
@@ -148,11 +149,13 @@ in the metadata row.
 - Release covers propagate to audio files: the upload queues a background
   task that re-embeds the new art as the front cover picture of every file
   already linked to the release. Per-file failures only log; the upload
-  itself already succeeded.
+  itself already succeeded. The pending embed survives a restart and is
+  re-enqueued at startup.
 - Removing a cover deletes the cached file and keeps it gone: later cover
   requests stay empty instead of fetching provider art again. Removing a
   release cover also queues a background task that clears the embedded
-  front cover from its linked files.
+  front cover from its linked files; the pending clear survives a restart
+  too.
 - Artist photos are display-only and are never written into audio files.
 - Fetching provider art again ("Refresh cover"/"Refresh photo") fetches
   first and swaps the cache only on success: a failed refresh or a no-art
@@ -179,8 +182,10 @@ in the metadata row.
   delete (`?permanent=true`) also tombstones the artist so later imports
   and re-adds cannot bring it back; deleting an artist during an in-flight
   import cancels the import instead of resurrecting anything. Tombstones
-  live under Permanently deleted in the navbar until removed — removing one
-  only allows the entity again, it never refreshes eagerly.
+  live under Permanently deleted in the navbar until removed — removing an
+  artist tombstone also reactivates a surviving soft-deleted row as a
+  collaborator, so its page offers Add to library even when the artist is
+  still credited on a shared release; either way, nothing refreshes eagerly.
 - Deleting a release group removes its release and tracks. A permanent
   delete tombstones the group so the next artist refresh or import skips
   it until allowed again.

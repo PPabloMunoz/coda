@@ -61,10 +61,20 @@ before upgrading and back up your database (see
   artists block `POST /artists` with `403` until allowed again, ignored
   collaborators never reactivate, and deleting an artist during an
   in-flight import cancels the import instead of resurrecting anything.
+  Allowing a permanently deleted artist again reactivates a surviving
+  soft-deleted row as a collaborator, so its page offers Add to library
+  instead of 404ing when it is still credited on a shared release;
+  membership still requires an explicit re-add.
 - Scans ignore hidden files and directories (names starting with `.`),
   so a leftover `.coda-tag-*` tag-write temp copy from a crash can never
   be indexed or auto-linked; each scan also deletes `.coda-tag-*` files
   older than 24 hours (fresh ones are left alone for in-flight writes).
+- Background work survives restarts: discography import lifecycles
+  (queued/running/done/failed) and pending cover-embed, cover-clear, and
+  release-relink jobs persist in the database and are re-enqueued at
+  startup, so an interrupted import resumes instead of silently resetting
+  to idle and a promised cover embed still reaches linked files. Shutdown
+  waits for detached cover prefetch work before the database is closed.
 
 ### Changed
 

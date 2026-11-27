@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/ppablomunoz/coda/internal/artwork"
 	"github.com/ppablomunoz/coda/internal/config"
@@ -182,22 +181,20 @@ func SaveArtistCover(ctx context.Context, st *store.Store, coverDir, artistID st
 // failures only log, so art never blocks or fails an import.
 // prefetchArtistCover fetches the artist photo when missing. Best-effort:
 // failures only log, and gaps backfill lazily on first GET .../cover.
-// Detached from the import task by the caller — the run survives the
-// task's cancellation but gives up within a bound.
+// The caller derives ctx from the runner with its own bound — the run
+// survives the finished import task but still gives up on shutdown.
 func (r *Runner) prefetchArtistCover(ctx context.Context, artistID, artistName string) {
 	if r.art == nil {
 		return
 	}
-	bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
-	defer cancel()
 
-	if _, err := r.st.GetArtistCover(bctx, artistID); err == nil {
+	if _, err := r.st.GetArtistCover(ctx, artistID); err == nil {
 		return
 	} else if !apperrors.Is(err, apperrors.ErrNotFound) {
 		r.log.Warnf("artist cover prefetch artist %q check: %v", artistID, err)
 		return
 	}
-	if _, err := EnsureArtistCover(bctx, r.st, r.art, r.coverDir, artistID, artistName); err != nil {
+	if _, err := EnsureArtistCover(ctx, r.st, r.art, r.coverDir, artistID, artistName); err != nil {
 		if !apperrors.Is(err, apperrors.ErrNotFound) {
 			r.log.Warnf("artist cover prefetch artist %q: %v", artistID, err)
 		}

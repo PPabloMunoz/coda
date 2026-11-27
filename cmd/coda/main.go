@@ -182,9 +182,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	queue := tasks.NewQueue(log)
+	queue := tasks.NewQueue(log, st)
 	runner := tasks.NewRunner(st, mb, log, queue, art, coverDir)
 	scheduler := tasks.NewScheduler(queue, log)
+
+	// Recover durable intent from before a restart: interrupted imports go
+	// back on the queue, pending cover/relink jobs return, and terminal
+	// import states hydrate so the status is not reset to idle.
+	if err := queue.Recover(ctx); err != nil {
+		log.Errorf("recover pending tasks: %v", err)
+	}
 
 	// Start server
 	addr := cfg.ListenAddr()

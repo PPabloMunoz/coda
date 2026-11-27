@@ -230,7 +230,10 @@ type coverJob struct {
 // nor the serial task queue. Releases are reloaded from the store rather
 // than passed in, so the run is self-contained. Best-effort by design:
 // failures only log, and gaps are always backfilled lazily on first
-// GET .../cover. Overlapping runs for one artist collapse into one.
+// GET .../cover. Overlapping runs for one artist collapse into one. The
+// caller derives ctx from the runner (not the finished import task) with
+// its own bound, so the run survives the task but still gives up on
+// shutdown; Start waits for it.
 func (r *Runner) prefetchCoversBG(ctx context.Context, artistID string) {
 	if r.art == nil {
 		return
@@ -240,12 +243,7 @@ func (r *Runner) prefetchCoversBG(ctx context.Context, artistID string) {
 	}
 	defer r.releaseCoverPrefetch(artistID)
 
-	// Detached: the import task is over; this run must survive its
-	// cancellation but still give up on shutdown within a bound.
-	bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Minute)
-	defer cancel()
-
-	releases, err := r.coverJobs(bctx, artistID)
+	releases, err := r.coverJobs(ctx, artistID)
 	if err != nil {
 		r.log.Warnf("cover prefetch artist %q list: %v", artistID, err)
 		return
@@ -264,7 +262,7 @@ func (r *Runner) prefetchCoversBG(ctx context.Context, artistID string) {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				if _, err := EnsureCover(bctx, r.st, r.art, r.coverDir, j.releaseID, j.artist, j.title); err != nil {
+				if _, err := EnsureCover(ctx, r.st, r.art, r.coverDir, j.releaseID, j.artist, j.title); err != nil {
 					if !apperrors.Is(err, apperrors.ErrNotFound) {
 						r.log.Warnf("cover prefetch release %q: %v", j.releaseID, err)
 					}
@@ -276,7 +274,7 @@ feed:
 	for _, j := range releases {
 		select {
 		case jobs <- j:
-		case <-bctx.Done():
+		case <-ctx.Done():
 			break feed
 		}
 	}

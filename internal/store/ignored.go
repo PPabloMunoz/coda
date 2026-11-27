@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -82,24 +84,61 @@ func (st *Store) ListIgnored(ctx context.Context, opts IgnoredListOptions) ([]Ig
 }
 
 // RemoveIgnored deletes a tombstone row so the entity can be added again.
-// A later artist refresh or re-add recreates it; nothing refreshes eagerly.
+// For artists it also reactivates a soft-deleted row (active = 0) as a
+// collaboration-only artist (in_library stays 0): the row only survives
+// because other releases still credit it, so without this its page would
+// 404 and offer no way back in. Library membership still requires an
+// explicit POST /artists. Release groups keep the old behavior — nothing
+// refreshes eagerly, a group returns on the next artist refresh or import.
 func (st *Store) RemoveIgnored(ctx context.Context, id string) error {
-	res, err := st.db.ExecContext(ctx, `DELETE FROM ignored WHERE id = ?`, id)
+	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("remove ignored start tx: %w", err),
+		)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var typ string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT type FROM ignored WHERE id = ?`, id,
+	).Scan(&typ); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return apperrors.ErrNotFound
+		}
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("check ignored: %w", err),
+		)
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM ignored WHERE id = ?`, id); err != nil {
 		return apperrors.Wrap(
 			apperrors.ErrInternal,
 			fmt.Errorf("delete ignored: %w", err),
 		)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
+
+	if typ == "artist" {
+		// Reactivate only soft-deleted collaborators, never touch a live
+		// library row. A hard-deleted row (no credits left) matches
+		// nothing here and is re-added via POST /artists instead.
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE artists SET active = 1 WHERE id = ? AND active = 0 AND in_library = 0`, id,
+		); err != nil {
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("reactivate artist: %w", err),
+			)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
 		return apperrors.Wrap(
 			apperrors.ErrInternal,
-			fmt.Errorf("delete ignored: %w", err),
+			fmt.Errorf("commit remove ignored: %w", err),
 		)
-	}
-	if n == 0 {
-		return apperrors.ErrNotFound
 	}
 	return nil
 }
