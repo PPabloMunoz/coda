@@ -77,10 +77,15 @@ Linked files move to a canonical path under their root:
   when the release has more than one disc.
 - Names are sanitized: `/` and `\` become `_`, the reserved characters
   `:*?"<>|` and control characters become `_`, spaces become `_`, leading
-  and trailing dots/underscores are trimmed, repeated `_` collapse, and a
-  segment is capped at 100 characters.
+  and trailing dots/underscores are trimmed, repeated `_` collapse, Windows
+  reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`,
+  `LPT1`–`LPT9`, with or without an extension) gain a trailing `_`, and a
+  segment is capped at 100 bytes (UTF-8 safe, so multi-byte titles cannot
+  exceed `NAME_MAX`).
 - An occupied destination refuses the move with `409` and leaves the
-  source file untouched. Coda never overwrites an existing file: moves use
+  source file untouched, except when source and destination are already the
+  same file (e.g. a case-only difference on a case-insensitive filesystem),
+  which links in place instead of conflicting. Coda never overwrites an existing file: moves use
   no-replace semantics (hard link plus an `O_EXCL` copy fallback, so
   cross-filesystem moves work too), and link/refresh operations for the
   same file or the same destination are serialized against each other and

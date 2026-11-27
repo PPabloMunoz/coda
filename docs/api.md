@@ -217,6 +217,11 @@ File objects:
 
 `track_id` is `null` while unlinked; `track` appears only with
 `include=track`. A missing id or a file under a removed root is 404.
+`mtime_ns` is the file's modification time as Unix nanoseconds (an integer
+for change detection, not a display clock). All other timestamps in the API
+(`scanned_at`, `created_at`, `deleted_at`, `fetched_at`, `checked_at`,
+import/scan `queued_at`/`started_at`/`finished_at`) are RFC3339 UTC strings
+(`2026-01-01T10:00:00Z`) so they parse consistently in every browser.
 
 ### `GET /files/:id/suggestions`
 
@@ -295,12 +300,12 @@ root, `400` if the file is not linked).
 {"id": "<musicbrainz artist MBID>"}
 ```
 
-| Status | Meaning                                                     |
-|--------|-------------------------------------------------------------|
-| 201    | Created; body is the artist; discography import is queued   |
-| 200    | Existing collaborator promoted to the library; import queued|
-| 304    | Already in the library; a refresh is requeued anyway        |
-| 403    | Artist was permanently deleted; allow it again first        |
+| Status | Meaning                                                        |
+|--------|----------------------------------------------------------------|
+| 201    | Created; body is the artist; discography import is queued      |
+| 200    | Already in the library (or collaborator promoted); body is the |
+|        | artist and a discography import/refresh is queued              |
+| 403    | Artist was permanently deleted; allow it again first           |
 
 The MBID is required and must be valid (`400` otherwise). A permanently
 deleted artist answers `403 FORBIDDEN` until its tombstone is removed

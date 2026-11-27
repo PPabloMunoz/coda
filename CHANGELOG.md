@@ -78,6 +78,15 @@ before upgrading and back up your database (see
   so a leftover `.coda-tag-*` tag-write temp copy from a crash can never
   be indexed or auto-linked; each scan also deletes `.coda-tag-*` files
   older than 24 hours (fresh ones are left alone for in-flight writes).
+- Path and timestamp edge cases: path segments are capped at 100 bytes
+  (UTF-8 safe) instead of 100 runes and Windows reserved device names
+  (`CON`, `NUL`, `COM1`, …) are mangled, so multi-byte titles cannot hit
+  `ENAMETOOLONG` and names are creatable on Windows; same-file destinations
+  (e.g. a case-only difference on a case-insensitive filesystem) link in
+  place instead of wrongly answering `409`; stored and API timestamps are
+  RFC3339 UTC (migration `0011` normalizes legacy rows) so they parse in
+  every browser; and the installer never creates or chowns `--roots`
+  directories — they must already exist.
 - Background work survives restarts: discography import lifecycles
   (queued/running/done/failed) and pending cover-embed, cover-clear, and
   release-relink jobs persist in the database and are re-enqueued at
@@ -102,6 +111,12 @@ before upgrading and back up your database (see
   revalidation instead of a 24h max-age, so uploads, refreshes, and
   removals show up without a hard reload; `fetched_at` carries
   millisecond precision so rapid updates never share an ETag.
+- `POST /artists` for an artist already in the library now returns `200`
+  with the existing artist (and queues a refresh) instead of `304`, which
+  clients treat as a cache response; `201` is for newly created artists and
+  `200` for promoted collaborators. `GET /files` keeps `mtime_ns` as a raw
+  Unix-nanosecond integer for change detection — all other timestamps are
+  documented as RFC3339 UTC. See `api.md`.
 - The install script keeps the previous port, roots, data dir and service
   user when re-run; a passed flag overrides them.
 - The outbound User-Agent contact is now the project URL instead of a

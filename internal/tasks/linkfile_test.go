@@ -112,6 +112,31 @@ func TestMoveFileNoReplaceOccupied(t *testing.T) {
 	}
 }
 
+func TestMoveFileNoReplaceSameFileNoop(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "song.wav")
+	dst := filepath.Join(dir, "SONG.wav")
+	if err := os.WriteFile(src, []byte("audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Hard-link dst to src so both paths are the same file: on
+	// case-insensitive filesystems this is the case-only destination from
+	// the issue (same file, different spelling). The move must be a no-op,
+	// not ALREADY_EXISTS.
+	if err := os.Link(src, dst); err != nil {
+		t.Skipf("hard links unsupported: %v", err)
+	}
+	if !sameFile(src, dst) {
+		t.Fatal("test setup: paths are not the same file")
+	}
+	if err := moveFileNoReplace("test", 1, "track", src, dst); err != nil {
+		t.Fatalf("same file = %v, want nil", err)
+	}
+	if err := copyFileNoReplace("test", 1, "track", src, dst); err != nil {
+		t.Fatalf("same file copy = %v, want nil", err)
+	}
+}
+
 func TestCopyFileNoReplaceSuccessAndOccupied(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.wav")

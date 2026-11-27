@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ppablomunoz/coda/internal/store"
 	"github.com/ppablomunoz/coda/internal/utils"
@@ -92,7 +93,7 @@ func syncLinkWav(t *testing.T, st *store.Store, root, name string) (int64, strin
 	if _, err := st.SyncLocalFiles(context.Background(), []store.ScannedFile{{
 		LibraryRoot: root, Path: path,
 		SizeBytes: fi.Size(), MtimeNs: fi.ModTime().UnixNano(), FormatHint: "wav",
-	}}, "2024-01-01 00:00:00", store.SyncOptions{}); err != nil {
+	}}, time.Now().UTC().Format(time.RFC3339), store.SyncOptions{}); err != nil {
 		t.Fatalf("SyncLocalFiles = %v", err)
 	}
 	files, _, err := st.ListFiles(context.Background(), store.FileListOptions{PageOptions: store.PageOptions{Limit: 100}})
@@ -355,4 +356,31 @@ func itoa(id int64) string {
 		buf[i] = '-'
 	}
 	return string(buf[i:])
+}
+
+// TestFileJSONTimestampsAreRFC3339 guards issue #48: scanned_at must parse
+// as RFC3339 (Safari cannot parse the legacy space format) while mtime_ns
+// stays a raw Unix-nanosecond integer for change detection.
+func TestFileJSONTimestampsAreRFC3339(t *testing.T) {
+	root := t.TempDir()
+	env := newTestEnv(t, root)
+	id, _ := syncLinkWav(t, env.st, root, "a.wav")
+
+	w := doRequest(t, env.router, "GET", "/api/v1/files/"+itoa(id), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get file = %d, want 200", w.Code)
+	}
+	var body struct {
+		MtimeNs   int64  `json:"mtime_ns"`
+		ScannedAt string `json:"scanned_at"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode file = %v", err)
+	}
+	if body.MtimeNs <= 0 {
+		t.Errorf("mtime_ns = %d, want positive UnixNano", body.MtimeNs)
+	}
+	if _, err := time.Parse(time.RFC3339, body.ScannedAt); err != nil {
+		t.Errorf("scanned_at = %q, want RFC3339: %v", body.ScannedAt, err)
+	}
 }

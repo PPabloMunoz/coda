@@ -124,7 +124,7 @@ func linkFile(ctx context.Context, st *store.Store, coverDir string, fileID int6
 		return false, false, nil
 	}
 
-	moved = filepath.Clean(dst) != filepath.Clean(src)
+	moved = filepath.Clean(dst) != filepath.Clean(src) && !sameFile(src, dst)
 	if moved {
 		if err := moveFileNoReplace("link", fileID, trackID, src, dst); err != nil {
 			return false, false, err
@@ -205,15 +205,35 @@ func linkFile(ctx context.Context, st *store.Store, coverDir string, fileID int6
 	return true, moved, nil
 }
 
+// sameFile reports whether src and dst resolve to the same on-disk file.
+// On case-insensitive filesystems (macOS/Windows) two paths differing only
+// by case stat to the same file; without this check the link below would
+// report EEXIST and the move would wrongly fail with ErrAlreadyExists.
+func sameFile(src, dst string) bool {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return false
+	}
+	dstInfo, err := os.Stat(dst)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(srcInfo, dstInfo)
+}
+
 // moveFileNoReplace relocates src to dst without ever replacing an existing
 // destination. A same-file move is a no-op. Otherwise it creates the
 // destination parent, hard-links src to dst and removes src, falling back to
 // an O_EXCL copy (same filesystem or cross-device) when hard links are
 // unsupported. An existing dst — at link time or at O_EXCL create time, so a
 // concurrent mover racing us still loses cleanly — returns ErrAlreadyExists
-// with the source untouched.
+// with the source untouched, unless src and dst are the same file (e.g. a
+// case-only difference on a case-insensitive filesystem), which is a no-op.
 func moveFileNoReplace(op string, fileID int64, trackID, src, dst string) error {
 	if filepath.Clean(src) == filepath.Clean(dst) {
+		return nil
+	}
+	if sameFile(src, dst) {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -234,6 +254,9 @@ func moveFileNoReplace(op string, fileID int64, trackID, src, dst string) error 
 		syncDir(filepath.Dir(src))
 		return nil
 	} else if os.IsExist(err) {
+		if sameFile(src, dst) {
+			return nil
+		}
 		return apperrors.Wrap(
 			apperrors.ErrAlreadyExists,
 			fmt.Errorf("%s file=%d track=%q destination occupied (%q): %w", op, fileID, trackID, dst, err),
@@ -283,6 +306,9 @@ func copyFileNoReplace(op string, fileID int64, trackID, src, dst string) error 
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		if os.IsExist(err) {
+			if sameFile(src, dst) {
+				return nil
+			}
 			return apperrors.Wrap(
 				apperrors.ErrAlreadyExists,
 				fmt.Errorf("%s file=%d track=%q destination occupied (%q): %w", op, fileID, trackID, dst, err),

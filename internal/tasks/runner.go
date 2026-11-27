@@ -153,7 +153,7 @@ func (r *Runner) scanRoots(ctx context.Context, forcePrune bool) {
 	r.log.Info("scanning root folders...")
 
 	start := time.Now()
-	scanStart := time.Now().UTC().Format("2006-01-02 15:04:05")
+	scanStart := time.Now().UTC().Format(time.RFC3339)
 	r.queue.markScanRunning()
 
 	roots := r.st.RootPaths()

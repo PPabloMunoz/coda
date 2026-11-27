@@ -307,9 +307,9 @@ func (st *Store) DeleteReleaseGroup(ctx context.Context, id string, permanent bo
 
 	if permanent {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO ignored (id, name, type)
-			VALUES (?, ?, 'release_group')
-			ON CONFLICT(id) DO UPDATE SET name=excluded.name, type='release_group'`,
+			INSERT INTO ignored (id, name, type, deleted_at)
+			VALUES (?, ?, 'release_group', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+			ON CONFLICT(id) DO UPDATE SET name=excluded.name, type='release_group', deleted_at=excluded.deleted_at`,
 			id, title,
 		); err != nil {
 			return apperrors.Wrap(
