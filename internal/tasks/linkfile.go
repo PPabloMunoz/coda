@@ -29,6 +29,16 @@ var fileOpLocks sync.Map // int64 -> *sync.Mutex
 // of distinct destinations ever targeted.
 var dstOpLocks sync.Map // cleaned path -> *sync.Mutex
 
+// moveLog reports best-effort ownership preservation failures. The move
+// helpers have no handler to return warnings through, so a failed chown
+// only warns here and the move still commits.
+var moveLog = utils.New()
+
+// preserveOwnership copies the original owner onto the move destination.
+// It is a variable so tests can stub the platform helper to simulate a
+// chown failure without changing file ownership.
+var preserveOwnership = copyOwnership
+
 func fileOpLock(id int64) *sync.Mutex {
 	m, _ := fileOpLocks.LoadOrStore(id, &sync.Mutex{})
 	return m.(*sync.Mutex)
@@ -245,7 +255,8 @@ func moveFileNoReplace(op string, fileID int64, trackID, src, dst string) error 
 // copyFileNoReplace copies src to a dst created with O_CREATE|O_EXCL, then
 // removes src. An existing dst returns ErrAlreadyExists; the source is only
 // removed after the copy is fsynced and closed, so a failure never loses a
-// file.
+// file. The copy keeps the source mode and, on Unix, the source owner
+// (best effort); xattrs/ACLs are not preserved.
 func copyFileNoReplace(op string, fileID int64, trackID, src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return apperrors.Wrap(
@@ -298,6 +309,14 @@ func copyFileNoReplace(op string, fileID int64, trackID, src, dst string) error 
 			apperrors.ErrInternal,
 			fmt.Errorf("%s file=%d track=%q chmod destination: %w", op, fileID, trackID, err),
 		)
+	}
+	// Best effort: keep the original owner on the copy so a cross-device
+	// or no-hard-link move does not silently hand the file to the Coda
+	// user. A failure only warns; the move still commits with the copy's
+	// owner. xattrs/ACLs are not preserved; the new file inherits the
+	// destination directory defaults.
+	if err := preserveOwnership(dst, srcInfo); err != nil {
+		moveLog.Warnf("%s file=%d track=%q preserve ownership for %q: %v", op, fileID, trackID, dst, err)
 	}
 	if err := os.Remove(src); err != nil {
 		_ = os.Remove(dst)
