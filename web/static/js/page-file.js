@@ -285,14 +285,6 @@ function initFilePage() {
           unlinkFile(headerUnlink),
         );
         actions.append(headerRefresh, headerUnlink);
-      } else {
-        actions.append(
-          link(
-            `/link?file=${file.id}`,
-            'Link this file',
-            'btn btn--primary btn--icon btn--icon-link',
-          ),
-        );
       }
 
       // The detail table renders for every file; only the link status
