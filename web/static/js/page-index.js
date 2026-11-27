@@ -215,6 +215,14 @@ function initArtistsPage() {
       }
 
       if (!response.ok) {
+        if (response.status === 403) {
+          setFormStatus(
+            addStatus,
+            'This artist was permanently deleted. Allow it again from Permanently deleted first.',
+            'error',
+          );
+          return;
+        }
         let message = response.statusText;
         try {
           const body = await response.json();

@@ -35,6 +35,7 @@ function initLayout() {
 
       setStat('artists', stats.artists);
       setStat('release_groups', stats.release_groups);
+      setStat('ignored', stats.ignored ?? 0);
       setStat('unlinked_files', stats.files.unlinked);
       setStat('total_files', stats.files.total);
     })

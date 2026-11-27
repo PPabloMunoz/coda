@@ -26,6 +26,7 @@ import {
   externalLink,
   link,
   mbLogoLink,
+  openDeleteDialog,
   setBusy,
   setFormStatus,
   setSharedArtName,
@@ -380,16 +381,19 @@ function initReleaseGroupPage() {
     if (!currentGroup) return;
     const groupTitle = currentGroup.title;
     const artistId = currentGroup.credit?.[0]?.artist_id;
-    if (
-      !window.confirm(
-        `Remove "${groupTitle}" from the library? Its saved release and tracks are deleted and linked files become unlinked. Audio files are kept.`,
-      )
-    ) {
-      return;
-    }
+    const choice = await openDeleteDialog({
+      title: `Remove "${groupTitle}"?`,
+      copy: 'Its saved release and tracks are deleted and linked files become unlinked. Audio files are kept.',
+      permanentHint:
+        'Permanently delete: this release group will not return on refresh until allowed from Permanently deleted.',
+    });
+    if (!choice.confirmed) return;
     setBusy(button, true, 'Removing…');
     try {
-      const response = await api.deleteReleaseGroup(currentGroup.id);
+      const response = await api.deleteReleaseGroup(
+        currentGroup.id,
+        choice.permanent,
+      );
       if (response.status === 404) {
         toast('Release group not found.', 'error');
         return;
@@ -407,7 +411,12 @@ function initReleaseGroupPage() {
         toast(`Could not remove release group: ${message}`, 'error');
         return;
       }
-      toast(`"${groupTitle}" removed.`, 'ok');
+      toast(
+        choice.permanent
+          ? `"${groupTitle}" permanently removed. It will not return on refresh.`
+          : `"${groupTitle}" removed.`,
+        'ok',
+      );
       window.location.assign(
         artistId
           ? `/artist?id=${encodeURIComponent(artistId)}`

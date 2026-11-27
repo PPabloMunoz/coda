@@ -27,7 +27,7 @@ func (r *Runner) importDiscography(ctx context.Context, id string) error {
 	}
 
 	saveStart := time.Now()
-	if err := r.st.SaveDiscography(ctx, releases); err != nil {
+	if err := r.st.SaveArtistDiscography(ctx, id, releases); err != nil {
 		return err
 	}
 	r.log.Infof("discography for %q: musicbrainz %s, save %s (%d releases)",

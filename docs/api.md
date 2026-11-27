@@ -121,6 +121,7 @@ curl -X POST 'http://localhost:8687/api/v1/scan?force_prune=true'
   "release_groups": 120,
   "releases": 135,
   "tracks": 1400,
+  "ignored": 2,
   "files": {"total": 1300, "linked": 1200, "unlinked": 100,
             "formats": {"mp3": 900, "flac": 400}}
 }
@@ -255,8 +256,11 @@ root, `400` if the file is not linked).
 | 201    | Created; body is the artist; discography import is queued   |
 | 200    | Existing collaborator promoted to the library; import queued|
 | 304    | Already in the library; a refresh is requeued anyway        |
+| 403    | Artist was permanently deleted; allow it again first        |
 
-The MBID is required and must be valid (`400` otherwise).
+The MBID is required and must be valid (`400` otherwise). A permanently
+deleted artist answers `403 FORBIDDEN` until its tombstone is removed
+from `/ignored`.
 
 ### Import status and refresh
 
@@ -272,6 +276,9 @@ The MBID is required and must be valid (`400` otherwise).
 `error` are omitted when not set. `POST /artists/:id/refresh` returns `202`
 with the same object. Both return 404 for artists not in the library.
 `DELETE /artists/:id` returns `200` with `{"pruned": <collaborator count>}`.
+`?permanent=true` also tombstones the artist so later imports and re-adds
+cannot resurrect it; an invalid `permanent` value is `400`. A permanently
+deleted artist also cancels an in-flight import instead of resurrecting it.
 
 ## MusicBrainz search
 
@@ -346,6 +353,30 @@ to a different group, `502` on MusicBrainz failure.
 
 `DELETE /release-groups/:id` returns `200` with an empty body and cascades to
 the release and its tracks. Files on disk are never touched.
+`?permanent=true` also tombstones the group so later discography imports
+skip it; an invalid `permanent` value is `400`.
+
+## Ignored (permanently deleted)
+
+| Method | Path             | Purpose                          |
+|--------|------------------|----------------------------------|
+| GET    | `/ignored`       | List tombstoned artists/groups    |
+| DELETE | `/ignored/:id`   | Allow the entity again            |
+
+`GET /ignored` lists permanently deleted tombstones with the standard
+pagination (`limit`, `offset`, `order`):
+
+| Param  | Notes                                              |
+|--------|----------------------------------------------------|
+| `q`    | Substring match on name (diacritics ignored)       |
+| `type` | `artist`, `release_group`, or empty for all        |
+| `sort` | `name` (default), `deleted_at`                     |
+
+Items are `{"id": "...", "name": "...", "type": "artist",
+"deleted_at": "..."}`. `DELETE /ignored/:id` returns `204`; removing a
+row only deletes the tombstone — a group returns on the next artist
+refresh or import, and an artist can be re-added from `POST /artists`.
+Nothing refreshes eagerly.
 
 ## Releases
 

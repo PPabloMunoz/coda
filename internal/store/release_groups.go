@@ -270,7 +270,9 @@ func (st *Store) GetReleaseGroup(ctx context.Context, id string) (*ReleaseGroupP
 
 // DeleteReleaseGroup deletes a release group (releases/tracks cascade, files unlink)
 // and sweeps orphan credits, returning ErrNotFound when missing.
-func (st *Store) DeleteReleaseGroup(ctx context.Context, id string) error {
+// When permanent is true the group MBID is tombstoned in ignored so later
+// discography imports skip it until the row is removed.
+func (st *Store) DeleteReleaseGroup(ctx context.Context, id string, permanent bool) error {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
 		return apperrors.Wrap(
@@ -281,9 +283,10 @@ func (st *Store) DeleteReleaseGroup(ctx context.Context, id string) error {
 	defer func() { _ = tx.Rollback() }()
 
 	var exists bool
+	var title string
 	if err := tx.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM release_groups WHERE id = ?)`, id,
-	).Scan(&exists); err != nil {
+		`SELECT EXISTS(SELECT 1 FROM release_groups WHERE id = ?), COALESCE((SELECT title FROM release_groups WHERE id = ?), '')`, id, id,
+	).Scan(&exists, &title); err != nil {
 		return apperrors.Wrap(
 			apperrors.ErrInternal,
 			fmt.Errorf("check release group: %w", err),
@@ -300,6 +303,20 @@ func (st *Store) DeleteReleaseGroup(ctx context.Context, id string) error {
 			apperrors.ErrInternal,
 			fmt.Errorf("delete release groups: %w", err),
 		)
+	}
+
+	if permanent {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO ignored (id, name, type)
+			VALUES (?, ?, 'release_group')
+			ON CONFLICT(id) DO UPDATE SET name=excluded.name, type='release_group'`,
+			id, title,
+		); err != nil {
+			return apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("ignore release group: %w", err),
+			)
+		}
 	}
 
 	_, err = tx.ExecContext(ctx, `

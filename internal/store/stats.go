@@ -12,6 +12,7 @@ type LibraryStats struct {
 	ReleaseGroups int64           `json:"release_groups"`
 	Releases      int64           `json:"releases"`
 	Tracks        int64           `json:"tracks"`
+	Ignored       int64           `json:"ignored"`
 	Files         LocalFilesStats `json:"files"`
 }
 
@@ -24,12 +25,14 @@ func (st *Store) GetLibraryStats(ctx context.Context) (*LibraryStats, error) {
 			(SELECT COUNT(*) FROM artists WHERE active = 1 AND in_library = 1),
 			(SELECT COUNT(*) FROM release_groups),
 			(SELECT COUNT(*) FROM releases),
-			(SELECT COUNT(*) FROM tracks)`,
+			(SELECT COUNT(*) FROM tracks),
+			(SELECT COUNT(*) FROM ignored)`,
 	).Scan(
 		&stats.Artists,
 		&stats.ReleaseGroups,
 		&stats.Releases,
 		&stats.Tracks,
+		&stats.Ignored,
 	); err != nil {
 		return nil, apperrors.Wrap(
 			apperrors.ErrInternal,

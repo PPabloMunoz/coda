@@ -132,8 +132,31 @@ func (st *Store) GetArtistByID(ctx context.Context, id string) (*Artist, error) 
 }
 
 // CreateArtist inserts an artist or reactivates it as active/in_library on conflict.
+// A permanent-deletion tombstone blocks the insert with ErrForbidden.
 func (st *Store) CreateArtist(ctx context.Context, art Artist) error {
-	stmt, err := st.db.PrepareContext(ctx, `
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("start tx: %w", err),
+		)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var ignored bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM ignored WHERE id = ? AND type = 'artist')`, art.ID,
+	).Scan(&ignored); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("check ignored: %w", err),
+		)
+	}
+	if ignored {
+		return apperrors.ErrForbidden
+	}
+
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO artists (id, name, sort_name, disambiguation, active, in_library)
 		VALUES (?, ?, ?, ?, 1, 1)
 		ON CONFLICT(id) DO UPDATE SET
@@ -141,20 +164,19 @@ func (st *Store) CreateArtist(ctx context.Context, art Artist) error {
 			sort_name=excluded.sort_name,
 			disambiguation=excluded.disambiguation,
 			active=1,
-			in_library=1`)
-	if err != nil {
-		return apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("prepare query: %w", err),
-		)
-	}
-	defer func() { _ = stmt.Close() }()
-
-	_, err = stmt.ExecContext(ctx, art.ID, art.Name, art.SortName, art.Disambiguation)
-	if err != nil {
+			in_library=1`,
+		art.ID, art.Name, art.SortName, art.Disambiguation,
+	); err != nil {
 		return apperrors.Wrap(
 			apperrors.ErrInternal,
 			fmt.Errorf("insert artist: %w", err),
+		)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("commit create artist: %w", err),
 		)
 	}
 
@@ -163,7 +185,9 @@ func (st *Store) CreateArtist(ctx context.Context, art Artist) error {
 
 // DeleteArtist removes primary release groups for id, guest-only groups with no
 // surviving library artist, soft-deletes the artist, and prunes orphan collaborators.
-func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
+// When permanent is true the artist MBID is also tombstoned in ignored so
+// later imports and re-adds cannot resurrect it until the row is removed.
+func (st *Store) DeleteArtist(ctx context.Context, id string, permanent bool) (int64, error) {
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, apperrors.Wrap(
@@ -253,6 +277,29 @@ func (st *Store) DeleteArtist(ctx context.Context, id string) (int64, error) {
 	}
 	if n == 0 {
 		return 0, apperrors.ErrNotFound
+	}
+
+	if permanent {
+		var name string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT name FROM artists WHERE id = ?`, id,
+		).Scan(&name); err != nil {
+			return 0, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("read artist name: %w", err),
+			)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO ignored (id, name, type)
+			VALUES (?, ?, 'artist')
+			ON CONFLICT(id) DO UPDATE SET name=excluded.name, type='artist'`,
+			id, name,
+		); err != nil {
+			return 0, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("ignore artist: %w", err),
+			)
+		}
 	}
 
 	// Collect credits orphaned by the deletes above (also reclaims rows

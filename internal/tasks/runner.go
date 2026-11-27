@@ -159,6 +159,14 @@ func (r *Runner) importArtist(ctx context.Context, t Task) {
 		return
 	}
 	if err := r.importDiscography(ctx, t.ID); err != nil {
+		// The artist was removed mid-fetch (or is permanently deleted):
+		// the save wrote nothing, so forget the import instead of
+		// leaving it failed and resurrecting anything.
+		if apperrors.Is(err, apperrors.ErrNotFound) {
+			r.log.Infof("skipping discography import for removed artist %q", t.ID)
+			r.queue.ForgetArtistImport(t.ID)
+			return
+		}
 		r.queue.markArtistImportFailed(t.ID, err)
 		r.log.Errorf("importing artist discography %q failed in %s: %v", t.ID, time.Since(start), err)
 		return

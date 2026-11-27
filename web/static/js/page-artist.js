@@ -21,6 +21,7 @@ import {
   emptyState,
   mapLimit,
   normalize,
+  openDeleteDialog,
   setBusy,
   setSharedArtName,
   sharedArtName,
@@ -425,6 +426,13 @@ function initArtistPage() {
         await load();
         return;
       }
+      if (response.status === 403) {
+        toast(
+          'This artist was permanently deleted. Allow it again from Permanently deleted first.',
+          'error',
+        );
+        return;
+      }
       let message = response.statusText;
       try {
         const body = await response.json();
@@ -447,16 +455,16 @@ function initArtistPage() {
   async function deleteArtist(button) {
     if (!artist) return;
     const name = artist.name;
-    if (
-      !window.confirm(
-        `Remove ${name} from the library? The saved discography is deleted and linked files become unlinked. Audio files are kept.`,
-      )
-    ) {
-      return;
-    }
+    const choice = await openDeleteDialog({
+      title: `Remove ${name}?`,
+      copy: 'The saved discography is deleted and linked files become unlinked. Audio files are kept.',
+      permanentHint:
+        'Permanently delete: never import this artist again until allowed from Permanently deleted.',
+    });
+    if (!choice.confirmed) return;
     setBusy(button, true, 'Removing…');
     try {
-      const response = await api.deleteArtist(artist.id);
+      const response = await api.deleteArtist(artist.id, choice.permanent);
       if (response.status === 404) {
         toast('Artist not found.', 'error');
         return;
@@ -475,7 +483,9 @@ function initArtistPage() {
         return;
       }
       stopImportPolling();
-      let message = `${name} removed.`;
+      let message = choice.permanent
+        ? `${name} permanently removed. It will not be imported again.`
+        : `${name} removed.`;
       try {
         const body = await response.json();
         const pruned = typeof body?.pruned === 'number' ? body.pruned : 0;

@@ -107,6 +107,10 @@ func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tas
 	v1.DELETE("/release-groups/:id", handler.deleteReleaseGroup)
 	v1.PUT("/release-groups/:id/update", handler.replaceRelease)
 
+	// Permanently deleted tombstones
+	v1.GET("/ignored", handler.getIgnored)
+	v1.DELETE("/ignored/:id", handler.deleteIgnored)
+
 	// Releases
 	v1.GET("/releases", handler.getReleases)
 	v1.GET("/releases/:id", handler.getRelease)

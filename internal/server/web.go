@@ -22,6 +22,7 @@ var pageRoutes = map[string]string{
 	"/link":          "link.html",
 	"/files":         "files.html",
 	"/file":          "file.html",
+	"/removed":       "removed.html",
 }
 
 // mountWeb serves the embedded vanilla UI (web/static).

@@ -171,6 +171,8 @@ func (h *Handler) replaceRelease(c *gin.Context) {
 }
 
 // deleteReleaseGroup deletes a release group and its cached cover files.
+// ?permanent=true also tombstones the group so later discography imports
+// skip it until the tombstone is removed from /ignored.
 func (h *Handler) deleteReleaseGroup(c *gin.Context) {
 	ctx := c.Request.Context()
 	releaseGroupID, err := requireMBID(c.Param("id"))
@@ -179,10 +181,19 @@ func (h *Handler) deleteReleaseGroup(c *gin.Context) {
 		return
 	}
 
+	permanent, err := parseOptionalBool(c.Query("permanent"))
+	if err != nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("invalid 'permanent' parameter: must be a boolean"),
+		))
+		return
+	}
+
 	// Capture the kept release so its cached files can be dropped below.
 	// Best-effort: a lookup miss just skips cleanup, DB rows cascade.
 	oldRelease, oldErr := h.st.GetReleaseOfGroup(ctx, releaseGroupID, false)
-	if err := h.st.DeleteReleaseGroup(ctx, releaseGroupID); err != nil {
+	if err := h.st.DeleteReleaseGroup(ctx, releaseGroupID, permanent != nil && *permanent); err != nil {
 		h.writeAppError(c, err)
 		return
 	}

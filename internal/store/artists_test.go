@@ -173,7 +173,7 @@ func TestDeleteArtist(t *testing.T) {
 		t.Fatalf("SaveDiscography = %v", err)
 	}
 
-	pruned, err := st.DeleteArtist(ctx(), testArtistID)
+	pruned, err := st.DeleteArtist(ctx(), testArtistID, false)
 	if err != nil {
 		t.Fatalf("DeleteArtist = %v", err)
 	}
@@ -186,10 +186,10 @@ func TestDeleteArtist(t *testing.T) {
 		t.Errorf("release should cascade-delete: %v", err)
 	}
 
-	if _, err := st.DeleteArtist(ctx(), testArtistID); !apperrors.Is(err, apperrors.ErrNotFound) {
+	if _, err := st.DeleteArtist(ctx(), testArtistID, false); !apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Errorf("second delete = %v, want NOT_FOUND", err)
 	}
-	if _, err := st.DeleteArtist(ctx(), "00000000-0000-4000-8000-000000000000"); !apperrors.Is(err, apperrors.ErrNotFound) {
+	if _, err := st.DeleteArtist(ctx(), "00000000-0000-4000-8000-000000000000", false); !apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Errorf("missing delete = %v, want NOT_FOUND", err)
 	}
 }
@@ -215,7 +215,7 @@ func TestPruneOrphanCollaborators(t *testing.T) {
 	}
 
 	// Delete the library artist cascades the release; guest becomes trackless.
-	if _, err := st.DeleteArtist(ctx(), testArtistID); err != nil {
+	if _, err := st.DeleteArtist(ctx(), testArtistID, false); err != nil {
 		t.Fatalf("DeleteArtist = %v", err)
 	}
 }
