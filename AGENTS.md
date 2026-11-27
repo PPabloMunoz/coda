@@ -19,9 +19,11 @@ Use `just` (wrappers around `go`):
 - `just fmt` — apply formatting: Go (`golangci-lint fmt`). Run it when `just check` reports format diffs, then re-run `just check`.
 - `just build` / `just build-prod` — `go build -o bin/coda ./cmd/coda` (`build-prod` adds `CGO_ENABLED=0` static, pure-Go SQLite, no cgo needed).
 - `just tidy` — `go mod tidy && go mod vendor` (`vendor/` is gitignored local output, not committed).
+- `just test-race` — `go test -race ./...` (CI race job).
+- `just vuln` — `govulncheck ./...` (pinned version, CI vuln job).
 - `just db-reset` — macOS-only (`rm -f "$HOME/Library/Application Support/Coda/"*.db*`); on Linux remove `$XDG_DATA_HOME/coda/*.db*` (or `~/.local/share/coda/`) or the `CODA_DB_PATH` target instead.
 
-Env overrides: `CODA_CONFIG=/path/to/config.yaml`, `CODA_DB_PATH=/path/to/coda.db`, `CODA_PORT=1234`, `CODA_ROOTS=/path/a:/path/b` (OS path-list separated, **replaces** config `roots`), `GIN_MODE=debug` (opt back into Gin's debug route dump; release is the default), `CODA_DEBUG=1` or `CODA_LOG_LEVEL=debug` (stderr debug logs). Flags: `-config` (overrides `CODA_CONFIG`), `-check-config` (print resolved config and exit), `-version`. Tests exist across most packages (`go test ./...`; `internal/artwork` has none) — don't add test scaffolding unless asked.
+Env overrides: `CODA_CONFIG=/path/to/config.yaml`, `CODA_DB_PATH=/path/to/coda.db`, `CODA_PORT=1234`, `CODA_ROOTS=/path/a:/path/b` (OS path-list separated, **replaces** config `roots`), `GIN_MODE=debug` (opt back into Gin's debug route dump; release is the default), `CODA_DEBUG=1` or `CODA_LOG_LEVEL=debug` (stderr debug logs). Flags: `-config` (overrides `CODA_CONFIG`), `-check-config` (print resolved config and exit), `-version`. Tests exist across most packages (`go test ./...`) — don't add test scaffolding unless asked.
 
 ## Runtime
 

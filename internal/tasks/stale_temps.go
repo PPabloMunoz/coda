@@ -21,9 +21,18 @@ const staleTempAge = 24 * time.Hour
 // staleTempAge. It runs before the library walk so a temp indexed by an
 // older version is gone before SyncLocalFiles prunes its bogus row in
 // the same scan. Best effort: per-file failures only log.
+//
+// The walk and the remove are both scoped to the root via os.Root so a
+// symlink swapped mid-walk cannot redirect the removal outside the
+// library (gosec G122).
 func (r *Runner) cleanupStaleTemps(ctx context.Context) {
 	for _, root := range r.st.RootPaths() {
-		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		ro, err := os.OpenRoot(root)
+		if err != nil {
+			r.log.Warnf("scan stale-temp cleanup root=%q: %v", root, err)
+			continue
+		}
+		err = fs.WalkDir(ro.FS(), ".", func(path string, d fs.DirEntry, err error) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -34,7 +43,7 @@ func (r *Runner) cleanupStaleTemps(ctx context.Context) {
 				return nil // unreadable entry: Scan reports it, cleanup ignores it
 			}
 			if d.IsDir() {
-				if path != root && strings.HasPrefix(d.Name(), ".") {
+				if path != "." && strings.HasPrefix(d.Name(), ".") {
 					return filepath.SkipDir
 				}
 				return nil
@@ -55,15 +64,16 @@ func (r *Runner) cleanupStaleTemps(ctx context.Context) {
 			if time.Since(info.ModTime()) < staleTempAge {
 				return nil // possibly in-flight, leave it
 			}
-			if err := os.Remove(path); err != nil {
+			if err := ro.Remove(path); err != nil {
 				if !os.IsNotExist(err) {
-					r.log.Warnf("scan removing stale tag temp %q: %v", path, err)
+					r.log.Warnf("scan removing stale tag temp %q: %v", filepath.Join(root, path), err)
 				}
 				return nil
 			}
-			r.log.Infof("scan removed stale tag temp %q", path)
+			r.log.Infof("scan removed stale tag temp %q", filepath.Join(root, path))
 			return nil
 		})
+		_ = ro.Close()
 		if err != nil {
 			r.log.Warnf("scan stale-temp cleanup root=%q: %v", root, err)
 			return

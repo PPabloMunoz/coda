@@ -27,6 +27,8 @@ the scope check in the template. Security issues go through
 | --- | --- |
 | `just run` | build, then `./bin/coda` (UI on `http://localhost:8687`) |
 | `just test` | `go test ./... -cover` |
+| `just test-race` | `go test -race ./...` (CI race job) |
+| `just vuln` | `govulncheck ./...` (CI vuln job, pinned version) |
 | `just vet` / `just lint` | `go vet` / golangci-lint |
 | `just fmt` / `just fmt-check` | apply / check formatting |
 | `just check` | the full gate: fmt-check + vet + lint + tests + build |

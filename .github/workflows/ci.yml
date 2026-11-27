@@ -31,3 +31,35 @@ jobs:
 
       # verify the static production build still works
       - run: CGO_ENABLED=0 go build -o /dev/null ./cmd/coda
+
+      # docs advertise building on Windows; only the binary shape is
+      # verified (release ships linux/darwin only)
+      - run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/coda
+
+  race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: extractions/setup-just@v3
+
+      - run: just test-race
+
+  vuln:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: extractions/setup-just@v3
+
+      - run: just vuln

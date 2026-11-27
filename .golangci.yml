@@ -6,11 +6,15 @@ run:
 
 linters:
   enable:
+    - bodyclose
     - copyloopvar
     - errcheck
+    - errorlint
+    - gosec
     - govet
     - ineffassign
     - misspell
+    - sqlclosecheck
     - staticcheck
     - unconvert
     - unused
@@ -22,6 +26,17 @@ linters:
       - std-error-handling
     paths:
       - vendor/...
+    rules:
+      # Fixture files only: 0644 keeps committed testdata-style helpers
+      # simple and uint32 length prefixes mirror the binary format.
+      - path: _test\.go
+        linters: [gosec]
+        text: "G306|G115"
+      # Store queries compose only static fragments and ? placeholder
+      # lists; every value is bound. Keep gosec active elsewhere.
+      - path: internal/store/
+        linters: [gosec]
+        text: "G202"
 
 formatters:
   enable:

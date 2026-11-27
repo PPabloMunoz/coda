@@ -18,6 +18,12 @@ build-prod:
 test:
     go test ./... -cover
 
+test-race:
+    go test -race ./...
+
+vuln:
+    go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
+
 vet:
     go vet ./...
 
