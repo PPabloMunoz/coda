@@ -20,8 +20,11 @@ curl -X POST 'localhost:8687/api/v1/scan?force_prune=true'
 A scan:
 
 - Walks each root and records every supported audio file. Symlinks are
-  never followed; files and folders behind a symlink are skipped. Point
-  roots at real directories.
+  never followed; files and folders behind a symlink are skipped. Hidden
+  files and directories (names starting with `.`) are skipped too, so
+  tag-write temp copies (`.coda-tag-*`), AppleDouble `._*` files, and
+  trash stay out of the library. A root whose own name starts with `.`
+  is still scanned. Point roots at real directories.
 - Syncs the database by absolute path. Unchanged files keep their links.
   Rows for files that vanished from disk are pruned, and their links go
   with them. A file you moved outside Coda re-appears at its new path and,
@@ -40,6 +43,11 @@ A scan:
   treatment as a manual link — tags rewritten, cover embedded, file moved
   to its canonical library path. Everything else is left for the link
   wizard; nothing is guessed.
+- Removes stale tag-write temp copies: `.coda-tag-*` files older than 24
+  hours are deleted at the start of each scan (each removal is logged).
+  Fresh ones are left alone so in-flight link operations are never
+  disturbed. A crash leftover is therefore ignored by the walk even
+  before its cleanup age arrives.
 - Fails safe: if the scan errors out, the API keeps serving the previous
   database state. Check the logs.
 
@@ -106,7 +114,11 @@ Unlinking clears exactly those keys and the embedded cover. Every other
 frame in the file is preserved.
 
 All tag writes go through a same-directory temp copy and an atomic rename,
-so a crash mid-write cannot corrupt a file. Linking runs one shared
+so a crash mid-write cannot corrupt a file. The temp copy is hidden
+(`.coda-tag-*` plus the original extension, which taglib needs to detect
+the file type) and is removed on handled errors; a crash leftover is
+skipped by the scan like any other hidden file, and deleted once older
+than 24 hours. Linking runs one shared
 pipeline (manual link, refresh, and scan auto-link): the file moves to its
 canonical path first with no-replace semantics, then tags and cover are
 written and the database link is recorded. Each run holds a per-file
