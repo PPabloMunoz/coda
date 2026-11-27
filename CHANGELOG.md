@@ -166,6 +166,16 @@ before upgrading and back up your database (see
   plus the first 50 failed paths. The last completed run persists, so it
   survives a restart; the Rescan button polls the endpoint and reports
   queued/running/done/failed instead of a one-shot toast.
+- Operational guardrails: single-instance lock (`coda.db.lock` next to the
+  database — a second process on the same data dir exits immediately
+  instead of scanning, moving, and tagging concurrently); automatic
+  pre-migration backup (`coda.db.bak-<schema-version>` via `VACUUM INTO`
+  before pending migrations, one per version, never overwritten — a failed
+  snapshot aborts startup); cover cache GC on every scan and after the
+  weekly inactive-artist sweep (orphaned, tombstoned, and stale-MIME files
+  go away); and OpenRC log rotation (`/etc/logrotate.d/coda`, weekly,
+  4 kept) from the installer. `coda --check-config` also prints the lock
+  path. See `operations.md` and `architecture.md`.
 
 ## [0.2.0] - 2026-11-26
 

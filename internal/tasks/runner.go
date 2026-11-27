@@ -161,6 +161,7 @@ func (r *Runner) scanRoots(ctx context.Context, forcePrune bool) {
 		auto := r.autoLinkMoves(ctx)
 		r.cleanupCredits(ctx)
 		r.pruneArtists(ctx)
+		r.pruneOrphanCovers(ctx)
 		r.queue.markScanDone(ScanResult{
 			AutoLinked:      auto.Linked,
 			Moved:           auto.Moved,
@@ -283,6 +284,7 @@ func (r *Runner) scanRoots(ctx context.Context, forcePrune bool) {
 	autolinkMs := time.Since(autolinkStart).Milliseconds()
 	r.cleanupCredits(ctx)
 	r.pruneArtists(ctx)
+	r.pruneOrphanCovers(ctx)
 	r.queue.markScanDone(ScanResult{
 		Found:           found,
 		Upserted:        upserted,
@@ -390,7 +392,8 @@ func (r *Runner) cleanupCredits(ctx context.Context) {
 	}
 }
 
-// deleteInactiveArtists hard-deletes soft-deleted artists with no credits left.
+// deleteInactiveArtists hard-deletes soft-deleted artists with no credits left,
+// then sweeps cover files orphaned by the cascade.
 func (r *Runner) deleteInactiveArtists(ctx context.Context) {
 	n, err := r.st.DeleteInactiveArtists(ctx)
 	if err != nil {
@@ -399,5 +402,14 @@ func (r *Runner) deleteInactiveArtists(ctx context.Context) {
 	}
 	if n > 0 {
 		r.log.Infof("deleted %d artists", n)
+	}
+	r.pruneOrphanCovers(ctx)
+}
+
+// pruneOrphanCovers sweeps cached cover files with no live row (deleted
+// releases/groups/artists, tombstones, stale MIME siblings, old temps).
+func (r *Runner) pruneOrphanCovers(ctx context.Context) {
+	if n := PruneOrphanCovers(ctx, r.st, r.coverDir, r.log); n > 0 {
+		r.log.Infof("cover GC removed %d orphan files", n)
 	}
 }

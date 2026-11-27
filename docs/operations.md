@@ -17,6 +17,8 @@ Inside it:
 | --- | --- |
 | `coda.db` | SQLite database (WAL mode) |
 | `coda.db-wal`, `coda.db-shm` | WAL sidecars; part of the database while running |
+| `coda.db.lock` | single-instance lock file; a second process on the same data dir exits immediately instead of starting |
+| `coda.db.bak-*` | automatic pre-migration snapshots (`bak-<schema-version>`); see below |
 | `covers/` | cached release covers (`<release-mbid>.jpg|png|webp`) and artist photos (`artist-<mbid>.*`) |
 | `config.yaml` | config (created on first start; the installer runs env-only) |
 
@@ -41,7 +43,22 @@ sqlite3 /var/lib/coda/coda.db ".backup '/backup/coda.db'"
 ```
 
 Restore by stopping Coda, replacing the directory contents, and starting
-again. Covers can be omitted from a backup; they are re-fetched lazily.
+again. Covers can be omitted from a backup; stale ones are swept by the
+cover GC on the next scan and missing ones are re-fetched lazily.
+
+## Automatic pre-migration backup
+
+Before applying pending schema migrations at startup, Coda snapshots the
+database to `coda.db.bak-<schema-version>` next to the database (a
+consistent `VACUUM INTO` copy, safe with WAL active). One snapshot per
+schema version is kept and never overwritten; a failed snapshot aborts
+startup so a migration never runs unprotected. Fresh databases and
+up-to-date databases need no snapshot.
+
+To roll back after a bad migration: stop Coda, replace `coda.db` with the
+`coda.db.bak-*` copy, restore the previous binary version, and start
+again. Old `coda.db.bak-*` files can be removed by hand once you are happy
+with the new version.
 
 ## Upgrades
 
@@ -66,7 +83,7 @@ off by default; enable with `CODA_DEBUG=1` (or `CODA_LOG_LEVEL=debug`).
 | Install | Where |
 | --- | --- |
 | systemd | `journalctl -u coda -f` |
-| OpenRC | `/var/log/coda.log` |
+| OpenRC | `/var/log/coda.log`, rotated weekly by `/etc/logrotate.d/coda` (4 kept; needs the `logrotate` package) |
 | Docker | `docker compose logs -f` |
 | Manual | stderr; redirect to a file as you like |
 
@@ -125,6 +142,12 @@ literal, the configured `host`, or a name in `allowed_hosts`. Add the name
 you browse by to `allowed_hosts` in `config.yaml` (or `CODA_ALLOWED_HOSTS`)
 and restart; verify with `coda --check-config`. Behind a reverse proxy,
 list the public hostname. Direct-IP access never needs listing.
+
+**"another coda instance is already running".** A second Coda process was
+started on the same data dir (same `CODA_DB_PATH`). Stop the first one;
+only one process may own a database. The guard is a lock file
+(`coda.db.lock` next to the database) and is host-local — it does not
+arbitrate network filesystems.
 
 **UI seems stale.** A failed scan keeps serving the last good data. Check
 `GET /api/v1/scan/status` first: it reports `queued`/`running` while work

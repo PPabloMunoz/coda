@@ -34,7 +34,8 @@ curl -fsSL https://raw.githubusercontent.com/PPabloMunoz/coda/main/scripts/insta
 The script downloads the latest release binary, verifies it against
 `checksums.txt`, installs it to `/usr/local/bin/coda`, creates a `coda`
 service user, writes a service definition (systemd unit, or OpenRC script
-plus `conf.d` — env-only config, no YAML editing), and starts the service.
+plus `conf.d` — env-only config, no YAML editing; OpenRC also gets a
+logrotate config at `/etc/logrotate.d/coda`), and starts the service.
 On hosts with neither init system it installs the binary and prints how to
 run it by hand.
 
@@ -62,7 +63,7 @@ dir and user; a flag you pass overrides them. Back up first on 0.x (see
 
 ```sh
 sudo systemctl disable --now coda          # or: rc-service coda stop; rc-update del coda
-sudo rm -f /usr/local/bin/coda /etc/systemd/system/coda.service /etc/conf.d/coda /etc/init.d/coda
+sudo rm -f /usr/local/bin/coda /etc/systemd/system/coda.service /etc/conf.d/coda /etc/init.d/coda /etc/logrotate.d/coda
 sudo userdel coda                          # if you don't want the user anymore
 sudo rm -rf /var/lib/coda                  # state: DB + covers + config
 ```

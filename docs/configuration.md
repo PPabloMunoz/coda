@@ -73,7 +73,7 @@ you browse by to `allowed_hosts` (see
 | `CODA_ROOTS` | music roots, **replaces** the file's `roots`. OS path list: `:`-separated on macOS/Linux, `;`-separated on Windows. Empty entries are dropped. |
 | `CODA_ALLOWED_HOSTS` | extra Host-allowlist names, **replaces** the file's `allowed_hosts`. Comma-separated bare hostnames/IPs (`coda.lan,nas.local`); surrounding spaces tolerated, empty entries dropped. Empty keeps the file's list. |
 | `CODA_SCAN_TIMEOUT` | scan bound as Go duration (`15m`), wins over the file; empty keeps the file's `scan_timeout` (default `10m`) |
-| `CODA_DB_PATH` | SQLite database path (the `covers/` cache dir lands next to it) |
+| `CODA_DB_PATH` | SQLite database path (the `covers/` cache dir, `coda.db.lock` and pre-migration `coda.db.bak-*` sidecars all land next to it) |
 | `CODA_DEBUG` | `1`/`true`/`yes`/`on` enables debug logs on stderr |
 | `CODA_LOG_LEVEL` | set to `debug` for the same effect |
 | `GIN_MODE` | `debug` opts back into Gin's debug route dump; release is the default |
@@ -101,6 +101,7 @@ allowed_hosts: 1
 scan_timeout: 10m0s
 db: /home/you/.local/share/coda/coda.db
 covers: /home/you/.local/share/coda/covers
+lock: /home/you/.local/share/coda/coda.db.lock
 ```
 
 An empty `host` prints `host: (all interfaces)` and `listen: :8687`.
@@ -139,4 +140,7 @@ overrides them.
 
 The cover cache is a `covers/` directory next to the database file: one
 file per release (`<release-mbid>.jpg|png|webp`) plus `artist-<mbid>.*`
-photos. See [operations.md](operations.md) for backups.
+photos. Files orphaned by deletes are swept on the next scan. The
+`coda.db.lock` single-instance lock and automatic `coda.db.bak-*`
+pre-migration snapshots live next to the database too. See
+[operations.md](operations.md) for backups.
