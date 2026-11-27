@@ -12,6 +12,9 @@ import {
   baseName,
   coverSourceBadge,
   coverSourceText,
+  dirName,
+  extension,
+  formatBytes,
   plural,
   typeLabel,
   yearOf,
@@ -26,6 +29,7 @@ import {
   externalLink,
   link,
   mbLogoLink,
+  normalize,
   openDeleteDialog,
   setBusy,
   setFormStatus,
@@ -36,10 +40,23 @@ import {
   toast,
 } from './ui.js';
 
-function renderFileCell(files) {
+function formatKey(file) {
+  return (file.format_hint || extension(file.path)).toUpperCase();
+}
+
+function renderFileCell(track, onLink) {
   const cell = el('td');
-  if (!files || files.length === 0) {
-    cell.append(el('span', 'chip', 'No file'));
+  const files = track.files || [];
+  if (files.length === 0) {
+    const button = el(
+      'button',
+      'btn btn--sm btn--secondary btn--icon btn--icon-link',
+      'Link file',
+    );
+    button.type = 'button';
+    button.setAttribute('aria-label', `Link a file to ${track.title}`);
+    button.addEventListener('click', () => onLink(track));
+    cell.append(button);
     return cell;
   }
 
@@ -57,7 +74,7 @@ function renderFileCell(files) {
   return cell;
 }
 
-function renderTrack(track, options = {}) {
+function renderTrack(track, onLink, options = {}) {
   const row = el('tr');
 
   const disc = el('td', 'num', String(track.disc));
@@ -93,12 +110,12 @@ function renderTrack(track, options = {}) {
     creditCell,
     length,
     mbCell,
-    renderFileCell(track.files),
+    renderFileCell(track, onLink),
   );
   return row;
 }
 
-function renderTrackTable(tracks, showDisc) {
+function renderTrackTable(tracks, showDisc, onLink) {
   const tableWrap = el('div', 'table-wrap');
   const table = el('table', 'data-table');
   const thead = el('thead');
@@ -122,7 +139,9 @@ function renderTrackTable(tracks, showDisc) {
     const fragment = document.createDocumentFragment();
     for (const track of tracks) {
       fragment.append(
-        showDisc ? renderTrack(track) : renderTrack(track, { hideDisc: true }),
+        showDisc
+          ? renderTrack(track, onLink)
+          : renderTrack(track, onLink, { hideDisc: true }),
       );
     }
     tbody.append(fragment);
@@ -169,6 +188,15 @@ function initReleaseGroupPage() {
   const switchStatus = byId('switch-status');
   const switchSubmit = byId('switch-submit');
 
+  const linkDialog = byId('link-dialog');
+  const linkTrackFormat = byId('link-track-format');
+  const linkTrackTitle = byId('link-track-title');
+  const linkTrackMeta = byId('link-track-meta');
+  const linkSearch = byId('link-search');
+  const linkList = byId('link-list');
+  const linkStatus = byId('link-status');
+  const linkSubmit = byId('link-submit');
+
   let currentGroup = null;
   let currentRelease = null;
   let heroSwitchButton = null;
@@ -176,6 +204,163 @@ function initReleaseGroupPage() {
   let coverMetaToken = 0;
   let switchInFlight = false;
   let coverInFlight = false;
+  let linkTrack = null;
+  let linkFiles = [];
+  let linkSelectedID = null;
+  let linkToken = 0;
+  let linkInFlight = false;
+
+  function closeLinkDialog() {
+    linkDialog.close();
+  }
+
+  function openLinkDialog(track) {
+    linkTrack = track;
+    linkSelectedID = null;
+    linkSubmit.disabled = true;
+    linkSubmit.textContent = 'Link file';
+    linkTrackFormat.textContent = String(
+      track.number || track.position || 'TRK',
+    );
+    linkTrackTitle.textContent = track.title;
+    linkTrackMeta.textContent = `Disc ${track.disc} · Track ${track.number || track.position}`;
+    linkSearch.value = '';
+    setFormStatus(linkStatus, '');
+    clear(linkList);
+    if (!linkDialog.open) linkDialog.showModal();
+    if (window.matchMedia('(pointer: fine)').matches) {
+      requestAnimationFrame(() => linkSearch.focus());
+    }
+    void loadLinkFiles();
+  }
+
+  function renderLinkList() {
+    clear(linkList);
+    const query = normalize(linkSearch.value);
+    const visible = linkFiles.filter(
+      (file) =>
+        !query ||
+        normalize(`${file.path} ${formatKey(file)}`).includes(query),
+    );
+    if (visible.length === 0) {
+      linkList.append(
+        el(
+          'div',
+          'picker__empty',
+          linkFiles.length === 0
+            ? 'No unlinked files. New files appear here after a scan.'
+            : 'No matching files.',
+        ),
+      );
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    for (const file of visible) {
+      const button = el('button', 'pick');
+      button.type = 'button';
+      button.setAttribute(
+        'aria-pressed',
+        linkSelectedID === file.id ? 'true' : 'false',
+      );
+      const art = el('span', 'pick__art');
+      art.append(el('span', 'pick__num', formatKey(file)));
+      const main = el('span', 'pick__main');
+      main.append(el('span', 'pick__title', baseName(file.path)));
+      main.append(
+        el(
+          'span',
+          'pick__meta',
+          `${dirName(file.path) || '—'} · ${formatBytes(file.size_bytes)}`,
+        ),
+      );
+      button.append(art, main, el('span', 'pick__mark', '✓'));
+      button.addEventListener('click', () => {
+        linkSelectedID = file.id;
+        for (const node of linkList.querySelectorAll('.pick')) {
+          node.setAttribute(
+            'aria-pressed',
+            node === button ? 'true' : 'false',
+          );
+        }
+        linkSubmit.disabled = false;
+        setFormStatus(linkStatus, '');
+      });
+      fragment.append(button);
+    }
+    linkList.append(fragment);
+  }
+
+  async function loadLinkFiles() {
+    const token = ++linkToken;
+    linkSubmit.disabled = true;
+    setFormStatus(linkStatus, 'Loading unlinked files…');
+    clear(linkList);
+    linkList.append(el('div', 'picker__empty', 'Loading unlinked files…'));
+    try {
+      const result = await api.listAllUnlinkedFiles();
+      if (token !== linkToken || !linkTrack) return;
+      linkFiles = result.items;
+      linkSelectedID = null;
+      renderLinkList();
+      if (linkFiles.length === 0) {
+        setFormStatus(linkStatus, '');
+      } else {
+        setFormStatus(
+          linkStatus,
+          `${linkFiles.length} unlinked file${linkFiles.length === 1 ? '' : 's'}`,
+        );
+      }
+    } catch (error) {
+      if (token !== linkToken) return;
+      clear(linkList);
+      const message =
+        error instanceof Error ? error.message : String(error);
+      linkList.append(
+        el('div', 'picker__empty', `Could not load files: ${message}`),
+      );
+      setFormStatus(linkStatus, `Could not load files: ${message}`, 'error');
+    }
+  }
+
+  async function submitLink() {
+    if (!linkTrack || !linkSelectedID || linkInFlight) return;
+    const track = linkTrack;
+    const fileID = linkSelectedID;
+    const file = linkFiles.find((candidate) => candidate.id === fileID);
+    linkInFlight = true;
+    setBusy(linkSubmit, true, 'Linking…');
+    setFormStatus(linkStatus, 'Moving file and writing tags…');
+    try {
+      const response = await api.link(fileID, track.id);
+      if (!response.ok) {
+        let message = response.statusText;
+        try {
+          const body = await response.json();
+          if (typeof body?.error === 'string' && body.error) {
+            message = body.error;
+          }
+        } catch {
+          /* keep status text */
+        }
+        setFormStatus(linkStatus, message, 'error');
+        return;
+      }
+      toast(
+        `${file ? baseName(file.path) : 'File'} linked to “${track.title}”.`,
+        'ok',
+      );
+      closeLinkDialog();
+      await load();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      setFormStatus(linkStatus, `Could not link file: ${message}`, 'error');
+    } finally {
+      linkInFlight = false;
+      setBusy(linkSubmit, false);
+      linkSubmit.disabled = !linkSelectedID;
+    }
+  }
 
   function openSwitch(release) {
     if (!currentGroup || !release) return;
@@ -523,13 +708,14 @@ function initReleaseGroupPage() {
           renderTrackTable(
             tracks.filter((track) => track.disc === disc),
             false,
+            openLinkDialog,
           ),
         );
         fragment.append(section);
       }
       tracksWrap.append(fragment);
     } else {
-      tracksWrap.append(renderTrackTable(tracks, false));
+      tracksWrap.append(renderTrackTable(tracks, false, openLinkDialog));
     }
   }
 
@@ -627,6 +813,20 @@ function initReleaseGroupPage() {
   dialog.addEventListener('click', (event) => {
     if (event.target === dialog) closeSwitch();
   });
+  byId('link-close').addEventListener('click', closeLinkDialog);
+  byId('link-cancel').addEventListener('click', closeLinkDialog);
+  linkDialog.addEventListener('click', (event) => {
+    if (event.target === linkDialog) closeLinkDialog();
+  });
+  linkDialog.addEventListener('close', () => {
+    linkTrack = null;
+    linkSelectedID = null;
+    linkToken += 1;
+    setFormStatus(linkStatus, '');
+    clear(linkList);
+  });
+  linkSearch.addEventListener('input', renderLinkList);
+  linkSubmit.addEventListener('click', () => void submitLink());
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const id = extractMbid(mbidInput.value);

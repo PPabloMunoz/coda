@@ -42,7 +42,8 @@ A scan:
   MusicBrainz release-track ID that resolves to a known track gets the same
   treatment as a manual link — tags rewritten, cover embedded, file moved
   to its canonical library path. Everything else is left for the link
-  wizard; nothing is guessed.
+  wizard (or the Link file button on an unlinked track row); nothing is
+  guessed.
 - Removes stale tag-write temp copies: `.coda-tag-*` files older than 24
   hours are deleted at the start of each scan (each removal is logged).
   Fresh ones are left alone so in-flight link operations are never
