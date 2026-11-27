@@ -1,7 +1,7 @@
 // Single-file detail page: stats, tags, MusicBrainz link panel.
 // Ported from `src/pages/file.astro` — Astro guards dropped, runtime identical.
 
-import { api, mbUrl } from './api.js';
+import { api, creditName, mbUrl } from './api.js';
 import {
   baseName,
   formatBytes,
@@ -38,6 +38,67 @@ function initFilePage() {
     status.classList.add('is-error');
     status.textContent = message;
     content.hidden = true;
+  }
+
+  function renderLinkedPanel(file) {
+    const panel = el('div', 'link-panel');
+    const body = el('div', 'link-panel__body');
+
+    body.append(el('p', 'eyebrow', 'MusicBrainz link'));
+
+    const track = file.track;
+    if (track) {
+      body.append(el('h2', 'link-panel__title', track.title));
+      const artist = creditName(track.credit);
+      if (artist) body.append(el('p', 'muted', artist));
+
+      const releaseLine = el('div', 'link-panel__meta');
+      releaseLine.append(el('span', '', 'Release'));
+      releaseLine.append(el('span', '', track.release?.title || '—'));
+      body.append(releaseLine);
+
+      if (track.group?.id) {
+        const groupLine = el('div', 'link-panel__meta');
+        groupLine.append(el('span', '', 'Group'));
+        groupLine.append(
+          link(
+            `/release-group?id=${encodeURIComponent(track.group.id)}`,
+            track.group.title,
+          ),
+        );
+        body.append(groupLine);
+      }
+
+      const trackLine = el('div', 'link-panel__meta');
+      trackLine.append(el('span', '', 'Track'));
+      const trackId = el('span', 'mono', track.id);
+      trackId.translate = false;
+      trackLine.append(trackId);
+      body.append(trackLine);
+    } else {
+      body.append(el('h2', 'link-panel__title', 'This file is linked'));
+      const trackLine = el('div', 'link-panel__meta');
+      trackLine.append(el('span', '', 'Track'));
+      const trackId = el('span', 'mono', file.track_id || '—');
+      trackId.translate = false;
+      trackLine.append(trackId);
+      body.append(trackLine);
+    }
+
+    if (track?.group?.id) {
+      const panelActions = el('div', 'link-panel__actions');
+      panelActions.append(
+        link(
+          `/release-group?id=${encodeURIComponent(track.group.id)}`,
+          'Open release group',
+          'btn btn--secondary',
+        ),
+      );
+      body.append(panelActions);
+    }
+
+    panel.append(body);
+    linkPanel.replaceChildren(panel);
   }
 
   function renderLinkPanel(file) {
@@ -247,13 +308,13 @@ function initFilePage() {
       }
 
       // The detail table renders for every file; only the link status
-      // text and the Track MBID value change with link state. The link
-      // panel stays unlinked-only since it is a link CTA.
-      const linked = Boolean(file.track_id);
+      // text and the Track MBID value change with link state. The panel
+      // below shares one slot: linked files show the track context
+      // (including the release-group link), unlinked files show the CTA.
       byId('detail-wrap').hidden = false;
-      linkPanel.hidden = linked;
-      if (linked) {
-        linkPanel.replaceChildren();
+      linkPanel.hidden = false;
+      if (Boolean(file.track_id)) {
+        renderLinkedPanel(file);
       } else {
         renderLinkPanel(file);
       }
