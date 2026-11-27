@@ -61,11 +61,11 @@ function renderFileCell(track, onLink) {
   }
 
   const first = files[0];
-  const anchor = link(
-    `/file?id=${first.id}`,
-    baseName(first.path),
-    'track-file',
-  );
+  const anchor = link(`/file?id=${first.id}`, '', 'track-file');
+  const fileName = el('span', 'track-file__name', baseName(first.path));
+  const fileArrow = el('span', 'track-file__arrow', '↗');
+  fileArrow.setAttribute('aria-hidden', 'true');
+  anchor.append(fileName, fileArrow);
   anchor.title = files.map((file) => file.path).join('\n');
   cell.append(anchor);
   if (files.length > 1) {
