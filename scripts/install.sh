@@ -345,6 +345,24 @@ EOF
   chmod +x "/etc/init.d/${BIN_NAME}"
   touch "/var/log/${BIN_NAME}.log"
   chown "$SERVICE_USER:$SERVICE_GROUP" "/var/log/${BIN_NAME}.log"
+  # OpenRC keeps the log fd open across rotations (no reopen signal), so
+  # copytruncate is required. Warn when logrotate is absent: the config is
+  # inert but correct if it is installed later.
+  log "writing logrotate config..."
+  cat >"/etc/logrotate.d/${BIN_NAME}" <<EOF
+/var/log/${BIN_NAME}.log {
+    weekly
+    rotate 4
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+}
+EOF
+  if ! have logrotate; then
+    log "warning: logrotate is not installed; /var/log/${BIN_NAME}.log will grow without bound until you install it."
+  fi
   rc-update add "$BIN_NAME" default
   rc-service "$BIN_NAME" stop >/dev/null 2>&1 || true
   rc-service "$BIN_NAME" start

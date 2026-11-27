@@ -17,6 +17,7 @@ import (
 
 	"github.com/ppablomunoz/coda/internal/artwork"
 	"github.com/ppablomunoz/coda/internal/config"
+	"github.com/ppablomunoz/coda/internal/lock"
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
 	"github.com/ppablomunoz/coda/internal/server"
 	"github.com/ppablomunoz/coda/internal/store"
@@ -151,8 +152,18 @@ func main() {
 		fmt.Printf("scan_timeout: %s\n", cfg.ScanTimeout)
 		fmt.Printf("db: %s\n", dbPath)
 		fmt.Printf("covers: %s\n", config.CoverDirFromDBPath(dsn))
+		fmt.Printf("lock: %s\n", lock.PathForDB(dsn))
 		return
 	}
+
+	// Single-instance guard: a second process on the same data dir would
+	// scan, move, and tag the same files concurrently. Fail fast instead.
+	lockHandle, err := lock.Acquire(dsn)
+	if err != nil {
+		log.Error(err.Error())
+		os.Exit(1)
+	}
+	defer func() { _ = lockHandle.Release() }()
 
 	st, err := store.NewStore(dsn, cfg.Roots, log)
 	if err != nil {

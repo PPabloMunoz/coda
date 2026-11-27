@@ -22,7 +22,8 @@ fully static (`CGO_ENABLED=0`).
 | --- | --- |
 | `cmd/coda` | wiring: config → store → clients → queue/runner/scheduler → HTTP server, 10s graceful shutdown |
 | `internal/config` | `config.yaml` + env overrides; per-OS config/DB paths; SQLite pragmas; covers dir |
-| `internal/store` | SQLite via a single connection; goose migrations; all queries; scan sync |
+| `internal/store` | SQLite via a single connection; pre-migration backup; goose migrations; all queries; scan sync |
+| `internal/lock` | single-instance lock file (`<db>.lock`, flock) taken at startup |
 | `internal/errors` | the error vocabulary: `AppError{Code, Message, Cause}` and sentinels |
 | `internal/library` | filesystem walk (symlink-skipping) and canonical library paths |
 | `internal/tags` | tag read/write via go.senan.xyz/taglib; atomic writes; link key set |
@@ -35,15 +36,20 @@ fully static (`CGO_ENABLED=0`).
 
 ## Startup and request flow
 
-`cmd/coda/main.go` resolves config and the DB path, opens the store (which
-runs migrations), validates roots, creates the shared MusicBrainz client
+`cmd/coda/main.go` resolves config and the DB path, takes the single-instance
+lock (`<db>.lock`, fail-fast when held), opens the store (which snapshots
+the DB to `<db>.bak-<schema-version>` when migrations are pending, then
+runs them), validates roots, creates the shared MusicBrainz client
 and artwork fetcher, then starts the task runner, the scheduler, and the
 HTTP server, and enqueues the initial scan.
 
 Requests flow: UI or scripts → Gin (`/api/v1`) → handler → store → SQLite.
-Handlers never talk to the filesystem directly; tag and file mutations go
-through `internal/tags` (atomic temp-copy + rename) and `internal/library`
-(path building).
+Handlers do touch the filesystem: link/unlink/refresh handlers move audio
+files (via `internal/library` path building) and rewrite tags and embedded
+covers (via `internal/tags` atomic temp-copy + rename), and cover handlers
+read and write the covers dir. Mutation handlers serialize through
+fine-grained locks (per-file, per-release/per-artist cover,
+per-destination) shared with the background queue.
 
 ## Errors
 
@@ -55,11 +61,24 @@ to clients. Codes are the API contract — never rename one.
 
 ## Background tasks
 
-A serial FIFO queue runs every job; nothing runs concurrently with
-anything else. The scheduler ticks: scan every 6h, orphan-credit prune
-every 24h, delete-inactive-artists weekly. A scan gets 10 minutes, a
-discography import 30. Scan failures are logged and the previous database
-state keeps serving.
+A serial FIFO queue runs every queued job (scans, imports, prunes, file
+jobs) one at a time — but it is not the only thing running. Cover prefetch
+runs detached from the queue (a 4-worker pool per artist plus the artist
+photo, derived from the runner context so it survives the finished import
+task but cancels on shutdown; `Start` waits for it), and HTTP handlers run
+concurrently with the queue (cover lazy-fetch, uploads, link/unlink tag
+writes). Serialization across queue and handlers comes from fine-grained
+locks: per-file operation locks, per-release/per-artist cover locks, and
+per-destination move locks. The scheduler ticks: scan every 6h,
+orphan-credit prune (`prune-artists`) every 24h, `delete-inactive-artists`
+weekly. A scan gets 10 minutes, a discography import 30. Scan failures are
+logged and the previous database state keeps serving.
+
+Scan cleanup (and the weekly inactive-artist sweep right after it) also
+runs cover GC: cached files whose release/artist row is gone, whose row is
+a removal tombstone, or whose extension no longer matches the row's MIME
+go away, along with stale cover temp files. Unknown files in the covers
+dir are never touched.
 
 Import lifecycles and pending release file jobs (cover embeds/clears,
 relinks) are durable: they persist in `artist_imports` and
