@@ -25,10 +25,15 @@ A scan:
   tag-write temp copies (`.coda-tag-*`), AppleDouble `._*` files, and
   trash stay out of the library. A root whose own name starts with `.`
   is still scanned. Point roots at real directories.
-- Syncs the database by absolute path. Unchanged files keep their links.
-  Rows for files that vanished from disk are pruned, and their links go
-  with them. A file you moved outside Coda re-appears at its new path and,
-  if its tags still carry the release-track MBID, is auto-linked again.
+- Syncs the database by absolute path in streamed batches. Settled files
+  (same size+mtime with stored tag evidence) skip the tag read entirely,
+  so a rescan of an unchanged library parses nothing; only new, changed,
+  or never-read files are parsed once to store their release-track MBID.
+  Unchanged files keep their links. Rows for files that vanished from disk
+  are pruned, and their links go with them. A file you moved outside Coda
+  re-appears at its new path and, if its tags still carry the
+  release-track MBID, is auto-linked again (including tracks imported
+  since the last scan).
 - Fails safe on missing or unreadable roots: a root whose walk did not
   complete never prunes, and a root whose complete walk suddenly yields
   zero files keeps its rows (with a warning in the logs) instead of

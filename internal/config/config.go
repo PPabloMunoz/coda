@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v4"
 
@@ -26,13 +27,19 @@ type Config struct {
 	// as is the concrete Host above; anything else must be listed here
 	// (reverse proxies, mDNS names, Docker hostnames).
 	AllowedHosts []string `yaml:"allowed_hosts"`
+	// ScanTimeout bounds the whole library scan (walk + sync + auto-link
+	// + prune). Zero means the default (10m); it is defaulted on load.
+	ScanTimeout time.Duration `yaml:"scan_timeout"`
 }
 
 const (
 	ConfigName = "config.yaml"
 )
 
-var DefaultConfig = Config{Host: "", Port: 8687, Roots: []string{}}
+// DefaultScanTimeout is the scan bound when scan_timeout is omitted.
+const DefaultScanTimeout = 10 * time.Minute
+
+var DefaultConfig = Config{Host: "", Port: 8687, Roots: []string{}, ScanTimeout: DefaultScanTimeout}
 
 // ListenAddr returns the TCP address for http.Server.Addr. An empty Host
 // keeps the previous all-interfaces behavior (":port").
@@ -101,12 +108,14 @@ func GetConfig(log *utils.Logger) (*Config, error) {
 	return &conf, nil
 }
 
-// applyEnvOverrides lets CODA_HOST, CODA_PORT, CODA_ROOTS and
-// CODA_ALLOWED_HOSTS override the file.
+// applyEnvOverrides lets CODA_HOST, CODA_PORT, CODA_ROOTS,
+// CODA_ALLOWED_HOSTS and CODA_SCAN_TIMEOUT override the file.
 // CODA_ROOTS uses the OS path list (filepath.SplitList): colon-separated
 // on macOS/Linux, semicolon-separated on Windows. Empty entries are dropped.
 // CODA_ALLOWED_HOSTS is comma-separated and replaces the file's
 // allowed_hosts. An empty CODA_HOST leaves the file's host untouched.
+// CODA_SCAN_TIMEOUT is a Go duration (e.g. "15m"); empty leaves the file's
+// scan_timeout untouched.
 func applyEnvOverrides(conf *Config) error {
 	if h := strings.TrimSpace(os.Getenv("CODA_HOST")); h != "" {
 		conf.Host = h
@@ -135,6 +144,16 @@ func applyEnvOverrides(conf *Config) error {
 			}
 		}
 		conf.AllowedHosts = hosts
+	}
+	if raw := strings.TrimSpace(os.Getenv("CODA_SCAN_TIMEOUT")); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			return fmt.Errorf("config: invalid CODA_SCAN_TIMEOUT %q: %w", raw, err)
+		}
+		conf.ScanTimeout = d
+	}
+	if conf.ScanTimeout == 0 {
+		conf.ScanTimeout = DefaultScanTimeout
 	}
 	return nil
 }
@@ -166,10 +185,18 @@ func normalizeHost(conf *Config) error {
 }
 
 // validateConfig cleans root paths, resolves symlinks, and rejects empty,
-// relative, duplicate, or nested roots plus invalid hosts/ports and non-directories.
+// relative, duplicate, or nested roots plus invalid hosts/ports,
+// non-directories, and non-positive scan timeouts. A zero scan timeout
+// means "omitted" and defaults to DefaultScanTimeout (old configs and
+// direct validateConfig callers without the field).
 func validateConfig(conf *Config) error {
 	if conf.Port < 1 || conf.Port > 65535 {
 		return fmt.Errorf("port must be between 1-65535")
+	}
+	if conf.ScanTimeout == 0 {
+		conf.ScanTimeout = DefaultScanTimeout
+	} else if conf.ScanTimeout < 0 {
+		return fmt.Errorf("scan_timeout must be positive")
 	}
 
 	if err := normalizeHost(conf); err != nil {

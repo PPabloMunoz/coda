@@ -120,7 +120,13 @@ value is `400 INVALID_INPUT`.
   "failed_count": 1,
   "failed_files": ["/music/broken.mp3"],
   "kept_roots": [],
-  "incomplete_roots": []
+  "incomplete_roots": [],
+  "walk_ms": 800,
+  "sync_ms": 2200,
+  "tag_read_ms": 1500,
+  "autolink_ms": 900,
+  "tag_reads": 5,
+  "unchanged": 113
 }
 ```
 
@@ -132,7 +138,10 @@ lifecycle; counters come from the last completed run's sync pass
 queued/running until it finishes. `failed_files` keeps the first 50
 failed paths while `failed_count` is the full count. `kept_roots` lists
 roots whose prune was skipped by a fail-safe guard, `incomplete_roots`
-lists roots whose walk did not complete. Only `done`/`failed` runs
+lists roots whose walk did not complete. `walk_ms`, `sync_ms`,
+`tag_read_ms`, and `autolink_ms` are per-phase timings; `tag_reads`
+counts tag parses attempted and `unchanged` counts settled files that
+skipped the tag read. Only `done`/`failed` runs
 persist, so the last completed run survives a restart; `queued`/`running`
 are memory-only.
 

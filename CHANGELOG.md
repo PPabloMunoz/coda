@@ -87,6 +87,17 @@ before upgrading and back up your database (see
 
 ### Changed
 
+- Scans are incremental and batched: `local_files` stores tag evidence
+  (`mb_track_id` + `tags_read_at`, migration `0010`) so a settled rescan
+  skips tag parses (same size+mtime with evidence), failed reads retry
+  next time, upserts are batched multi-row statements in streamed 500-file
+  chunks, and the auto-link pass pages DB candidates instead of re-reading
+  every file's tags. Newly imported tracks still auto-link files with
+  unresolved MBIDs. The scan bound is configurable (`scan_timeout`,
+  default `10m`, `CODA_SCAN_TIMEOUT` override) and per-phase timings
+  (`walk_ms`, `sync_ms`, `tag_read_ms`, `autolink_ms`) plus `tag_reads` /
+  `unchanged` counters are logged and exposed in `GET /scan/status`.
+  See `configuration.md`, `api.md`, `architecture.md`, and `library.md`.
 - Cover image responses use `Cache-Control: no-cache` with ETag
   revalidation instead of a 24h max-age, so uploads, refreshes, and
   removals show up without a hard reload; `fetched_at` carries

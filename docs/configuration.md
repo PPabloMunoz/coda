@@ -25,11 +25,15 @@ roots:
 # and the host above (reverse proxies, mDNS names, Docker hostnames).
 # Empty by default; ports are ignored when matching.
 allowed_hosts: []
+# scan_timeout: bounds the whole library scan (walk + sync + auto-link +
+# prune) as a Go duration. Default 10m; increase for large or slow
+# (network) libraries.
+scan_timeout: 10m
 ```
 
 Validation: `host` must be empty or a bare hostname/IP (`127.0.0.1`,
 `::1`); `host:port` values are rejected — the port belongs in `port`.
-`port` must be 1–65535; each `roots` entry must be an absolute
+`port` must be 1–65535; `scan_timeout` must be a positive Go duration (`10m`, `15m`, `1h`); each `roots` entry must be an absolute
 path to an existing directory; duplicates and nested roots (one inside
 another) are rejected; symlinks are resolved to their real path.
 `allowed_hosts` entries must be bare hostnames/IPs (lowercased, trailing
@@ -68,6 +72,7 @@ you browse by to `allowed_hosts` (see
 | `CODA_PORT` | server port (1–65535), wins over the file |
 | `CODA_ROOTS` | music roots, **replaces** the file's `roots`. OS path list: `:`-separated on macOS/Linux, `;`-separated on Windows. Empty entries are dropped. |
 | `CODA_ALLOWED_HOSTS` | extra Host-allowlist names, **replaces** the file's `allowed_hosts`. Comma-separated bare hostnames/IPs (`coda.lan,nas.local`); surrounding spaces tolerated, empty entries dropped. Empty keeps the file's list. |
+| `CODA_SCAN_TIMEOUT` | scan bound as Go duration (`15m`), wins over the file; empty keeps the file's `scan_timeout` (default `10m`) |
 | `CODA_DB_PATH` | SQLite database path (the `covers/` cache dir lands next to it) |
 | `CODA_DEBUG` | `1`/`true`/`yes`/`on` enables debug logs on stderr |
 | `CODA_LOG_LEVEL` | set to `debug` for the same effect |
@@ -93,6 +98,7 @@ roots: 2
   - /other
 allowed_hosts: 1
   - coda.lan
+scan_timeout: 10m0s
 db: /home/you/.local/share/coda/coda.db
 covers: /home/you/.local/share/coda/covers
 ```

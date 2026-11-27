@@ -74,13 +74,18 @@ off by default; enable with `CODA_DEBUG=1` (or `CODA_LOG_LEVEL=debug`).
 
 - `GET /api/v1/health` answers `200 ok` (the Docker image health-checks
   this itself).
-- `coda --check-config` prints the resolved listen address, port, roots, DB and covers
-  paths and exits without starting — the first thing to run when config
-  seems off.
+- `coda --check-config` prints the resolved listen address, port, roots, scan
+  timeout, DB and covers paths and exits without starting — the first
+  thing to run when config seems off.
 - `GET /api/v1/scan/status` reports the scan lifecycle
   (`idle`/`queued`/`running`/`done`/`failed`) with timestamps, duration,
-  sync/auto-link counters, and the last failure plus the first 50 failed
-  paths. The last `done`/`failed` run survives a restart.
+  per-phase timings (`walk_ms`, `sync_ms`, `tag_read_ms`, `autolink_ms`),
+  incremental counters (`tag_reads`, `unchanged`), sync/auto-link counters,
+  and the last failure plus the first 50 failed paths. A settled rescan
+  shows `tag_reads` near 0 with `unchanged` covering the library. The last
+  `done`/`failed` run survives a restart. `scan_timeout` (default `10m`,
+  `CODA_SCAN_TIMEOUT` override) bounds the whole scan; increase it for
+  large or slow libraries.
 
 ## Troubleshooting
 

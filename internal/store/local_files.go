@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/tags"
@@ -423,13 +424,40 @@ type SyncStats struct {
 	Upserted int
 	Pruned   int64
 	// Failed lists paths whose tags could not be read. They are still
-	// synced (keeping any existing track link) but never link by MBID,
-	// and they don't fail the sync.
+	// synced (keeping any existing track link) but are retried on the next
+	// scan (tags_read_at stays NULL), and they don't fail the sync.
 	Failed []string
 	// KeptRoots lists root paths whose prune was skipped by a fail-safe
 	// guard (incomplete walk or unexpected empty result).
 	KeptRoots []string
+	// TagReads counts tag parses attempted (unchanged files skip the read).
+	TagReads int
+	// Unchanged counts files skipped as settled (same size+mtime with tag
+	// evidence already stored).
+	Unchanged int
+	// TagReadMs is time spent in tag reads, milliseconds.
+	TagReadMs int64
 }
+
+// syncReadTags is the tag-read seam for SyncFileChunk. Tests stub it to
+// count reads without real audio files.
+var syncReadTags = tags.Read
+
+// AutoLinkCandidate is a file whose stored tag MBID resolves to a known
+// track but whose link differs (unlinked or changed). The auto-link pass
+// pages these by id instead of re-reading every file's tags.
+type AutoLinkCandidate struct {
+	ID        int64
+	MbTrackID string
+}
+
+// syncUpsertBatch is the chunk size for walk streaming and batched writes.
+// One short write transaction covers a chunk, so the single SQLite
+// connection is yielded between chunks.
+const syncUpsertBatch = 500
+
+// SyncChunkSize is the walk-streaming chunk size (exported for the runner).
+const SyncChunkSize = syncUpsertBatch
 
 // SyncOptions controls prune guards in SyncLocalFiles.
 type SyncOptions struct {
@@ -442,8 +470,377 @@ type SyncOptions struct {
 	ForcePrune bool
 }
 
-// SyncLocalFiles upserts scanned files by path (preserving track_id), links
-// tracks via on-disk MBIDs, and prunes rows with scanned_at older than scanStart.
+// knownFile is the previous-scan state for one path: on-disk stat plus tag
+// evidence. tagsReadAt nil means never read (or a failed read awaiting
+// retry), which forces a tag parse even when size+mtime match.
+type knownFile struct {
+	mtime      int64
+	size       int64
+	tagsReadAt *string
+}
+
+// chunkRow is one file classified for the batched upsert.
+type chunkRow struct {
+	rootID int64
+	path   string
+	size   int64
+	mtime  int64
+	hint   string
+	mb     string // validated MBID or "" (NULL)
+}
+
+// loadRootIDs resolves configured root paths to their DB ids.
+func (st *Store) loadRootIDs(ctx context.Context) (map[string]int64, error) {
+	rootIDs := map[string]int64{}
+	if len(st.rootPaths) == 0 {
+		return rootIDs, nil
+	}
+	ph := placeholders(len(st.rootPaths))
+	args := make([]any, len(st.rootPaths))
+	for i, r := range st.rootPaths {
+		args[i] = r
+	}
+	rows, err := st.db.QueryContext(ctx,
+		"SELECT id, path FROM roots WHERE path in ("+ph+")",
+		args...,
+	)
+	if err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("get roots: %w", err),
+		)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int64
+		var path string
+		if err := rows.Scan(&id, &path); err != nil {
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan roots: %w", err),
+			)
+		}
+		rootIDs[path] = id
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading rows: %w", err),
+		)
+	}
+	return rootIDs, nil
+}
+
+// loadExistingCounts returns per-root row counts before the scan, for the
+// empty-root prune guard.
+func (st *Store) loadExistingCounts(ctx context.Context, rootIDs map[string]int64) (map[int64]int64, error) {
+	out := make(map[int64]int64, len(rootIDs))
+	if len(rootIDs) == 0 {
+		return out, nil
+	}
+	ph := placeholders(len(rootIDs))
+	ids := make([]any, 0, len(rootIDs))
+	for _, id := range rootIDs {
+		ids = append(ids, id)
+	}
+	rows, err := st.db.QueryContext(ctx,
+		"SELECT root_id, COUNT(*) FROM local_files WHERE root_id IN ("+ph+") GROUP BY root_id",
+		ids...,
+	)
+	if err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("count existing local files: %w", err),
+		)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var rootID, n int64
+		if err := rows.Scan(&rootID, &n); err != nil {
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan existing counts: %w", err),
+			)
+		}
+		out[rootID] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading existing counts: %w", err),
+		)
+	}
+	return out, nil
+}
+
+// LoadSyncState resolves root ids and pre-scan row counts for a streaming
+// scan. The runner loads this once, then calls SyncFileChunk per walk chunk
+// and PruneScanned at the end.
+func (st *Store) LoadSyncState(ctx context.Context) (map[string]int64, map[int64]int64, error) {
+	rootIDs, err := st.loadRootIDs(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	counts, err := st.loadExistingCounts(ctx, rootIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return rootIDs, counts, nil
+}
+
+// queryKnownChunk loads previous-scan state for chunk paths only, so
+// streaming chunks never load the whole library.
+func (st *Store) queryKnownChunk(ctx context.Context, paths []string) (map[string]knownFile, error) {
+	out := make(map[string]knownFile, len(paths))
+	if len(paths) == 0 {
+		return out, nil
+	}
+	ph := placeholders(len(paths))
+	args := make([]any, len(paths))
+	for i, p := range paths {
+		args[i] = p
+	}
+	rows, err := st.db.QueryContext(ctx,
+		"SELECT path, mtime_ns, size_bytes, tags_read_at FROM local_files WHERE path IN ("+ph+")",
+		args...,
+	)
+	if err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query known local files: %w", err),
+		)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var path string
+		var mtime, size int64
+		var tagsReadAt sql.NullString
+		if err := rows.Scan(&path, &mtime, &size, &tagsReadAt); err != nil {
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("scan known local files: %w", err),
+			)
+		}
+		k := knownFile{mtime: mtime, size: size}
+		if tagsReadAt.Valid {
+			s := tagsReadAt.String
+			k.tagsReadAt = &s
+		}
+		out[path] = k
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading known local files: %w", err),
+		)
+	}
+	return out, nil
+}
+
+// SyncFileChunk upserts one bounded walk chunk: tag reads happen outside any
+// write tx, then one short tx applies batched multi-row upserts. It never
+// touches track_id (linking is the auto-link pass's job); it only stores
+// mb_track_id evidence and tags_read_at. Unchanged files (same size+mtime
+// with evidence) skip the tag parse. A failed read preserves the old
+// evidence but clears tags_read_at so the next scan retries. No pruning.
+func (st *Store) SyncFileChunk(ctx context.Context, files []ScannedFile, scanStart string, rootIDs map[string]int64) (SyncStats, error) {
+	var stats SyncStats
+	if len(files) == 0 {
+		return stats, nil
+	}
+	if strings.TrimSpace(scanStart) == "" {
+		return SyncStats{}, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("sync local files: missing scanStart"),
+		)
+	}
+	for _, f := range files {
+		if _, ok := rootIDs[f.LibraryRoot]; !ok {
+			return SyncStats{}, apperrors.Wrap(
+				apperrors.ErrNotFound,
+				fmt.Errorf("unknown root %q", f.LibraryRoot),
+			)
+		}
+	}
+
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	known, err := st.queryKnownChunk(ctx, paths)
+	if err != nil {
+		return SyncStats{}, err
+	}
+
+	var unchanged, readOK, readFailed []chunkRow
+	for _, f := range files {
+		select {
+		case <-ctx.Done():
+			return SyncStats{}, ctx.Err()
+		default:
+		}
+		id := rootIDs[f.LibraryRoot]
+		base := chunkRow{rootID: id, path: f.Path, size: f.SizeBytes, mtime: f.MtimeNs, hint: f.FormatHint}
+		if prev, ok := known[f.Path]; ok && prev.mtime == f.MtimeNs && prev.size == f.SizeBytes && prev.tagsReadAt != nil {
+			unchanged = append(unchanged, base)
+			stats.Unchanged++
+			continue
+		}
+		t0 := time.Now()
+		snap, rerr := syncReadTags(f.Path)
+		stats.TagReadMs += time.Since(t0).Milliseconds()
+		stats.TagReads++
+		if rerr != nil {
+			st.log.Warnf("scan sync file=%q read tags: %v", f.Path, rerr)
+			stats.Failed = append(stats.Failed, f.Path)
+			readFailed = append(readFailed, base)
+			continue
+		}
+		if raw := strings.TrimSpace(snap.MBReleaseTrackID); raw != "" {
+			if utils.ValidateMBID(raw) == nil {
+				base.mb = raw
+			}
+		}
+		readOK = append(readOK, base)
+	}
+
+	if err := st.upsertChunkTx(ctx, scanStart, unchanged, readOK, readFailed); err != nil {
+		return SyncStats{}, err
+	}
+	stats.Upserted = len(files)
+	return stats, nil
+}
+
+// upsertChunkTx applies the three classified groups in one short write tx
+// with multi-row statements: unchanged rows only bump scanned_at,
+// read-OK rows overwrite mb evidence, failed rows clear tags_read_at to
+// force a retry while preserving the old mb and track link.
+func (st *Store) upsertChunkTx(ctx context.Context, scanStart string, unchanged, readOK, readFailed []chunkRow) error {
+	if len(unchanged) == 0 && len(readOK) == 0 && len(readFailed) == 0 {
+		return nil
+	}
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("begin tx local files: %w", err),
+		)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if len(unchanged) > 0 {
+		if err := execUpsert(ctx, tx, scanStart, unchanged, false, false); err != nil {
+			return err
+		}
+	}
+	if len(readOK) > 0 {
+		if err := execUpsert(ctx, tx, scanStart, readOK, true, false); err != nil {
+			return err
+		}
+	}
+	if len(readFailed) > 0 {
+		if err := execUpsert(ctx, tx, scanStart, readFailed, false, true); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("commit sync local files: %w", err),
+		)
+	}
+	return nil
+}
+
+// execUpsert builds one multi-row INSERT ... ON CONFLICT for rows.
+// overwriteMB sets mb_track_id/tags_read_at from the new read; clearTags
+// sets tags_read_at=NULL to force a retry (failed reads).
+func execUpsert(ctx context.Context, tx *sql.Tx, scanStart string, rows []chunkRow, overwriteMB, clearTags bool) error {
+	const cols = "(root_id, path, size_bytes, mtime_ns, format_hint, scanned_at, track_id, mb_track_id, tags_read_at)"
+	var sb strings.Builder
+	sb.WriteString("INSERT INTO local_files" + cols + " VALUES ")
+	args := make([]any, 0, len(rows)*9)
+	for i, r := range rows {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString("(?,?,?,?,?,?,?,?,?)")
+		args = append(args, r.rootID, r.path, r.size, r.mtime, r.hint, scanStart, nil)
+		if overwriteMB {
+			args = append(args, utils.NullIfEmpty(r.mb), scanStart)
+		} else {
+			args = append(args, nil, nil)
+		}
+	}
+	sb.WriteString(` ON CONFLICT(path) DO UPDATE SET
+		root_id=excluded.root_id,
+		size_bytes=excluded.size_bytes,
+		mtime_ns=excluded.mtime_ns,
+		format_hint=excluded.format_hint,
+		scanned_at=excluded.scanned_at`)
+	if overwriteMB {
+		sb.WriteString(`, mb_track_id=excluded.mb_track_id,
+		tags_read_at=excluded.tags_read_at`)
+	} else if clearTags {
+		sb.WriteString(`, tags_read_at=NULL`)
+	}
+	if _, err := tx.ExecContext(ctx, sb.String(), args...); err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("upsert %d files: %w", len(rows), err),
+		)
+	}
+	return nil
+}
+
+// PruneScanned deletes rows whose scanned_at predates scanStart, guarded per
+// root: incomplete walks never prune, and complete walks yielding zero
+// files keep rows unless ForcePrune is set.
+func (st *Store) PruneScanned(ctx context.Context, rootIDs map[string]int64, existingCounts map[int64]int64, foundCounts map[string]int, scanStart string, opts SyncOptions) (int64, []string, error) {
+	var pruned int64
+	var kept []string
+	incomplete := make(map[string]struct{}, len(opts.IncompleteRoots))
+	for _, r := range opts.IncompleteRoots {
+		incomplete[r] = struct{}{}
+	}
+	for rootPath, id := range rootIDs {
+		select {
+		case <-ctx.Done():
+			return pruned, kept, ctx.Err()
+		default:
+		}
+		if _, ok := incomplete[rootPath]; ok {
+			st.log.Warnf("scan sync root=%q walk incomplete: keeping %d rows, skipping prune", rootPath, existingCounts[id])
+			kept = append(kept, rootPath)
+			continue
+		}
+		if foundCounts[rootPath] == 0 && existingCounts[id] > 0 && !opts.ForcePrune {
+			st.log.Warnf("scan sync root=%q yielded 0 files but has %d rows: keeping rows, skipping prune (use force prune to clear)", rootPath, existingCounts[id])
+			kept = append(kept, rootPath)
+			continue
+		}
+		res, err := st.db.ExecContext(ctx,
+			"DELETE FROM local_files WHERE root_id = ? AND scanned_at < ?",
+			id,
+			scanStart,
+		)
+		if err != nil {
+			return pruned, kept, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("[store] prune root %d: %w", id, err),
+			)
+		}
+		if n, err := res.RowsAffected(); err == nil {
+			pruned += n
+		}
+	}
+	sort.Strings(kept)
+	return pruned, kept, nil
+}
+
+// SyncLocalFiles upserts scanned files by path (preserving track_id),
+// stores tag evidence for incremental auto-link, and prunes rows with
+// scanned_at older than scanStart.
 //
 // Pruning is guarded per root: a root whose walk was incomplete never
 // prunes, and a root whose complete walk unexpectedly yields zero files
@@ -452,11 +849,13 @@ type SyncOptions struct {
 // link data. Normal pruning (individual files genuinely removed) is
 // unaffected.
 //
-// Tag reads happen before the transaction: with the store's single SQLite
+// Tag reads happen outside any write tx: with the store's single SQLite
 // connection, holding a write tx across per-file filesystem I/O would stall
 // every other request for the whole scan. Files unchanged since the previous
-// scan (same size and mtime) skip the tag parse entirely, so rescanning a
-// settled library is DB-cheap.
+// scan (same size+mtime with tag evidence) skip the tag parse entirely, so
+// rescanning a settled library is DB-cheap. Linking is not done here —
+// the auto-link pass links via stored mb_track_id — so the write tx is a
+// short batched multi-row upsert per chunk.
 func (st *Store) SyncLocalFiles(ctx context.Context,
 	files []ScannedFile, scanStart string, opts SyncOptions,
 ) (SyncStats, error) {
@@ -469,289 +868,89 @@ func (st *Store) SyncLocalFiles(ctx context.Context,
 			fmt.Errorf("sync local files: missing scanStart"),
 		)
 	}
-
-	rootIDs := map[string]int64{}
-	ph := placeholders(len(st.rootPaths))
-	args := make([]any, len(st.rootPaths))
-
-	for i, r := range st.rootPaths {
-		args[i] = r
-	}
-
-	rows, err := st.db.QueryContext(ctx,
-		"SELECT id, path FROM roots WHERE path in ("+ph+")",
-		args...,
-	)
+	rootIDs, err := st.loadRootIDs(ctx)
 	if err != nil {
-		return SyncStats{}, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("get roots: %w", err),
-		)
+		return SyncStats{}, err
 	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var id int64
-		var path string
-		if err := rows.Scan(&id, &path); err != nil {
-			return SyncStats{}, apperrors.Wrap(
-				apperrors.ErrInternal,
-				fmt.Errorf("scan roots: %w", err),
-			)
-		}
-		rootIDs[path] = id
-	}
-
-	if err := rows.Err(); err != nil {
-		return SyncStats{}, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("reading rows: %w", err),
-		)
-	}
-
-	// Phase 1: on-disk state as of the previous scan, so unchanged files
-	// can skip the tag parse.
-	known := make(map[string][2]int64, len(files)) // path -> {mtime_ns, size}
-	existingCounts := make(map[int64]int64, len(rootIDs))
-	ph = placeholders(len(rootIDs))
-	ids := make([]any, 0, len(rootIDs))
-	for _, id := range rootIDs {
-		ids = append(ids, id)
-	}
-	krows, err := st.db.QueryContext(ctx,
-		"SELECT root_id, path, mtime_ns, size_bytes FROM local_files WHERE root_id IN ("+ph+")",
-		ids...,
-	)
-	if err != nil {
-		return SyncStats{}, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("query known local files: %w", err),
-		)
-	}
-	for krows.Next() {
-		var rootID int64
-		var path string
-		var mtime, size int64
-		if err := krows.Scan(&rootID, &path, &mtime, &size); err != nil {
-			_ = krows.Close()
-			return SyncStats{}, apperrors.Wrap(
-				apperrors.ErrInternal,
-				fmt.Errorf("scan known local files: %w", err),
-			)
-		}
-		known[path] = [2]int64{mtime, size}
-		existingCounts[rootID]++
-	}
-	if err := krows.Err(); err != nil {
-		_ = krows.Close()
-		return SyncStats{}, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("reading known local files: %w", err),
-		)
-	}
-	_ = krows.Close()
-
-	// Phase 2: tag reads outside any tx. A read failure still syncs the
-	// file (keeping its existing link) but is reported, never fatal.
-	stats := SyncStats{Found: len(files)}
-
-	type row struct {
-		rootID  int64
-		path    string
-		size    int64
-		mtime   int64
-		hint    string
-		trackID string
-	}
-	batch := make([]row, 0, len(files))
-	seen := make(map[string]struct{})
-	for _, f := range files {
-		id, ok := rootIDs[f.LibraryRoot]
-		if !ok {
-			return SyncStats{}, apperrors.Wrap(
-				apperrors.ErrNotFound,
-				fmt.Errorf("unknown root %q", f.LibraryRoot),
-			)
-		}
-
-		r := row{rootID: id, path: f.Path, size: f.SizeBytes, mtime: f.MtimeNs, hint: f.FormatHint}
-		if prev, ok := known[f.Path]; ok && prev[0] == f.MtimeNs && prev[1] == f.SizeBytes {
-			batch = append(batch, r) // unchanged since the last scan
-			continue
-		}
-
-		snap, err := tags.Read(f.Path)
-		if err != nil {
-			st.log.Warnf("scan sync file=%q read tags: %v", f.Path, err)
-			stats.Failed = append(stats.Failed, f.Path)
-			batch = append(batch, r)
-			continue
-		}
-		if tid := strings.TrimSpace(snap.MBReleaseTrackID); tid != "" {
-			r.trackID = tid
-			seen[tid] = struct{}{}
-		}
-		batch = append(batch, r)
-	}
-
-	// Phase 3: one short write tx — all DB work, no filesystem I/O.
-	tx, err := st.db.BeginTx(ctx, nil)
-	if err != nil {
-		return SyncStats{}, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("begin tx local files: %w", err),
-		)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	exists, err := st.existingTracks(ctx, tx, seen)
+	existingCounts, err := st.loadExistingCounts(ctx, rootIDs)
 	if err != nil {
 		return SyncStats{}, err
 	}
 
-	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO local_files(root_id, path, size_bytes,
-			mtime_ns, format_hint, scanned_at, track_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(path) DO UPDATE SET
-			root_id=excluded.root_id,
-			size_bytes=excluded.size_bytes,
-			mtime_ns=excluded.mtime_ns,
-			format_hint=excluded.format_hint,
-			scanned_at=excluded.scanned_at,
-			track_id=COALESCE(excluded.track_id, local_files.track_id)`,
-	)
-	if err != nil {
-		return SyncStats{}, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("prepare query: %w", err),
-		)
-	}
-	defer func() { _ = stmt.Close() }()
-
-	for _, r := range batch {
-		trackID := ""
-		if r.trackID != "" {
-			if _, ok := exists[r.trackID]; ok {
-				trackID = r.trackID
-			}
-		}
-
-		if _, err := stmt.ExecContext(
-			ctx,
-			r.rootID,
-			r.path,
-			r.size,
-			r.mtime,
-			r.hint,
-			scanStart,
-			utils.NullIfEmpty(trackID),
-		); err != nil {
-			return SyncStats{}, apperrors.Wrap(
-				apperrors.ErrInternal,
-				fmt.Errorf("upsert %q: %w", r.path, err),
-			)
-		}
-		stats.Upserted++
-	}
-
-	// Per-root found counts for the empty-root guard.
-	foundCounts := make(map[string]int, len(files))
+	stats := SyncStats{Found: len(files)}
+	foundCounts := make(map[string]int, len(rootIDs))
 	for _, f := range files {
 		foundCounts[f.LibraryRoot]++
 	}
-	incomplete := make(map[string]struct{}, len(opts.IncompleteRoots))
-	for _, r := range opts.IncompleteRoots {
-		incomplete[r] = struct{}{}
-	}
-
-	for rootPath, id := range rootIDs {
-		if _, ok := incomplete[rootPath]; ok {
-			st.log.Warnf("scan sync root=%q walk incomplete: keeping %d rows, skipping prune", rootPath, existingCounts[id])
-			stats.KeptRoots = append(stats.KeptRoots, rootPath)
-			continue
+	for start := 0; start < len(files); start += syncUpsertBatch {
+		select {
+		case <-ctx.Done():
+			return SyncStats{}, ctx.Err()
+		default:
 		}
-		if foundCounts[rootPath] == 0 && existingCounts[id] > 0 && !opts.ForcePrune {
-			st.log.Warnf("scan sync root=%q yielded 0 files but has %d rows: keeping rows, skipping prune (use force prune to clear)", rootPath, existingCounts[id])
-			stats.KeptRoots = append(stats.KeptRoots, rootPath)
-			continue
-		}
-		res, err := tx.ExecContext(ctx,
-			"DELETE FROM local_files WHERE root_id = ? AND scanned_at < ?",
-			id,
-			scanStart,
-		)
+		end := min(start+syncUpsertBatch, len(files))
+		chunkStats, err := st.SyncFileChunk(ctx, files[start:end], scanStart, rootIDs)
 		if err != nil {
-			return SyncStats{}, apperrors.Wrap(
-				apperrors.ErrInternal,
-				fmt.Errorf("[store] prune root %d: %w", id, err),
-			)
+			return SyncStats{}, err
 		}
-		if n, err := res.RowsAffected(); err == nil {
-			stats.Pruned += n
-		}
-	}
-	sort.Strings(stats.KeptRoots)
-
-	if err := tx.Commit(); err != nil {
-		return SyncStats{}, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("commit sync local files: %w", err),
-		)
+		stats.Upserted += chunkStats.Upserted
+		stats.TagReads += chunkStats.TagReads
+		stats.Unchanged += chunkStats.Unchanged
+		stats.TagReadMs += chunkStats.TagReadMs
+		stats.Failed = append(stats.Failed, chunkStats.Failed...)
 	}
 
+	pruned, kept, err := st.PruneScanned(ctx, rootIDs, existingCounts, foundCounts, scanStart, opts)
+	if err != nil {
+		return SyncStats{}, err
+	}
+	stats.Pruned = pruned
+	stats.KeptRoots = kept
 	return stats, nil
 }
 
-// existingTracks returns the subset of ids present in tracks, prefetching
-// them in chunks inside tx so the sync loop needs no per-file lookup.
-func (st *Store) existingTracks(ctx context.Context, tx *sql.Tx, ids map[string]struct{}) (map[string]struct{}, error) {
-	out := make(map[string]struct{}, len(ids))
-	if len(ids) == 0 {
-		return out, nil
+// ListAutoLinkCandidates returns files whose stored tag MBID resolves to a
+// known track but whose link differs, paged by id. The scan auto-link pass
+// uses this instead of re-reading every file's tags; files whose track is
+// not imported yet are excluded by the JOIN until the import lands.
+func (st *Store) ListAutoLinkCandidates(ctx context.Context, afterID int64, limit int) ([]AutoLinkCandidate, error) {
+	if limit <= 0 {
+		limit = 200
 	}
-
-	all := make([]string, 0, len(ids))
-	for id := range ids {
-		all = append(all, id)
+	rows, err := st.db.QueryContext(ctx, `
+		SELECT lf.id, lf.mb_track_id
+		FROM local_files lf
+		JOIN tracks t ON t.id = lf.mb_track_id
+		WHERE lf.root_id IN (SELECT id FROM roots WHERE active = 1)
+		  AND lf.id > ?
+		  AND lf.mb_track_id IS NOT NULL
+		  AND (lf.track_id IS NULL OR lf.track_id <> lf.mb_track_id)
+		ORDER BY lf.id LIMIT ?`,
+		afterID, limit,
+	)
+	if err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("query auto-link candidates: %w", err),
+		)
 	}
-	sort.Strings(all)
-
-	const chunk = 500
-	for start := 0; start < len(all); start += chunk {
-		end := min(start+chunk, len(all))
-		ph := placeholders(end - start)
-		args := make([]any, 0, end-start)
-		for _, id := range all[start:end] {
-			args = append(args, id)
-		}
-		qrows, err := tx.QueryContext(ctx,
-			"SELECT id FROM tracks WHERE id IN ("+ph+")", args...)
-		if err != nil {
+	defer func() { _ = rows.Close() }()
+	out := []AutoLinkCandidate{}
+	for rows.Next() {
+		var c AutoLinkCandidate
+		if err := rows.Scan(&c.ID, &c.MbTrackID); err != nil {
 			return nil, apperrors.Wrap(
 				apperrors.ErrInternal,
-				fmt.Errorf("query existing tracks: %w", err),
+				fmt.Errorf("scan auto-link candidate: %w", err),
 			)
 		}
-		for qrows.Next() {
-			var id string
-			if err := qrows.Scan(&id); err != nil {
-				_ = qrows.Close()
-				return nil, apperrors.Wrap(
-					apperrors.ErrInternal,
-					fmt.Errorf("scan existing tracks: %w", err),
-				)
-			}
-			out[id] = struct{}{}
-		}
-		if err := qrows.Err(); err != nil {
-			_ = qrows.Close()
-			return nil, apperrors.Wrap(
-				apperrors.ErrInternal,
-				fmt.Errorf("reading existing tracks: %w", err),
-			)
-		}
-		_ = qrows.Close()
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("reading auto-link candidates: %w", err),
+		)
 	}
 	return out, nil
 }
@@ -776,7 +975,9 @@ func (st *Store) GetRoot(ctx context.Context, id int64) (*Root, error) {
 // Link ties a local file to a track and records its current on-disk state.
 // newPath/sizeBytes/mtimeNs describe the file AFTER the caller finished tag
 // writes and (optionally) the rename, so the DB never points at a path that
-// doesn't exist yet. Filesystem work stays in the caller; store is DB-only.
+// doesn't exist yet. It also stores the tag evidence (mb_track_id and
+// tags_read_at) so settled rescans skip the tag parse. Filesystem work
+// stays in the caller; store is DB-only.
 func (st *Store) Link(ctx context.Context,
 	fileID int64, trackID, newPath string, sizeBytes, mtimeNs int64,
 ) error {
@@ -829,9 +1030,10 @@ func (st *Store) Link(ctx context.Context,
 
 	res, err := st.db.ExecContext(ctx, `
 		UPDATE local_files
-		SET track_id = ?, path = ?, size_bytes = ?, mtime_ns = ?
+		SET track_id = ?, path = ?, size_bytes = ?, mtime_ns = ?,
+			mb_track_id = ?, tags_read_at = CURRENT_TIMESTAMP
 		WHERE id = ?`,
-		trackID, newPath, sizeBytes, mtimeNs, fileID,
+		trackID, newPath, sizeBytes, mtimeNs, trackID, fileID,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -850,12 +1052,14 @@ func (st *Store) Link(ctx context.Context,
 }
 
 // Unlink clears the track link for a local file, keeping the file row.
+// It also clears the stored tag evidence (the caller just cleared the
+// tags), so the next scan re-reads rather than trusting stale MBIDs.
 // A missing or hidden (inactive root) file is ErrNotFound.
 func (st *Store) Unlink(ctx context.Context, localFileID int64) error {
 	// Update relation
 	res, err := st.db.ExecContext(ctx, `
 		UPDATE local_files
-		SET track_id = NULL
+		SET track_id = NULL, mb_track_id = NULL, tags_read_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND `+activeRootCond,
 		localFileID,
 	)

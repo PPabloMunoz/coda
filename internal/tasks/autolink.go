@@ -107,79 +107,71 @@ func trackIDFromTags(snap *tags.Snapshot) (string, bool) {
 }
 
 // autoLinkMoves links exactly-identifiable files and moves them to their
-// library path: for every tracked file whose on-disk MBReleaseTrackID is a
-// valid MBID resolving to a known track, it rewrites tags + cover (same as
-// manual link), renames into place, and records the link. Best-effort by
-// design: per-file failures only log, occupied destinations are skipped and
+// library path: for every file whose stored tag MBID resolves to a known
+// track but whose link differs, it rewrites tags + cover (same as manual
+// link), renames into place, and records the link. Candidates come from a
+// paged DB query on stored tag evidence, so a settled rescan reads no tags
+// here (tag parses happen once in the sync). Best-effort by design:
+// per-file failures only log, occupied destinations are skipped and
 // reported via SkippedConflict, and the scan never fails because of this
 // pass.
 func (r *Runner) autoLinkMoves(ctx context.Context) AutoLinkStats {
 	var stats AutoLinkStats
 
 	const batch = 200
-	var all []store.LocalFile
-	for offset := 0; ; offset += batch {
+	var afterID int64
+	for {
 		select {
 		case <-ctx.Done():
 			return stats
 		default:
 		}
-		files, total, err := r.st.ListFiles(ctx, store.FileListOptions{
-			PageOptions: store.PageOptions{Limit: batch, Offset: offset},
-		})
+		candidates, err := r.st.ListAutoLinkCandidates(ctx, afterID, batch)
 		if err != nil {
-			r.log.Warnf("scan auto-link list files: %v", err)
+			r.log.Warnf("scan auto-link list candidates: %v", err)
 			return stats
 		}
-		all = append(all, files...)
-		if len(all) >= total || len(files) < batch {
+		if len(candidates) == 0 {
 			break
 		}
-	}
+		for _, c := range candidates {
+			select {
+			case <-ctx.Done():
+				return stats
+			default:
+			}
+			afterID = c.ID
+			stats.Checked++
 
-	for _, f := range all {
-		select {
-		case <-ctx.Done():
-			return stats
-		default:
-		}
-		stats.Checked++
-
-		snap, err := tags.Read(f.Path)
-		if err != nil {
-			r.log.Debugf("scan auto-link file=%d read tags: %v", f.ID, err)
-			continue
-		}
-		trackID, ok := trackIDFromTags(snap)
-		if !ok {
-			continue
-		}
-
-		// The shared pipeline serializes per file and per destination,
-		// moves with no-replace semantics before writing tags, and maps an
-		// occupied destination to ErrAlreadyExists.
-		linked, moved, err := LinkFile(ctx, r.st, r.coverDir, f.ID, trackID)
-		if err != nil {
-			if apperrors.Is(err, apperrors.ErrAlreadyExists) {
-				stats.SkippedConflict++
-				r.log.Warnf("scan auto-link file=%d track=%q skipped: destination occupied", f.ID, trackID)
+			// The shared pipeline serializes per file and per destination,
+			// moves with no-replace semantics before writing tags, and maps an
+			// occupied destination to ErrAlreadyExists.
+			linked, moved, err := LinkFile(ctx, r.st, r.coverDir, c.ID, c.MbTrackID)
+			if err != nil {
+				if apperrors.Is(err, apperrors.ErrAlreadyExists) {
+					stats.SkippedConflict++
+					r.log.Warnf("scan auto-link file=%d track=%q skipped: destination occupied", c.ID, c.MbTrackID)
+					continue
+				}
+				if apperrors.Is(err, apperrors.ErrNotFound) {
+					continue
+				}
+				r.log.Warnf("scan auto-link file=%d track=%q: %v", c.ID, c.MbTrackID, err)
 				continue
 			}
-			if apperrors.Is(err, apperrors.ErrNotFound) {
+			if !linked {
 				continue
 			}
-			r.log.Warnf("scan auto-link file=%d track=%q: %v", f.ID, trackID, err)
-			continue
-		}
-		if !linked {
-			continue
-		}
 
-		stats.Linked++
-		if moved {
-			stats.Moved++
+			stats.Linked++
+			if moved {
+				stats.Moved++
+			}
+			r.log.Infof("scan auto-link file=%d track=%q moved=%t", c.ID, c.MbTrackID, moved)
 		}
-		r.log.Infof("scan auto-link file=%d track=%q moved=%t", f.ID, trackID, moved)
+		if len(candidates) < batch {
+			break
+		}
 	}
 
 	return stats

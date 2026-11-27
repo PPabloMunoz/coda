@@ -14,7 +14,9 @@ import (
 // ScanRun is the durable last completed library scan (done or failed).
 // Queued/running states stay memory-only; only terminal runs persist so the
 // status survives a restart. FailedFiles keeps the first N failed paths
-// (see tasks.MaxScanFailedFiles); FailedCount is the full count.
+// (see tasks.MaxScanFailedFiles); FailedCount is the full count. WalkMs,
+// SyncMs, TagReadMs, and AutolinkMs are per-phase timings; TagReads counts
+// tag parses and Unchanged counts files skipped as settled.
 type ScanRun struct {
 	State           string
 	QueuedAt        *time.Time
@@ -32,6 +34,12 @@ type ScanRun struct {
 	KeptRoots       []string
 	IncompleteRoots []string
 	Error           string
+	WalkMs          int64
+	SyncMs          int64
+	TagReadMs       int64
+	AutolinkMs      int64
+	TagReads        int
+	Unchanged       int
 }
 
 // UpsertScanRun inserts or replaces the singleton last-scan row (id = 1).
@@ -61,8 +69,9 @@ func (st *Store) UpsertScanRun(ctx context.Context, run ScanRun) error {
 		INSERT INTO scan_runs
 			(id, state, queued_at, started_at, finished_at, duration_ms,
 			 found, upserted, pruned, autolinked, moved, skipped_conflict,
-			 failed_count, failed_files, kept_roots, incomplete_roots, error)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 failed_count, failed_files, kept_roots, incomplete_roots, error,
+			 walk_ms, sync_ms, tag_read_ms, autolink_ms, tag_reads, unchanged)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			state=excluded.state,
 			queued_at=excluded.queued_at,
@@ -79,13 +88,21 @@ func (st *Store) UpsertScanRun(ctx context.Context, run ScanRun) error {
 			failed_files=excluded.failed_files,
 			kept_roots=excluded.kept_roots,
 			incomplete_roots=excluded.incomplete_roots,
-			error=excluded.error`,
+			error=excluded.error,
+			walk_ms=excluded.walk_ms,
+			sync_ms=excluded.sync_ms,
+			tag_read_ms=excluded.tag_read_ms,
+			autolink_ms=excluded.autolink_ms,
+			tag_reads=excluded.tag_reads,
+			unchanged=excluded.unchanged`,
 		run.State,
 		formatImportTime(run.QueuedAt), formatImportTime(run.StartedAt),
 		formatImportTime(run.FinishedAt), run.DurationMs,
 		run.Found, run.Upserted, run.Pruned,
 		run.AutoLinked, run.Moved, run.SkippedConflict,
 		run.FailedCount, failedFiles, keptRoots, incompleteRoots, run.Error,
+		run.WalkMs, run.SyncMs, run.TagReadMs, run.AutolinkMs,
+		run.TagReads, run.Unchanged,
 	); err != nil {
 		return apperrors.Wrap(
 			apperrors.ErrInternal,
@@ -104,13 +121,16 @@ func (st *Store) GetScanRun(ctx context.Context) (*ScanRun, error) {
 	if err := st.db.QueryRowContext(ctx, `
 		SELECT state, queued_at, started_at, finished_at, duration_ms,
 			found, upserted, pruned, autolinked, moved, skipped_conflict,
-			failed_count, failed_files, kept_roots, incomplete_roots, error
+			failed_count, failed_files, kept_roots, incomplete_roots, error,
+			walk_ms, sync_ms, tag_read_ms, autolink_ms, tag_reads, unchanged
 		FROM scan_runs
 		WHERE id = 1`,
 	).Scan(&run.State, &queuedAt, &startedAt, &finishedAt, &run.DurationMs,
 		&run.Found, &run.Upserted, &run.Pruned,
 		&run.AutoLinked, &run.Moved, &run.SkippedConflict,
 		&run.FailedCount, &failedFiles, &keptRoots, &incompleteRoots, &run.Error,
+		&run.WalkMs, &run.SyncMs, &run.TagReadMs, &run.AutolinkMs,
+		&run.TagReads, &run.Unchanged,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, apperrors.ErrNotFound

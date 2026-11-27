@@ -56,20 +56,26 @@ func TestScanRootsIgnoresTaggedTempFile(t *testing.T) {
 	}
 
 	// Fail fast if the fixture is broken: the seeded temp row must carry
-	// the valid MBID (proving the tag round-tripped) so the scan has
-	// something it could wrongly auto-link.
-	seeded, _, err := st.ListFiles(ctx, store.FileListOptions{PageOptions: store.PageOptions{Limit: 100}})
+	// the valid MBID as stored tag evidence (proving the tag round-tripped)
+	// so the scan has something it could wrongly auto-link. Sync stores
+	// evidence only; linking happens in the auto-link pass.
+	candidates, err := st.ListAutoLinkCandidates(ctx, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var tempLinked bool
-	for _, f := range seeded {
-		if f.Path == tempPath && f.TrackID != nil && *f.TrackID == embedTrackID {
-			tempLinked = true
+	var tempCandidate bool
+	for _, c := range candidates {
+		// Resolve the candidate path via ListFiles to compare.
+		f, ferr := st.GetFile(ctx, c.ID, false)
+		if ferr != nil {
+			continue
+		}
+		if f.Path == tempPath && c.MbTrackID == embedTrackID {
+			tempCandidate = true
 		}
 	}
-	if !tempLinked {
-		t.Fatal("seeded temp row is not linked, want MBID-tagged row (broken fixture)")
+	if !tempCandidate {
+		t.Fatal("seeded temp row is not an auto-link candidate, want MBID-tagged row (broken fixture)")
 	}
 
 	r.scanRoots(ctx, false)

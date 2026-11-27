@@ -19,6 +19,8 @@ type Runner struct {
 	mb       *musicbrainz.Client // same instance as server, don't make two (rate limiter is per-client)
 	art      *artwork.Fetcher    // nil disables cover prefetch
 	coverDir string
+	// scanTimeout bounds the whole scan (walk + sync + auto-link + prune).
+	scanTimeout time.Duration
 	// baseCtx is the queue-run context from Start. Detached cover work
 	// derives from it (not from the finished import task) so it survives
 	// the task but still cancels on shutdown.
@@ -33,18 +35,37 @@ type Runner struct {
 	log           *utils.Logger
 }
 
+// defaultScanTimeout is the scan bound when no timeout is configured.
+const defaultScanTimeout = 10 * time.Minute
+
 // NewRunner returns a Runner dispatching queued scan/import/prune work.
 func NewRunner(st *store.Store, mb *musicbrainz.Client, l *utils.Logger, q *Queue,
 	art *artwork.Fetcher, coverDir string,
 ) *Runner {
 	return &Runner{
-		queue:    q,
-		st:       st,
-		mb:       mb,
-		art:      art,
-		coverDir: coverDir,
-		log:      l,
+		queue:       q,
+		st:          st,
+		mb:          mb,
+		art:         art,
+		coverDir:    coverDir,
+		scanTimeout: defaultScanTimeout,
+		log:         l,
 	}
+}
+
+// SetScanTimeout overrides the scan bound; non-positive values keep the default.
+func (r *Runner) SetScanTimeout(d time.Duration) {
+	if d > 0 {
+		r.scanTimeout = d
+	}
+}
+
+// scanTimeoutOrDefault returns the configured scan bound or the default.
+func (r *Runner) scanTimeoutOrDefault() time.Duration {
+	if r.scanTimeout > 0 {
+		return r.scanTimeout
+	}
+	return defaultScanTimeout
 }
 
 // Start runs queued tasks serially until ctx is canceled, then waits for
@@ -87,11 +108,11 @@ func (r *Runner) spawnPrefetch(fn func(context.Context), timeout time.Duration) 
 	}()
 }
 
-// exec dispatches a task with per-kind timeouts (10m scan, 30m import).
+// exec dispatches a task with per-kind timeouts (configurable scan, 30m import).
 func (r *Runner) exec(ctx context.Context, t Task) {
 	switch t.Key {
 	case TaskScanRoots:
-		sctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		sctx, cancel := context.WithTimeout(ctx, r.scanTimeoutOrDefault())
 		defer cancel()
 		r.scanRoots(sctx, t.ForcePrune)
 	case TaskImportDiscography:
@@ -119,11 +140,15 @@ func (r *Runner) exec(ctx context.Context, t Task) {
 	}
 }
 
-// scanRoots walks configured roots, syncs DB rows by path, auto-links
-// exact-MBID files (tag rewrite + move), prunes missing files, and sweeps
-// orphan credits/collaborators. Roots whose walk is incomplete never prune;
-// roots whose complete walk yields zero files keep their rows unless
-// forcePrune is set.
+// scanRoots walks configured roots, syncs DB rows by path in streamed
+// chunks, auto-links exact-MBID files (tag rewrite + move), prunes missing
+// files, and sweeps orphan credits/collaborators. Roots whose walk is
+// incomplete never prune; roots whose complete walk yields zero files keep
+// their rows unless forcePrune is set. The walk streams into the sync in
+// bounded chunks so large libraries never materialize; each chunk is one
+// short write tx. Tag evidence (mb_track_id + tags_read_at) makes settled
+// rescans skip tag parses, and the auto-link pass pages DB candidates
+// instead of re-reading every file.
 func (r *Runner) scanRoots(ctx context.Context, forcePrune bool) {
 	r.log.Info("scanning root folders...")
 
@@ -132,38 +157,113 @@ func (r *Runner) scanRoots(ctx context.Context, forcePrune bool) {
 	r.queue.markScanRunning()
 
 	roots := r.st.RootPaths()
-	files := []store.ScannedFile{}
+	if len(roots) == 0 {
+		auto := r.autoLinkMoves(ctx)
+		r.cleanupCredits(ctx)
+		r.pruneArtists(ctx)
+		r.queue.markScanDone(ScanResult{
+			AutoLinked:      auto.Linked,
+			Moved:           auto.Moved,
+			SkippedConflict: auto.SkippedConflict,
+		}, time.Since(start))
+		r.log.Infof("scan done: found=0 upserted=0 pruned=0 failed=0 kept_roots=0 autolinked=%d moved=%d skipped=%d in %s",
+			auto.Linked, auto.Moved, auto.SkippedConflict, time.Since(start))
+		return
+	}
+
+	r.cleanupStaleTemps(ctx)
+	rootIDs, existingCounts, err := r.st.LoadSyncState(ctx)
+	if err != nil {
+		if ctx.Err() != nil || r.shuttingDown() {
+			r.log.Warnf("scan interrupted by shutdown, will resume on restart: %v", err)
+			return
+		}
+		r.queue.markScanFailed(err, time.Since(start))
+		r.log.Errorf("scan failed in %s: %v", time.Since(start), err)
+		return
+	}
+
+	foundCounts := make(map[string]int, len(rootIDs))
+	var found, upserted, tagReads, unchanged int
+	var tagReadMs int64
+	var failed []string
 	incomplete := []string{}
-	if len(roots) > 0 {
-		r.cleanupStaleTemps(ctx)
-		statuses, err := library.Scan(ctx, roots, func(f library.File) error {
-			files = append(files, store.ScannedFile{
-				LibraryRoot: f.LibraryRoot,
-				Path:        f.Path,
-				SizeBytes:   f.SizeBytes,
-				MtimeNs:     f.MtimeNs,
-				FormatHint:  f.FormatHint,
-			})
+
+	walkStart := time.Now()
+	chunk := make([]store.ScannedFile, 0, store.SyncChunkSize)
+	flush := func() error {
+		if len(chunk) == 0 {
 			return nil
-		})
+		}
+		stats, err := r.st.SyncFileChunk(ctx, chunk, scanStart, rootIDs)
 		if err != nil {
+			return err
+		}
+		upserted += stats.Upserted
+		tagReads += stats.TagReads
+		unchanged += stats.Unchanged
+		tagReadMs += stats.TagReadMs
+		failed = append(failed, stats.Failed...)
+		chunk = chunk[:0]
+		return nil
+	}
+	var syncPhaseMs int64
+	statuses, err := library.Scan(ctx, roots, func(f library.File) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		chunk = append(chunk, store.ScannedFile{
+			LibraryRoot: f.LibraryRoot,
+			Path:        f.Path,
+			SizeBytes:   f.SizeBytes,
+			MtimeNs:     f.MtimeNs,
+			FormatHint:  f.FormatHint,
+		})
+		foundCounts[f.LibraryRoot]++
+		found++
+		if len(chunk) >= store.SyncChunkSize {
+			t0 := time.Now()
+			if ferr := flush(); ferr != nil {
+				return ferr
+			}
+			syncPhaseMs += time.Since(t0).Milliseconds()
+		}
+		return nil
+	})
+	walkMs := time.Since(walkStart).Milliseconds()
+	if err != nil {
+		if ctx.Err() != nil || r.shuttingDown() {
+			r.log.Warnf("scan interrupted by shutdown, will resume on restart: %v", err)
+			return
+		}
+		r.queue.markScanFailed(err, time.Since(start))
+		r.log.Errorf("scan failed in %s: %v", time.Since(start), err)
+		return
+	}
+	for _, s := range statuses {
+		if !s.Walked {
+			r.log.Warnf("scan root=%q walk incomplete, skipping prune for its rows: %v", s.Root, s.WalkErr)
+			incomplete = append(incomplete, s.Root)
+		}
+	}
+	{
+		t0 := time.Now()
+		if err := flush(); err != nil {
 			if ctx.Err() != nil || r.shuttingDown() {
 				r.log.Warnf("scan interrupted by shutdown, will resume on restart: %v", err)
 				return
 			}
-			r.queue.markScanFailed(err, time.Since(start))
+			r.queue.markScanFailed(err, time.Since(t0))
 			r.log.Errorf("scan failed in %s: %v", time.Since(start), err)
 			return
 		}
-		for _, s := range statuses {
-			if !s.Walked {
-				r.log.Warnf("scan root=%q walk incomplete, skipping prune for its rows: %v", s.Root, s.WalkErr)
-				incomplete = append(incomplete, s.Root)
-			}
-		}
+		syncPhaseMs += time.Since(t0).Milliseconds()
 	}
 
-	stats, err := r.st.SyncLocalFiles(ctx, files, scanStart, store.SyncOptions{
+	pruneStart := time.Now()
+	pruned, kept, err := r.st.PruneScanned(ctx, rootIDs, existingCounts, foundCounts, scanStart, store.SyncOptions{
 		IncompleteRoots: incomplete,
 		ForcePrune:      forcePrune,
 	})
@@ -176,22 +276,32 @@ func (r *Runner) scanRoots(ctx context.Context, forcePrune bool) {
 		r.log.Errorf("scan failed in %s: %v", time.Since(start), err)
 		return
 	}
+	syncPhaseMs += time.Since(pruneStart).Milliseconds()
+
+	autolinkStart := time.Now()
 	auto := r.autoLinkMoves(ctx)
+	autolinkMs := time.Since(autolinkStart).Milliseconds()
 	r.cleanupCredits(ctx)
 	r.pruneArtists(ctx)
 	r.queue.markScanDone(ScanResult{
-		Found:           stats.Found,
-		Upserted:        stats.Upserted,
-		Pruned:          stats.Pruned,
+		Found:           found,
+		Upserted:        upserted,
+		Pruned:          pruned,
 		AutoLinked:      auto.Linked,
 		Moved:           auto.Moved,
 		SkippedConflict: auto.SkippedConflict,
-		Failed:          stats.Failed,
-		KeptRoots:       stats.KeptRoots,
+		Failed:          failed,
+		KeptRoots:       kept,
 		IncompleteRoots: incomplete,
+		WalkMs:          walkMs,
+		SyncMs:          syncPhaseMs,
+		TagReadMs:       tagReadMs,
+		AutolinkMs:      autolinkMs,
+		TagReads:        tagReads,
+		Unchanged:       unchanged,
 	}, time.Since(start))
-	r.log.Infof("scan done: found=%d upserted=%d pruned=%d failed=%d kept_roots=%d autolinked=%d moved=%d skipped=%d in %s",
-		stats.Found, stats.Upserted, stats.Pruned, len(stats.Failed), len(stats.KeptRoots), auto.Linked, auto.Moved, auto.SkippedConflict, time.Since(start))
+	r.log.Infof("scan done: found=%d upserted=%d pruned=%d failed=%d kept_roots=%d autolinked=%d moved=%d skipped=%d tag_reads=%d unchanged=%d walk_ms=%d sync_ms=%d tag_read_ms=%d autolink_ms=%d in %s",
+		found, upserted, pruned, len(failed), len(kept), auto.Linked, auto.Moved, auto.SkippedConflict, tagReads, unchanged, walkMs, syncPhaseMs, tagReadMs, autolinkMs, time.Since(start))
 }
 
 // importArtist imports an artist's discography, then prefetches covers in the

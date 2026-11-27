@@ -221,8 +221,8 @@ func TestSyncLocalFilesToleratesUnreadableFile(t *testing.T) {
 	}
 	tracked := "t-123"
 	if _, err := st.db.Exec(
-		`INSERT INTO local_files (root_id, path, size_bytes, mtime_ns, format_hint, scanned_at, track_id)
-		 VALUES (?, ?, ?, ?, 'mp3', '2024-01-01 00:00:00', ?)`,
+		`INSERT INTO local_files (root_id, path, size_bytes, mtime_ns, format_hint, scanned_at, track_id, tags_read_at)
+		 VALUES (?, ?, ?, ?, 'mp3', '2024-01-01 00:00:00', ?, '2024-01-01 00:00:00')`,
 		rootID, good, fi.Size(), fi.ModTime().UnixNano(), tracked,
 	); err != nil {
 		t.Fatalf("insert tracked file = %v", err)
@@ -287,8 +287,8 @@ func TestSyncLocalFilesSkipsUnchangedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := st.db.Exec(
-		`INSERT INTO local_files (root_id, path, size_bytes, mtime_ns, format_hint, scanned_at)
-		 VALUES (?, ?, ?, ?, 'mp3', '2024-01-01 00:00:00')`,
+		`INSERT INTO local_files (root_id, path, size_bytes, mtime_ns, format_hint, scanned_at, tags_read_at)
+		 VALUES (?, ?, ?, ?, 'mp3', '2024-01-01 00:00:00', '2024-01-01 00:00:00')`,
 		rootID, path, fi.Size(), mtime.UnixNano(),
 	); err != nil {
 		t.Fatalf("insert file = %v", err)

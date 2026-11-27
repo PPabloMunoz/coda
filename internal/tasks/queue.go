@@ -455,6 +455,12 @@ type ScanResult struct {
 	Failed          []string
 	KeptRoots       []string
 	IncompleteRoots []string
+	WalkMs          int64
+	SyncMs          int64
+	TagReadMs       int64
+	AutolinkMs      int64
+	TagReads        int
+	Unchanged       int
 }
 
 // markScanDone records a completed scan with its counters and persists the
@@ -483,6 +489,12 @@ func (q *Queue) markScanDone(res ScanResult, duration time.Duration) {
 	q.scan.KeptRoots = append([]string(nil), res.KeptRoots...)
 	q.scan.IncompleteRoots = append([]string(nil), res.IncompleteRoots...)
 	q.scan.Error = ""
+	q.scan.WalkMs = res.WalkMs
+	q.scan.SyncMs = res.SyncMs
+	q.scan.TagReadMs = res.TagReadMs
+	q.scan.AutolinkMs = res.AutolinkMs
+	q.scan.TagReads = res.TagReads
+	q.scan.Unchanged = res.Unchanged
 	cp := *q.scan
 	q.mu.Unlock()
 	q.persistScan(cp)
@@ -514,6 +526,12 @@ func (q *Queue) markScanFailed(err error, duration time.Duration) {
 	q.scan.KeptRoots = nil
 	q.scan.IncompleteRoots = nil
 	q.scan.Error = err.Error()
+	q.scan.WalkMs = 0
+	q.scan.SyncMs = 0
+	q.scan.TagReadMs = 0
+	q.scan.AutolinkMs = 0
+	q.scan.TagReads = 0
+	q.scan.Unchanged = 0
 	cp := *q.scan
 	q.mu.Unlock()
 	q.persistScan(cp)
@@ -543,6 +561,12 @@ func (q *Queue) persistScan(status ScanStatus) {
 		KeptRoots:       status.KeptRoots,
 		IncompleteRoots: status.IncompleteRoots,
 		Error:           status.Error,
+		WalkMs:          status.WalkMs,
+		SyncMs:          status.SyncMs,
+		TagReadMs:       status.TagReadMs,
+		AutolinkMs:      status.AutolinkMs,
+		TagReads:        status.TagReads,
+		Unchanged:       status.Unchanged,
 	}); err != nil {
 		q.debugf("scan persist %s: %v", status.State, err)
 	}
@@ -567,6 +591,12 @@ func scanStatusFromRow(run *store.ScanRun) *ScanStatus {
 		KeptRoots:       append([]string(nil), run.KeptRoots...),
 		IncompleteRoots: append([]string(nil), run.IncompleteRoots...),
 		Error:           run.Error,
+		WalkMs:          run.WalkMs,
+		SyncMs:          run.SyncMs,
+		TagReadMs:       run.TagReadMs,
+		AutolinkMs:      run.AutolinkMs,
+		TagReads:        run.TagReads,
+		Unchanged:       run.Unchanged,
 	}
 }
 
