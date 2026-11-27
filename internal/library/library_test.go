@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -68,6 +69,45 @@ func TestScanSkipsSymlinks(t *testing.T) {
 	}
 	if got[0].Path != real {
 		t.Errorf("Path = %q, want %q", got[0].Path, real)
+	}
+}
+
+func TestScanSkipsHiddenFilesAndDirs(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "song.mp3"))
+	writeFile(t, filepath.Join(root, ".hidden.mp3"))
+	writeFile(t, filepath.Join(root, ".coda-tag-abc123.mp3"))
+	writeFile(t, filepath.Join(root, ".hidden-dir", "inner.mp3"))
+	writeFile(t, filepath.Join(root, "sub", "track.ogg"))
+	writeFile(t, filepath.Join(root, "sub", ".coda-tag-xyz.wav"))
+
+	got := collectScan(t, []string{root})
+	if len(got) != 2 {
+		t.Fatalf("found %d files, want 2 (hidden skipped): %v", len(got), got)
+	}
+	for _, f := range got {
+		if strings.HasPrefix(filepath.Base(f.Path), ".") {
+			t.Errorf("hidden file indexed: %q", f.Path)
+		}
+		if strings.Contains(f.Path, ".hidden-dir") {
+			t.Errorf("file under hidden dir indexed: %q", f.Path)
+		}
+	}
+}
+
+// A root whose own name starts with "." is still scanned; only entries
+// below the root are subject to the hidden skip.
+func TestScanDotRootStillScanned(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".library")
+	writeFile(t, filepath.Join(root, "song.mp3"))
+	writeFile(t, filepath.Join(root, ".coda-tag-abc.mp3"))
+
+	got := collectScan(t, []string{root})
+	if len(got) != 1 {
+		t.Fatalf("found %d files, want 1 (dot root scanned, temp skipped): %v", len(got), got)
+	}
+	if want := filepath.Join(root, "song.mp3"); got[0].Path != want {
+		t.Errorf("Path = %q, want %q", got[0].Path, want)
 	}
 }
 

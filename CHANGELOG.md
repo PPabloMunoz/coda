@@ -53,6 +53,10 @@ before upgrading and back up your database (see
   entities as 500: link, unlink, refresh, and suggestions on a missing
   file, an unknown track, or a file under a removed root answer `404
   NOT_FOUND`, while an occupied destination still answers `409`.
+- Scans ignore hidden files and directories (names starting with `.`),
+  so a leftover `.coda-tag-*` tag-write temp copy from a crash can never
+  be indexed or auto-linked; each scan also deletes `.coda-tag-*` files
+  older than 24 hours (fresh ones are left alone for in-flight writes).
 
 ### Changed
 

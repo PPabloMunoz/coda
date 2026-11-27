@@ -41,7 +41,11 @@ type RootStatus struct {
 }
 
 // Scan walks rootPaths and calls fn for each supported audio file, skipping
-// symlinks, non-regular files, and unreadable entries. It never follows symlinks.
+// symlinks, non-regular files, unreadable entries, and hidden files and
+// directories (any base name starting with "."). This keeps tag-write temp
+// copies (".coda-tag-*"), AppleDouble "._*" files, trash, and similar
+// dotfiles out of the library. A root whose own name starts with "." is
+// still scanned; only entries below it are skipped. It never follows symlinks.
 //
 // A per-root status is returned alongside the error: a missing/unreadable
 // root or subdirectory marks that root Walked=false (recording the first
@@ -71,7 +75,14 @@ func Scan(ctx context.Context, rootPaths []string, fn func(File) error) ([]RootS
 			}
 
 			if d.IsDir() {
+				if path != r && strings.HasPrefix(d.Name(), ".") {
+					return filepath.SkipDir
+				}
 				return nil
+			}
+
+			if strings.HasPrefix(d.Name(), ".") {
+				return nil // hidden file (covers .coda-tag-* temps)
 			}
 
 			if d.Type()&fs.ModeSymlink != 0 {

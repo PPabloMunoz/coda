@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -81,6 +82,18 @@ func mutate(path string, write func(tmp string) error) error {
 	return nil
 }
 
+// tempPrefix is the hidden temp name prefix used by tempPattern. Crashed
+// tag writes can leave these copies behind; the library scan skips them
+// and removes stale ones.
+const tempPrefix = ".coda-tag-"
+
+// IsTempFile reports whether name (base or full path) is a Coda tag-write
+// temp file. It matches the tempPattern prefix, not the random suffix, so
+// it also catches leftovers from crashed writes.
+func IsTempFile(name string) bool {
+	return strings.HasPrefix(filepath.Base(name), tempPrefix)
+}
+
 // tempPattern builds a hidden temp name in the same directory that keeps
 // the original extension: taglib resolves file type by extension, so a
 // bare ".tmp" name would fail to parse.
@@ -89,7 +102,7 @@ func tempPattern(path string) string {
 	if ext != "" {
 		ext = "*" + ext
 	}
-	return ".coda-tag-" + ext
+	return tempPrefix + ext
 }
 
 // syncFile flushes a written file to stable storage before the rename.

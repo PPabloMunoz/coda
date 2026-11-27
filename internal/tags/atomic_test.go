@@ -223,3 +223,21 @@ func TestTempPatternKeepsExtension(t *testing.T) {
 		}
 	}
 }
+
+func TestIsTempFile(t *testing.T) {
+	cases := map[string]bool{
+		".coda-tag-12345.mp3":     true,
+		"/a/b/.coda-tag-xyz.wav":  true,
+		"/a/b/.coda-tag-":         true,
+		"song.mp3":                false,
+		".hidden.mp3":             false,
+		"/a/b/.coda-cover-x.tmp":  false,
+		"/a/b/coda-tag-12345.mp3": false,
+		"":                        false,
+	}
+	for name, want := range cases {
+		if got := IsTempFile(name); got != want {
+			t.Errorf("IsTempFile(%q) = %t, want %t", name, got, want)
+		}
+	}
+}

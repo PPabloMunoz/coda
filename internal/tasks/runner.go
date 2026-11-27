@@ -92,6 +92,7 @@ func (r *Runner) scanRoots(ctx context.Context, forcePrune bool) {
 	files := []store.ScannedFile{}
 	incomplete := []string{}
 	if len(roots) > 0 {
+		r.cleanupStaleTemps(ctx)
 		statuses, err := library.Scan(ctx, roots, func(f library.File) error {
 			files = append(files, store.ScannedFile{
 				LibraryRoot: f.LibraryRoot,
