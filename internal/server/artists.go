@@ -125,8 +125,8 @@ type PostArtistBody struct {
 	ID string `json:"id" binding:"required"`
 }
 
-// postArtist adds an artist from MusicBrainz by MBID, 201 created, 200 when promoting
-// a collaborator, or 304 when already in the library (refresh still requeued).
+// postArtist adds an artist from MusicBrainz by MBID: 201 created, 200 when promoting
+// a collaborator or already in the library (refresh still requeued).
 func (h *Handler) postArtist(c *gin.Context) {
 	ctx := c.Request.Context()
 	var body PostArtistBody
@@ -154,7 +154,7 @@ func (h *Handler) postArtist(c *gin.Context) {
 
 	if art != nil && art.InLibrary == 1 {
 		h.queue.EnqueueRefreshArtist(art.ID)
-		c.JSON(http.StatusNotModified, nil)
+		c.JSON(http.StatusOK, art)
 		return
 	}
 	promoting := art != nil

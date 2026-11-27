@@ -42,13 +42,17 @@ run it by hand.
 | --- | --- | --- |
 | `--version X.Y.Z` | latest | release to install |
 | `--port PORT` | `8687` | port coda listens on |
-| `--roots PATHS` | `/mnt/music` | music dirs, `:`-separated like `CODA_ROOTS` |
+| `--roots PATHS` | `/mnt/music` | existing music dirs, `:`-separated like `CODA_ROOTS` |
 | `--data-dir DIR` | `/var/lib/coda` | state dir for DB, covers and config |
 | `--user USER` | `coda` | service user to create/run as |
 | `--no-service` | — | install the binary only |
 
-The script warns when the service user cannot read/write a root — linking
-moves files, so it needs write access.
+Each `--roots` entry must already exist (create or mount it before running
+the installer). The script never creates library directories and never
+changes their ownership. It warns when the service user cannot read/write a
+root — linking moves files, so it needs write access; fix ownership
+yourself (e.g. `chown -R coda:coda /mnt/music`) or pass `--user` naming an
+account that already can.
 
 **Upgrade:** re-run the script. It keeps the previous port, roots, data
 dir and user; a flag you pass overrides them. Back up first on 0.x (see

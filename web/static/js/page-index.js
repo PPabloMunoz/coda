@@ -204,16 +204,6 @@ function initArtistsPage() {
     try {
       const response = await api.addArtist(id);
 
-      if (response.status === 304) {
-        toast(
-          'Artist is already in the library. A refresh was queued.',
-          'info',
-        );
-        closeAdd();
-        await load(true);
-        return;
-      }
-
       if (!response.ok) {
         if (response.status === 403) {
           setFormStatus(

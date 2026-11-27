@@ -275,9 +275,9 @@ func (st *Store) DeleteArtist(ctx context.Context, id string, permanent bool) (i
 			)
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO ignored (id, name, type)
-			VALUES (?, ?, 'artist')
-			ON CONFLICT(id) DO UPDATE SET name=excluded.name, type='artist'`,
+			INSERT INTO ignored (id, name, type, deleted_at)
+			VALUES (?, ?, 'artist', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+			ON CONFLICT(id) DO UPDATE SET name=excluded.name, type='artist', deleted_at=excluded.deleted_at`,
 			id, name,
 		); err != nil {
 			return 0, apperrors.Wrap(

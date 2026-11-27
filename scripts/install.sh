@@ -45,7 +45,7 @@ and service user; a flag you pass overrides it.
 Options:
   --version X.Y.Z   release to install (default: latest stable)
   --port PORT       port coda listens on (default: 8687)
-  --roots PATHS     music dirs, ':'-separated like CODA_ROOTS (default: /mnt/music)
+  --roots PATHS     existing music dirs, ':'-separated like CODA_ROOTS (default: /mnt/music)
   --data-dir DIR    state dir for DB, covers and config.yaml (default: /var/lib/coda)
   --user USER       service user to create/run as (default: coda)
   --no-service      install the binary only, skip service setup
@@ -268,6 +268,9 @@ fi
 
 mkdir -p "$DATA_DIR"
 # Split ROOTS on ':' (same separator as CODA_ROOTS on Linux) without arrays.
+# Roots must already exist: Coda never creates library directories, and the
+# installer never changes their ownership. Point --roots at a mounted,
+# existing music library; fix ownership yourself when warned.
 case "$ROOTS" in
 "" | :* | *: | *::*) fail "empty entry in --roots (check for '::' or leading/trailing ':')" ;;
 esac
@@ -288,8 +291,7 @@ while [ -n "$roots_left" ]; do
   /*) ;;
   *) fail "root must be absolute: $r" ;;
   esac
-  mkdir -p "$r"
-  chown "$SERVICE_USER:$SERVICE_GROUP" "$r"
+  [ -d "$r" ] || fail "root does not exist: $r (create or mount it first, then re-run)"
   if [ "$CAN_SU" -eq 1 ] && ! su -s /bin/sh "$SERVICE_USER" -c "[ -r '$r' ] && [ -w '$r' ] && [ -x '$r' ]"; then
     log "warning: ${SERVICE_USER} cannot read/write ${r}; linking (which moves files) will fail."
     log "warning: fix with e.g. 'chown -R ${SERVICE_USER}:${SERVICE_GROUP} ${r}' or pass --user <owner>."

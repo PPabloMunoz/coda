@@ -3,6 +3,7 @@ package utils
 import (
 	"errors"
 	"testing"
+	"unicode/utf8"
 )
 
 type validMBIDTest struct {
@@ -76,6 +77,11 @@ func TestSanitizeSegment(t *testing.T) {
 		{"trims dots", ".hidden.", "hidden"},
 		{"collapses underscores", "a__b___c", "a_b_c"},
 		{"leading/trailing spaces trimmed", "  hello world  ", "hello_world"},
+		{"reserved bare", "CON", "CON_"},
+		{"reserved lower", "nul", "nul_"},
+		{"reserved with ext", "COM1.txt", "COM1_.txt"},
+		{"reserved dotted", "aux.foo.bar", "aux_.foo.bar"},
+		{"non-reserved prefix", "Console", "Console"},
 	}
 
 	for _, tt := range tests {
@@ -93,11 +99,48 @@ func TestSanitizeSegmentMaxLength(t *testing.T) {
 		long += "a"
 	}
 	got := SanitizeSegment(long)
-	if len([]rune(got)) != 100 {
-		t.Errorf("len = %d, want 100", len([]rune(got)))
+	if len(got) != 100 {
+		t.Errorf("len = %d, want 100 bytes", len(got))
 	}
 	if got == "" {
 		t.Error("expected non-empty truncated segment")
+	}
+}
+
+func TestSanitizeSegmentByteCap(t *testing.T) {
+	// 150 CJK characters: 150 runes but 450 bytes. Must fit in 100 bytes
+	// without splitting UTF-8 and without exceeding NAME_MAX.
+	long := ""
+	for range 150 {
+		long += "あ" // 3 bytes in UTF-8
+	}
+	got := SanitizeSegment(long)
+	if len(got) > 100 {
+		t.Errorf("len = %d bytes, want <= 100", len(got))
+	}
+	if got == "" {
+		t.Fatal("expected non-empty truncated segment")
+	}
+	for _, r := range got {
+		if r == utf8.RuneError {
+			t.Fatalf("truncated mid-rune: %q", got)
+		}
+	}
+	// 33 full 3-byte runes = 99 bytes; the 34th would exceed 100.
+	if want := 99; len(got) != want {
+		t.Errorf("len = %d, want %d (whole runes only)", len(got), want)
+	}
+
+	emoji := ""
+	for range 40 {
+		emoji += "😀" // 4 bytes in UTF-8
+	}
+	got = SanitizeSegment(emoji)
+	if len(got) > 100 {
+		t.Errorf("emoji len = %d bytes, want <= 100", len(got))
+	}
+	if len(got)%4 != 0 {
+		t.Errorf("emoji len = %d, want a multiple of 4 (whole runes)", len(got))
 	}
 }
 

@@ -49,8 +49,8 @@ func (st *Store) AddRootDirs(ctx context.Context) error {
 
 	for _, r := range st.rootPaths {
 		_, execErr := tx.ExecContext(ctx, `
-			INSERT INTO roots(path, active) 
-			VALUES (?, 1) 
+			INSERT INTO roots(path, active, created_at)
+			VALUES (?, 1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 			ON CONFLICT(path) DO UPDATE SET active=1`,
 			r,
 		)

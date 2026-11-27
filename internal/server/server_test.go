@@ -350,10 +350,10 @@ func TestPostArtistFlow(t *testing.T) {
 		t.Fatalf("create = %d %s, want 201", w.Code, w.Body.String())
 	}
 
-	// Same id again → 304 (already in library, requeues refresh).
+	// Same id again → 200 with the existing artist (refresh requeued).
 	w = doRequest(t, env.router, "POST", "/api/v1/artists", map[string]string{"id": id})
-	if w.Code != http.StatusNotModified {
-		t.Errorf("dup = %d, want 304", w.Code)
+	if w.Code != http.StatusOK {
+		t.Errorf("dup = %d, want 200", w.Code)
 	}
 
 	// Refresh → 202.

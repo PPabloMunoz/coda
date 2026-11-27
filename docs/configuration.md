@@ -122,8 +122,10 @@ The compose file reads:
 
 `scripts/install.sh` accepts `--version`, `--port`, `--roots`,
 `--data-dir`, `--user`, `--no-service`, `--help`. Defaults: port `8687`,
-roots `/mnt/music`, data dir `/var/lib/coda`, user `coda`. Re-running the
-installer keeps the previous settings; a flag you pass overrides them.
+roots `/mnt/music`, data dir `/var/lib/coda`, user `coda`. Roots must
+already exist; the installer never creates or chowns library directories.
+Re-running the installer keeps the previous settings; a flag you pass
+overrides them.
 
 ## Data locations
 

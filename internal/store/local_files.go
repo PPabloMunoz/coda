@@ -1031,7 +1031,7 @@ func (st *Store) Link(ctx context.Context,
 	res, err := st.db.ExecContext(ctx, `
 		UPDATE local_files
 		SET track_id = ?, path = ?, size_bytes = ?, mtime_ns = ?,
-			mb_track_id = ?, tags_read_at = CURRENT_TIMESTAMP
+			mb_track_id = ?, tags_read_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 		WHERE id = ?`,
 		trackID, newPath, sizeBytes, mtimeNs, trackID, fileID,
 	)
@@ -1059,7 +1059,7 @@ func (st *Store) Unlink(ctx context.Context, localFileID int64) error {
 	// Update relation
 	res, err := st.db.ExecContext(ctx, `
 		UPDATE local_files
-		SET track_id = NULL, mb_track_id = NULL, tags_read_at = CURRENT_TIMESTAMP
+		SET track_id = NULL, mb_track_id = NULL, tags_read_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 		WHERE id = ? AND `+activeRootCond,
 		localFileID,
 	)

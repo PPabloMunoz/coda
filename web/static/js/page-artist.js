@@ -417,11 +417,7 @@ function initArtistPage() {
     setBusy(button, true, 'Adding…');
     try {
       const response = await api.addArtist(artistID);
-      if (
-        response.status === 200 ||
-        response.status === 201 ||
-        response.status === 304
-      ) {
+      if (response.status === 200 || response.status === 201) {
         toast('Artist added. Importing discography…', 'ok');
         await load();
         return;
