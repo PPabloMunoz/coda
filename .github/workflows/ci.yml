@@ -25,7 +25,7 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v9
 
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
 
       - run: just check
 
@@ -42,7 +42,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
 
       - run: just test-race
 
@@ -56,6 +56,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
 
       - run: just vuln
