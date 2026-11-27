@@ -28,22 +28,43 @@ type Handler struct {
 	queue    *tasks.Queue
 	art      *artwork.Fetcher // nil disables cover lazy-fetch (cache still serves)
 	coverDir string
+	// allowedHosts holds extra Host-allowlist names in canonical form.
+	allowedHosts map[string]struct{}
+	// listenHost is the configured listen host in canonical form (""
+	// when unset or a wildcard bind, which adds nothing).
+	listenHost string
 }
 
 // NewHandler builds the Gin engine with /api/v1 routes and the embedded UI fallback.
 func NewHandler(l *utils.Logger, st *store.Store, mb *musicbrainz.Client, q *tasks.Queue,
-	art *artwork.Fetcher, coverDir string,
+	art *artwork.Fetcher, coverDir string, opts Options,
 ) *gin.Engine {
+	allowed := make(map[string]struct{}, len(opts.AllowedHosts))
+	for _, raw := range opts.AllowedHosts {
+		if v := normalizeAllowlistEntry(raw); v != "" {
+			allowed[v] = struct{}{}
+		}
+	}
+	listen := normalizeAllowlistEntry(opts.ListenHost)
+	switch listen {
+	case "", "0.0.0.0", "::":
+		listen = ""
+	}
 	handler := Handler{
-		log:      l,
-		st:       st,
-		mb:       mb,
-		queue:    q,
-		art:      art,
-		coverDir: coverDir,
+		log:          l,
+		st:           st,
+		mb:           mb,
+		queue:        q,
+		art:          art,
+		coverDir:     coverDir,
+		allowedHosts: allowed,
+		listenHost:   listen,
 	}
 
 	router := gin.New()
+	router.Use(handler.securityHeaders())
+	router.Use(handler.hostAllowlist())
+	router.Use(handler.apiBodyLimit())
 	router.Use(gin.Recovery())
 
 	// No access logging: the API stays silent like the UI serving; the app

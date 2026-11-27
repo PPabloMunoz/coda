@@ -9,6 +9,18 @@ before upgrading and back up your database (see
 
 ## [Unreleased]
 
+### Security
+
+- HTTP hardening: `ReadTimeout`/`WriteTimeout` 90s, `IdleTimeout` 120s,
+  `MaxHeaderBytes` 64 KiB, JSON API bodies capped at 1 MiB (`413
+  PAYLOAD_TOO_LARGE`; cover uploads keep their 15 MiB limit), and
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` plus a
+  same-origin `Content-Security-Policy` on every response. The Host header
+  is allowlisted (localhost, IP literals, configured `host`, and new
+  `allowed_hosts` / `CODA_ALLOWED_HOSTS`); anything else answers `421
+  INVALID_HOST`. See `configuration.md` (host allowlist),
+  `api.md` (limits, headers), and `operations.md` (421 troubleshooting).
+
 ### Fixed
 
 - Library moves are non-overwriting and serialized: manual link, refresh,

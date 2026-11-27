@@ -211,3 +211,75 @@ func TestGetConfigPathEnvOverride(t *testing.T) {
 		t.Errorf("getConfigPath = %q, want /tmp/coda-test.yaml", got)
 	}
 }
+
+func TestValidateAllowedHosts(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		hosts   []string
+		want    []string
+		wantErr bool
+	}{
+		{"empty ok", nil, []string{}, false},
+		{"hostname lowercased", []string{"Coda.LAN"}, []string{"coda.lan"}, false},
+		{"trailing dot stripped", []string{"nas.local."}, []string{"nas.local"}, false},
+		{"bracketed ipv6 unwrapped", []string{"[::1]"}, []string{"::1"}, false},
+		{"ip ok", []string{"192.168.1.10"}, []string{"192.168.1.10"}, false},
+		{"duplicates collapse", []string{"a.lan", "A.LAN", "a.lan."}, []string{"a.lan"}, false},
+		{"empty entry rejected", []string{""}, nil, true},
+		{"blank entry rejected", []string{"   "}, nil, true},
+		{"wildcard rejected", []string{"*"}, nil, true},
+		{"url rejected", []string{"http://coda.lan"}, nil, true},
+		{"path rejected", []string{"coda/lan"}, nil, true},
+		{"space rejected", []string{"coda lan"}, nil, true},
+		{"host:port rejected", []string{"coda.lan:8687"}, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conf := Config{Port: 8687, AllowedHosts: tc.hosts}
+			err := validateConfig(&conf)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("validateConfig(hosts=%q) = nil, want error", tc.hosts)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("validateConfig(hosts=%q) = %v, want nil", tc.hosts, err)
+			}
+			if len(conf.AllowedHosts) != len(tc.want) {
+				t.Fatalf("hosts = %q, want %q", conf.AllowedHosts, tc.want)
+			}
+			for i := range tc.want {
+				if conf.AllowedHosts[i] != tc.want[i] {
+					t.Errorf("hosts[%d] = %q, want %q", i, conf.AllowedHosts[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestApplyEnvOverridesAllowedHosts(t *testing.T) {
+	t.Run("env replaces file", func(t *testing.T) {
+		t.Setenv("CODA_ALLOWED_HOSTS", "coda.lan, NAS.LOCAL.")
+		conf := Config{Port: 8687, AllowedHosts: []string{"old.lan"}}
+		if err := applyEnvOverrides(&conf); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateConfig(&conf); err != nil {
+			t.Fatal(err)
+		}
+		if len(conf.AllowedHosts) != 2 || conf.AllowedHosts[0] != "coda.lan" || conf.AllowedHosts[1] != "nas.local" {
+			t.Errorf("AllowedHosts = %q, want [coda.lan nas.local]", conf.AllowedHosts)
+		}
+	})
+
+	t.Run("empty env keeps file", func(t *testing.T) {
+		t.Setenv("CODA_ALLOWED_HOSTS", "")
+		conf := Config{Port: 8687, AllowedHosts: []string{"keep.lan"}}
+		if err := applyEnvOverrides(&conf); err != nil {
+			t.Fatal(err)
+		}
+		if len(conf.AllowedHosts) != 1 || conf.AllowedHosts[0] != "keep.lan" {
+			t.Errorf("AllowedHosts = %q, want [keep.lan]", conf.AllowedHosts)
+		}
+	})
+}

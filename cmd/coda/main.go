@@ -70,6 +70,10 @@ func main() {
 		)
 		fmt.Fprintf(
 			flag.CommandLine.Output(),
+			"  CODA_ALLOWED_HOSTS  comma-separated extra Host names (Host allowlist)\n",
+		)
+		fmt.Fprintf(
+			flag.CommandLine.Output(),
 			"  CODA_DEBUG   1/true/yes/on enables debug logs\n",
 		)
 		fmt.Fprintf(
@@ -136,6 +140,10 @@ func main() {
 		for _, r := range cfg.Roots {
 			fmt.Printf("  - %s\n", r)
 		}
+		fmt.Printf("allowed_hosts: %d\n", len(cfg.AllowedHosts))
+		for _, h := range cfg.AllowedHosts {
+			fmt.Printf("  - %s\n", h)
+		}
 		fmt.Printf("db: %s\n", dbPath)
 		fmt.Printf("covers: %s\n", config.CoverDirFromDBPath(dsn))
 		return
@@ -186,11 +194,18 @@ func main() {
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	router := server.NewHandler(log, st, mb, queue, art, coverDir)
+	router := server.NewHandler(log, st, mb, queue, art, coverDir, server.Options{
+		AllowedHosts: cfg.AllowedHosts,
+		ListenHost:   cfg.Host,
+	})
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           router.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       90 * time.Second,
+		WriteTimeout:      90 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    64 << 10,
 	}
 
 	errCh := make(chan error, 1)

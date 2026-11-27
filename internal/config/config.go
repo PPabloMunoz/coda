@@ -21,6 +21,11 @@ type Config struct {
 	Host  string   `yaml:"host"`
 	Port  int      `yaml:"port"`
 	Roots []string `yaml:"roots"`
+	// AllowedHosts lists extra bare hostnames/IPs accepted by the HTTP
+	// Host allowlist. Localhost and any IP literal are always allowed,
+	// as is the concrete Host above; anything else must be listed here
+	// (reverse proxies, mDNS names, Docker hostnames).
+	AllowedHosts []string `yaml:"allowed_hosts"`
 }
 
 const (
@@ -96,10 +101,12 @@ func GetConfig(log *utils.Logger) (*Config, error) {
 	return &conf, nil
 }
 
-// applyEnvOverrides lets CODA_HOST, CODA_PORT and CODA_ROOTS override the file.
+// applyEnvOverrides lets CODA_HOST, CODA_PORT, CODA_ROOTS and
+// CODA_ALLOWED_HOSTS override the file.
 // CODA_ROOTS uses the OS path list (filepath.SplitList): colon-separated
 // on macOS/Linux, semicolon-separated on Windows. Empty entries are dropped.
-// An empty CODA_HOST leaves the file's host untouched.
+// CODA_ALLOWED_HOSTS is comma-separated and replaces the file's
+// allowed_hosts. An empty CODA_HOST leaves the file's host untouched.
 func applyEnvOverrides(conf *Config) error {
 	if h := strings.TrimSpace(os.Getenv("CODA_HOST")); h != "" {
 		conf.Host = h
@@ -119,6 +126,15 @@ func applyEnvOverrides(conf *Config) error {
 			}
 		}
 		conf.Roots = roots
+	}
+	if raw, ok := os.LookupEnv("CODA_ALLOWED_HOSTS"); ok && strings.TrimSpace(raw) != "" {
+		var hosts []string
+		for part := range strings.SplitSeq(raw, ",") {
+			if part = strings.TrimSpace(part); part != "" {
+				hosts = append(hosts, part)
+			}
+		}
+		conf.AllowedHosts = hosts
 	}
 	return nil
 }
@@ -157,6 +173,10 @@ func validateConfig(conf *Config) error {
 	}
 
 	if err := normalizeHost(conf); err != nil {
+		return err
+	}
+
+	if err := normalizeAllowedHosts(conf); err != nil {
 		return err
 	}
 
@@ -230,6 +250,54 @@ func validateConfig(conf *Config) error {
 		}
 	}
 
+	return nil
+}
+
+// normalizeAllowedHosts trims, lowercases, unwraps bracketed IPv6,
+// drops a trailing dot, and rejects empty, wildcard, URL/path, or
+// host:port values. Duplicates collapse silently. IP literals need not be
+// listed (the server always allows them) but are accepted when present.
+func normalizeAllowedHosts(conf *Config) error {
+	seen := make(map[string]struct{}, len(conf.AllowedHosts))
+	out := make([]string, 0, len(conf.AllowedHosts))
+	for i, raw := range conf.AllowedHosts {
+		h := strings.TrimSpace(raw)
+		if h == "" {
+			return fmt.Errorf("allowed_hosts #%d is invalid: cannot be empty", i)
+		}
+		if strings.HasPrefix(h, "[") && strings.HasSuffix(h, "]") {
+			h = strings.TrimSpace(h[1 : len(h)-1])
+			if h == "" {
+				return fmt.Errorf("allowed_hosts #%d is invalid: must not be empty", i)
+			}
+		}
+		if strings.ContainsAny(h, " \t\r\n/") || strings.Contains(h, "\\") {
+			return fmt.Errorf("allowed_hosts #%d %q is invalid: must be a bare hostname or IP", i, raw)
+		}
+		h = strings.ToLower(h)
+		h = strings.TrimSuffix(h, ".")
+		if h == "" {
+			return fmt.Errorf("allowed_hosts #%d is invalid: must not be empty", i)
+		}
+		if h == "*" {
+			return fmt.Errorf("allowed_hosts #%d is invalid: %q is not allowed", i, raw)
+		}
+		if strings.Contains(h, ":") {
+			ip := h
+			if j := strings.LastIndex(ip, "%"); j != -1 {
+				ip = ip[:j]
+			}
+			if net.ParseIP(ip) == nil {
+				return fmt.Errorf("allowed_hosts #%d %q is invalid: must be a bare hostname or IP, not host:port", i, raw)
+			}
+		}
+		if _, ok := seen[h]; ok {
+			continue
+		}
+		seen[h] = struct{}{}
+		out = append(out, h)
+	}
+	conf.AllowedHosts = out
 	return nil
 }
 

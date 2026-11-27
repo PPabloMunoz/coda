@@ -109,5 +109,11 @@ Deezer → iTunes (artist photos: Deezer → Wikimedia Commons). If no
 provider has art, the UI shows a generated placeholder; refresh endpoints
 exist per artist, release group and release (see [api.md](api.md)).
 
+**HTTP 421 host not allowed.** The `Host` header is not localhost, an IP
+literal, the configured `host`, or a name in `allowed_hosts`. Add the name
+you browse by to `allowed_hosts` in `config.yaml` (or `CODA_ALLOWED_HOSTS`)
+and restart; verify with `coda --check-config`. Behind a reverse proxy,
+list the public hostname. Direct-IP access never needs listing.
+
 **UI seems stale.** A failed scan keeps serving the last good data. Check
 the logs, fix the cause, and trigger a rescan (`POST /api/v1/scan`).

@@ -63,11 +63,17 @@ func seedUploadRelease(t *testing.T, env *testEnv) {
 
 func doRawRequest(t *testing.T, env *testEnv, method, path string, body []byte, contentType string) *httptest.ResponseRecorder {
 	t.Helper()
+	return doRawRequestWithHost(t, env, method, path, body, contentType, "localhost")
+}
+
+func doRawRequestWithHost(t *testing.T, env *testEnv, method, path string, body []byte, contentType, host string) *httptest.ResponseRecorder {
+	t.Helper()
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
 	}
 	req := httptest.NewRequest(method, path, rdr)
+	req.Host = host
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -197,6 +203,7 @@ func TestUploadArtistCoverUnknownArtist(t *testing.T) {
 func doGetWithHeaders(t *testing.T, env *testEnv, path string, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Host = "localhost"
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

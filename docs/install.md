@@ -114,7 +114,7 @@ then see [configuration.md](configuration.md) for config and env.
 
 Run it under your init system of choice, or a plain `systemd` unit
 equivalent to what the installer writes (env-only config: `CODA_HOST`,
-`CODA_PORT`, `CODA_ROOTS`, `CODA_CONFIG`, `CODA_DB_PATH`). Set
+`CODA_PORT`, `CODA_ROOTS`, `CODA_ALLOWED_HOSTS`, `CODA_CONFIG`, `CODA_DB_PATH`). Set
 `CODA_HOST=127.0.0.1` to listen on loopback only.
 
 ## Build from source
