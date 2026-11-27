@@ -19,7 +19,7 @@ the scope check in the template. Security issues go through
 
 ## Development setup
 
-- [Go](https://go.dev) 1.27.3 (see `go.mod`). No cgo; no other toolchain.
+- [Go](https://go.dev) 1.27.4 (see `go.mod`). No cgo; no other toolchain.
 - [just](https://just.systems/) wraps the common commands.
 - [golangci-lint](https://golangci-lint.run) for vet/lint/fmt.
 
@@ -27,6 +27,8 @@ the scope check in the template. Security issues go through
 | --- | --- |
 | `just run` | build, then `./bin/coda` (UI on `http://localhost:8687`) |
 | `just test` | `go test ./... -cover` |
+| `just test-race` | `go test -race ./...` (CI race job) |
+| `just vuln` | `govulncheck ./...` (CI vuln job, pinned version) |
 | `just vet` / `just lint` | `go vet` / golangci-lint |
 | `just fmt` / `just fmt-check` | apply / check formatting |
 | `just check` | the full gate: fmt-check + vet + lint + tests + build |

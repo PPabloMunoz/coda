@@ -500,7 +500,10 @@ func (st *Store) suggestCandidates(ctx context.Context, snap *tags.Snapshot, sco
 // with the same scope, so LIMIT windows can't shadow an exact or title
 // match. Rank still comes from Go-side text scoring.
 func (st *Store) candidatesByScope(ctx context.Context, scopeID string) ([]suggestCandidate, error) {
-	rows, err := st.db.QueryContext(ctx, `
+	// Scanned in a closure so rows close via defer before the candidate
+	// query below runs on the single-connection DB.
+	groupIDs, err := func() ([]any, error) {
+		rows, err := st.db.QueryContext(ctx, `
 		SELECT DISTINCT rg.id
 		FROM release_groups rg
 		JOIN artist_credit_items aci_scope
@@ -508,34 +511,37 @@ func (st *Store) candidatesByScope(ctx context.Context, scopeID string) ([]sugge
 		WHERE aci_scope.artist_id = ?
 		ORDER BY rg.title
 		LIMIT 20`,
-		scopeID,
-	)
-	if err != nil {
-		return nil, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("suggest query scope groups: %w", err),
+			scopeID,
 		)
-	}
-	groupIDs := []any{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
+		if err != nil {
 			return nil, apperrors.Wrap(
 				apperrors.ErrInternal,
-				fmt.Errorf("suggest scan scope group: %w", err),
+				fmt.Errorf("suggest query scope groups: %w", err),
 			)
 		}
-		groupIDs = append(groupIDs, id)
+		defer func() { _ = rows.Close() }()
+		var out []any
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return nil, apperrors.Wrap(
+					apperrors.ErrInternal,
+					fmt.Errorf("suggest scan scope group: %w", err),
+				)
+			}
+			out = append(out, id)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("suggest reading scope groups: %w", err),
+			)
+		}
+		return out, nil
+	}()
+	if err != nil {
+		return nil, err
 	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("suggest reading scope groups: %w", err),
-		)
-	}
-	_ = rows.Close()
 	if len(groupIDs) == 0 {
 		return nil, nil
 	}
@@ -608,41 +614,47 @@ func (st *Store) candidatesByArtistText(ctx context.Context, names []string) ([]
 			`unaccent(aci_query.credited_name) LIKE unaccent(?) ESCAPE '\'`)
 		args = append(args, pat, pat)
 	}
-	rows, err := st.db.QueryContext(ctx, `
+	// Scanned in a closure so rows close via defer before the candidate
+	// query below runs on the single-connection DB.
+	groupIDs, err := func() ([]any, error) {
+		rows, err := st.db.QueryContext(ctx, `
 		SELECT DISTINCT rg.id
 		FROM release_groups rg
 		JOIN artist_credit_items aci_query ON aci_query.artist_credit_id = rg.artist_credit_id
 		JOIN artists a_query ON a_query.id = aci_query.artist_id
 		WHERE `+strings.Join(conds, " OR ")+`
 		LIMIT 20`,
-		args...,
-	)
-	if err != nil {
-		return nil, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("suggest query groups: %w", err),
+			args...,
 		)
-	}
-	groupIDs := []any{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
+		if err != nil {
 			return nil, apperrors.Wrap(
 				apperrors.ErrInternal,
-				fmt.Errorf("suggest scan group: %w", err),
+				fmt.Errorf("suggest query groups: %w", err),
 			)
 		}
-		groupIDs = append(groupIDs, id)
+		defer func() { _ = rows.Close() }()
+		var out []any
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return nil, apperrors.Wrap(
+					apperrors.ErrInternal,
+					fmt.Errorf("suggest scan group: %w", err),
+				)
+			}
+			out = append(out, id)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("suggest reading groups: %w", err),
+			)
+		}
+		return out, nil
+	}()
+	if err != nil {
+		return nil, err
 	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("suggest reading groups: %w", err),
-		)
-	}
-	_ = rows.Close()
 	if len(groupIDs) == 0 {
 		return nil, nil
 	}
@@ -688,37 +700,45 @@ func (st *Store) scoreCandidates(ctx context.Context, snap *tags.Snapshot, cands
 		for id := range artistIDs {
 			ids = append(ids, id)
 		}
-		rows, err := st.db.QueryContext(ctx, `
+		// Scanned in a closure so rows close via defer before the file
+		// query below runs on the single-connection DB.
+		scanned, err := func() (map[string]Artist, error) {
+			rows, err := st.db.QueryContext(ctx, `
 			SELECT id, name, sort_name, disambiguation, active, in_library
 			FROM artists
 			WHERE id IN (`+placeholders(len(ids))+`) AND active = 1`,
-			ids...,
-		)
-		if err != nil {
-			return nil, apperrors.Wrap(
-				apperrors.ErrInternal,
-				fmt.Errorf("suggest query artists: %w", err),
+				ids...,
 			)
-		}
-		for rows.Next() {
-			var a Artist
-			if err := rows.Scan(&a.ID, &a.Name, &a.SortName, &a.Disambiguation, &a.Active, &a.InLibrary); err != nil {
-				_ = rows.Close()
+			if err != nil {
 				return nil, apperrors.Wrap(
 					apperrors.ErrInternal,
-					fmt.Errorf("suggest scan artist: %w", err),
+					fmt.Errorf("suggest query artists: %w", err),
 				)
 			}
-			artists[a.ID] = a
+			defer func() { _ = rows.Close() }()
+			out := map[string]Artist{}
+			for rows.Next() {
+				var a Artist
+				if err := rows.Scan(&a.ID, &a.Name, &a.SortName, &a.Disambiguation, &a.Active, &a.InLibrary); err != nil {
+					return nil, apperrors.Wrap(
+						apperrors.ErrInternal,
+						fmt.Errorf("suggest scan artist: %w", err),
+					)
+				}
+				out[a.ID] = a
+			}
+			if err := rows.Err(); err != nil {
+				return nil, apperrors.Wrap(
+					apperrors.ErrInternal,
+					fmt.Errorf("suggest reading artists: %w", err),
+				)
+			}
+			return out, nil
+		}()
+		if err != nil {
+			return nil, err
 		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return nil, apperrors.Wrap(
-				apperrors.ErrInternal,
-				fmt.Errorf("suggest reading artists: %w", err),
-			)
-		}
-		_ = rows.Close()
+		artists = scanned
 	}
 
 	trackIDs := make([]string, 0, len(cands))

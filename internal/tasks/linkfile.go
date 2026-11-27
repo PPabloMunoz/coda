@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -136,7 +137,7 @@ func linkFile(ctx context.Context, st *store.Store, coverDir string, fileID int6
 			if rbErr := moveFileNoReplace("link-rollback", fileID, trackID, dst, src); rbErr != nil {
 				return false, false, apperrors.Wrap(
 					apperrors.ErrInternal,
-					fmt.Errorf("link file=%d track=%q write tags: %v; rollback %q -> %q: %v",
+					fmt.Errorf("link file=%d track=%q write tags: %w; rollback %q -> %q: %w",
 						fileID, trackID, err, dst, src, rbErr),
 				)
 			}
@@ -154,7 +155,7 @@ func linkFile(ctx context.Context, st *store.Store, coverDir string, fileID int6
 			if rbErr := moveFileNoReplace("link-rollback", fileID, trackID, dst, src); rbErr != nil {
 				return false, false, apperrors.Wrap(
 					apperrors.ErrInternal,
-					fmt.Errorf("link file=%d track=%q write cover: %v; rollback %q -> %q: %v",
+					fmt.Errorf("link file=%d track=%q write cover: %w; rollback %q -> %q: %w",
 						fileID, trackID, err, dst, src, rbErr),
 				)
 			}
@@ -187,7 +188,7 @@ func linkFile(ctx context.Context, st *store.Store, coverDir string, fileID int6
 			if rbErr := moveFileNoReplace("link-rollback", fileID, trackID, dst, src); rbErr != nil {
 				return false, false, apperrors.Wrap(
 					apperrors.ErrInternal,
-					fmt.Errorf("link file=%d track=%q save: %v; rollback %q -> %q: %v",
+					fmt.Errorf("link file=%d track=%q save: %w; rollback %q -> %q: %w",
 						fileID, trackID, err, dst, src, rbErr),
 				)
 			}
@@ -299,8 +300,8 @@ func copyFileNoReplace(op string, fileID int64, trackID, src, dst string) error 
 		_ = os.Remove(dst)
 		return apperrors.Wrap(
 			apperrors.ErrInternal,
-			fmt.Errorf("%s file=%d track=%q copy: copy=%v sync=%v close=%v",
-				op, fileID, trackID, copyErr, syncErr, closeErr),
+			fmt.Errorf("%s file=%d track=%q copy: %w",
+				op, fileID, trackID, errors.Join(copyErr, syncErr, closeErr)),
 		)
 	}
 	if err := os.Chmod(dst, srcInfo.Mode().Perm()); err != nil {

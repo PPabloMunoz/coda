@@ -498,44 +498,51 @@ func (st *Store) ReplaceRelease(ctx context.Context, groupID string, p FullRelea
 		disc   int
 		pos    int
 	}
-	oldLinks := []oldLink{}
-	linkRows, err := tx.QueryContext(ctx, `
+	// Scanned in a closure so rows close via defer before the DELETE
+	// below runs: the store holds a single connection, so the rows must
+	// be released before the next statement on the tx.
+	oldLinks, err := func() ([]oldLink, error) {
+		linkRows, err := tx.QueryContext(ctx, `
 		SELECT lf.id, t.recording_id, t.disc_number, t.position
 		FROM local_files lf
 		JOIN tracks t ON t.id = lf.track_id
 		JOIN releases r ON r.id = t.release_id
 		WHERE r.release_group_id = ? AND lf.track_id IS NOT NULL`,
-		groupID,
-	)
-	if err != nil {
-		return apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("query outgoing links: %w", err),
+			groupID,
 		)
-	}
-	for linkRows.Next() {
-		var l oldLink
-		var rec sql.NullString
-		if err := linkRows.Scan(&l.fileID, &rec, &l.disc, &l.pos); err != nil {
-			_ = linkRows.Close()
-			return apperrors.Wrap(
+		if err != nil {
+			return nil, apperrors.Wrap(
 				apperrors.ErrInternal,
-				fmt.Errorf("scan outgoing link: %w", err),
+				fmt.Errorf("query outgoing links: %w", err),
 			)
 		}
-		if rec.Valid {
-			l.rec = strings.TrimSpace(rec.String)
+		defer func() { _ = linkRows.Close() }()
+		var out []oldLink
+		for linkRows.Next() {
+			var l oldLink
+			var rec sql.NullString
+			if err := linkRows.Scan(&l.fileID, &rec, &l.disc, &l.pos); err != nil {
+				return nil, apperrors.Wrap(
+					apperrors.ErrInternal,
+					fmt.Errorf("scan outgoing link: %w", err),
+				)
+			}
+			if rec.Valid {
+				l.rec = strings.TrimSpace(rec.String)
+			}
+			out = append(out, l)
 		}
-		oldLinks = append(oldLinks, l)
+		if err := linkRows.Err(); err != nil {
+			return nil, apperrors.Wrap(
+				apperrors.ErrInternal,
+				fmt.Errorf("reading outgoing links: %w", err),
+			)
+		}
+		return out, nil
+	}()
+	if err != nil {
+		return err
 	}
-	if err := linkRows.Err(); err != nil {
-		_ = linkRows.Close()
-		return apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("reading outgoing links: %w", err),
-		)
-	}
-	_ = linkRows.Close()
 
 	res, err := tx.ExecContext(ctx,
 		`DELETE FROM releases WHERE release_group_id = ?`,
@@ -586,50 +593,56 @@ func (st *Store) ReplaceRelease(ctx context.Context, groupID string, p FullRelea
 	}
 
 	if len(oldLinks) > 0 {
-		newRows, err := tx.QueryContext(ctx,
-			`SELECT id, recording_id, disc_number, position FROM tracks WHERE release_id = ?`,
-			p.ID,
-		)
-		if err != nil {
-			return apperrors.Wrap(
-				apperrors.ErrInternal,
-				fmt.Errorf("query new tracks: %w", err),
-			)
-		}
 		type trackKey struct {
 			rec  string
 			disc int
 			pos  int
 		}
-		byKey := make(map[trackKey]string)
-		for newRows.Next() {
-			var id string
-			var rec sql.NullString
-			var disc, pos int
-			if err := newRows.Scan(&id, &rec, &disc, &pos); err != nil {
-				_ = newRows.Close()
-				return apperrors.Wrap(
+		// Scanned in a closure so rows close via defer before the
+		// per-file UPDATEs below run on the single-connection tx.
+		byKey, err := func() (map[trackKey]string, error) {
+			newRows, err := tx.QueryContext(ctx,
+				`SELECT id, recording_id, disc_number, position FROM tracks WHERE release_id = ?`,
+				p.ID,
+			)
+			if err != nil {
+				return nil, apperrors.Wrap(
 					apperrors.ErrInternal,
-					fmt.Errorf("scan new track: %w", err),
+					fmt.Errorf("query new tracks: %w", err),
 				)
 			}
-			recStr := ""
-			if rec.Valid {
-				recStr = strings.TrimSpace(rec.String)
+			defer func() { _ = newRows.Close() }()
+			byKey := make(map[trackKey]string)
+			for newRows.Next() {
+				var id string
+				var rec sql.NullString
+				var disc, pos int
+				if err := newRows.Scan(&id, &rec, &disc, &pos); err != nil {
+					return nil, apperrors.Wrap(
+						apperrors.ErrInternal,
+						fmt.Errorf("scan new track: %w", err),
+					)
+				}
+				recStr := ""
+				if rec.Valid {
+					recStr = strings.TrimSpace(rec.String)
+				}
+				if recStr == "" {
+					continue
+				}
+				byKey[trackKey{rec: recStr, disc: disc, pos: pos}] = id
 			}
-			if recStr == "" {
-				continue
+			if err := newRows.Err(); err != nil {
+				return nil, apperrors.Wrap(
+					apperrors.ErrInternal,
+					fmt.Errorf("reading new tracks: %w", err),
+				)
 			}
-			byKey[trackKey{rec: recStr, disc: disc, pos: pos}] = id
+			return byKey, nil
+		}()
+		if err != nil {
+			return err
 		}
-		if err := newRows.Err(); err != nil {
-			_ = newRows.Close()
-			return apperrors.Wrap(
-				apperrors.ErrInternal,
-				fmt.Errorf("reading new tracks: %w", err),
-			)
-		}
-		_ = newRows.Close()
 
 		for _, l := range oldLinks {
 			if strings.TrimSpace(l.rec) == "" {
