@@ -27,7 +27,7 @@ func newTestRunner(t *testing.T) (*Runner, *store.Store, *Queue) {
 	if err != nil {
 		t.Fatalf("mb New = %v", err)
 	}
-	q := NewQueue(log)
+	q := NewQueue(log, st)
 	return NewRunner(st, mb, log, q, nil, ""), st, q
 }
 
@@ -121,7 +121,7 @@ func TestScanRootsGuardsPrune(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mb New = %v", err)
 	}
-	q := NewQueue(log)
+	q := NewQueue(log, st)
 	r := NewRunner(st, mb, log, q, nil, "")
 
 	// Seed one row per root. The files don't exist on disk, so the tag

@@ -65,6 +65,12 @@ before upgrading and back up your database (see
   so a leftover `.coda-tag-*` tag-write temp copy from a crash can never
   be indexed or auto-linked; each scan also deletes `.coda-tag-*` files
   older than 24 hours (fresh ones are left alone for in-flight writes).
+- Background work survives restarts: discography import lifecycles
+  (queued/running/done/failed) and pending cover-embed, cover-clear, and
+  release-relink jobs persist in the database and are re-enqueued at
+  startup, so an interrupted import resumes instead of silently resetting
+  to idle and a promised cover embed still reaches linked files. Shutdown
+  waits for detached cover prefetch work before the database is closed.
 
 ### Changed
 

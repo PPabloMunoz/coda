@@ -19,7 +19,7 @@ import (
 )
 
 func TestEnqueueEmbedReleaseCoverDedup(t *testing.T) {
-	q := NewQueue(nil)
+	q := NewQueue(nil, nil)
 	q.EnqueueEmbedReleaseCover("rel-1")
 	q.EnqueueEmbedReleaseCover("rel-1")
 	q.EnqueueEmbedReleaseCover("rel-2")
@@ -105,7 +105,7 @@ func newEmbedRunner(t *testing.T, root string) (*Runner, *store.Store) {
 	if err := st.AddRootDirs(context.Background()); err != nil {
 		t.Fatalf("AddRootDirs = %v", err)
 	}
-	q := NewQueue(log)
+	q := NewQueue(log, st)
 	coverDir := t.TempDir()
 	r := NewRunner(st, nil, log, q, nil, coverDir)
 	return r, st
@@ -230,7 +230,7 @@ func TestExecEmbedReleaseCoverNoPanic(t *testing.T) {
 }
 
 func TestEnqueueClearReleaseCoverDedup(t *testing.T) {
-	q := NewQueue(nil)
+	q := NewQueue(nil, nil)
 	q.EnqueueClearReleaseCover("rel-1")
 	q.EnqueueClearReleaseCover("rel-1")
 	q.EnqueueClearReleaseCover("rel-2")

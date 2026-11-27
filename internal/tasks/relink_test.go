@@ -9,7 +9,7 @@ import (
 )
 
 func TestEnqueueRelinkReleaseDedup(t *testing.T) {
-	q := NewQueue(nil)
+	q := NewQueue(nil, nil)
 	q.EnqueueRelinkRelease("rel-1")
 	q.EnqueueRelinkRelease("rel-1")
 	q.EnqueueRelinkRelease("rel-2")

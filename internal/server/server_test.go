@@ -56,7 +56,7 @@ func newTestEnvWithArtAndOptions(t *testing.T, art *artwork.Fetcher, opts Option
 			t.Fatalf("AddRootDirs = %v", err)
 		}
 	}
-	q := tasks.NewQueue(log)
+	q := tasks.NewQueue(log, st)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

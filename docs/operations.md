@@ -117,3 +117,9 @@ list the public hostname. Direct-IP access never needs listing.
 
 **UI seems stale.** A failed scan keeps serving the last good data. Check
 the logs, fix the cause, and trigger a rescan (`POST /api/v1/scan`).
+
+**Restart during an import or cover update.** Queued and running imports
+resume after the restart instead of resetting to idle, and pending
+cover-embed, cover-clear, and release-relink jobs are re-enqueued; `done`
+and `failed` import states stay visible. Scans and periodic prunes are not
+resumed — the startup scan and the scheduler re-enqueue them.

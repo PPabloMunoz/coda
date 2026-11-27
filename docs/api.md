@@ -501,3 +501,10 @@ that runs in a serial background queue. Progress is only observable for
 artist imports (`GET /artists/:id/import`); a scan is visible through
 `/stats` and `/files` once it has synced. See `operations.md` for the
 scheduler's periodic jobs.
+
+Import statuses and pending cover-embed, cover-clear, and release-relink
+jobs survive restarts: they persist in the database and are re-enqueued at
+startup, so an interrupted import resumes instead of resetting to `idle`
+and a promised file update still runs. Terminal states (`done`, `failed`)
+stay visible too. Scans and periodic prunes are not persisted — the
+startup scan and the scheduler re-enqueue them.
