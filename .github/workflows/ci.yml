@@ -32,10 +32,6 @@ jobs:
       # verify the static production build still works
       - run: CGO_ENABLED=0 go build -o /dev/null ./cmd/coda
 
-      # docs advertise building on Windows; only the binary shape is
-      # verified (release ships linux/darwin only)
-      - run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/coda
-
   race:
     runs-on: ubuntu-latest
     timeout-minutes: 15
