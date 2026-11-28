@@ -357,74 +357,10 @@ func SaveCover(ctx context.Context, st *store.Store, coverDir, releaseID string,
 	return nil
 }
 
-// coverPrefetchWorkers bounds parallel cover downloads. Network dominates,
-// so a small pool cuts a big-discography prefetch to a fraction of the
-// sequential time without stressing provider rate budgets (iTunes ~20/min
-// only fires on double-misses).
-const coverPrefetchWorkers = 4
-
 type coverJob struct {
 	releaseID string
 	artist    string
 	title     string
-}
-
-// prefetchCoversBG caches one cover per release of an artist in the
-// background: it never blocks the import task (which already reported done)
-// nor the serial task queue. Releases are reloaded from the store rather
-// than passed in, so the run is self-contained. Best-effort by design:
-// failures only log, and gaps are always backfilled lazily on first
-// GET .../cover. Overlapping runs for one artist collapse into one. The
-// caller derives ctx from the runner (not the finished import task) with
-// its own bound, so the run survives the task but still gives up on
-// shutdown; Start waits for it.
-func (r *Runner) prefetchCoversBG(ctx context.Context, artistID string) {
-	if r.art == nil {
-		return
-	}
-	if !r.claimCoverPrefetch(artistID) {
-		return
-	}
-	defer r.releaseCoverPrefetch(artistID)
-
-	releases, err := r.coverJobs(ctx, artistID)
-	if err != nil {
-		r.log.Warnf("cover prefetch artist %q list: %s", artistID, apperrors.LogDetail(err))
-		return
-	}
-	if len(releases) == 0 {
-		r.log.Infof("cover prefetch artist %q: nothing to fetch", artistID)
-		return
-	}
-
-	start := time.Now()
-	r.log.Infof("cover prefetch artist %q: %d releases to fetch", artistID, len(releases))
-	jobs := make(chan coverJob)
-	var wg sync.WaitGroup
-	for range coverPrefetchWorkers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := range jobs {
-				if _, _, err := EnsureCover(ctx, r.st, r.art, r.coverDir, j.releaseID, j.artist, j.title); err != nil {
-					if !apperrors.Is(err, apperrors.ErrNotFound) {
-						r.log.Warnf("cover prefetch release %q: %s", j.releaseID, apperrors.LogDetail(err))
-					}
-				}
-			}
-		}()
-	}
-feed:
-	for _, j := range releases {
-		select {
-		case jobs <- j:
-		case <-ctx.Done():
-			break feed
-		}
-	}
-	close(jobs)
-	wg.Wait()
-	r.log.Infof("cover prefetch artist %q done: %d releases in %s", artistID, len(releases), time.Since(start))
 }
 
 // coverJobs lists the releases of an artist that still need a cover, derived
@@ -469,28 +405,6 @@ func (r *Runner) coverJobs(ctx context.Context, artistID string) ([]coverJob, er
 		}
 	}
 	return jobs, nil
-}
-
-// claimCoverPrefetch registers a background cover run; a second concurrent
-// run for the same artist is declined (the first covers it).
-func (r *Runner) claimCoverPrefetch(artistID string) bool {
-	r.coverMu.Lock()
-	defer r.coverMu.Unlock()
-	if r.coverPrefetch == nil {
-		r.coverPrefetch = make(map[string]struct{})
-	}
-	if _, ok := r.coverPrefetch[artistID]; ok {
-		return false
-	}
-	r.coverPrefetch[artistID] = struct{}{}
-	return true
-}
-
-// releaseCoverPrefetch releases the background cover claim for an artist.
-func (r *Runner) releaseCoverPrefetch(artistID string) {
-	r.coverMu.Lock()
-	defer r.coverMu.Unlock()
-	delete(r.coverPrefetch, artistID)
 }
 
 // embedReleaseCover re-stamps the currently cached release cover into every

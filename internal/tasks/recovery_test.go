@@ -8,9 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/ppablomunoz/coda/internal/artwork"
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
 	"github.com/ppablomunoz/coda/internal/store"
 	"github.com/ppablomunoz/coda/internal/utils"
@@ -238,6 +236,35 @@ func TestShutdownKeepsPendingRowForRecovery(t *testing.T) {
 	}
 }
 
+func TestRecoverDropsPrefetchTasks(t *testing.T) {
+	log := utils.NewWithWriter(io.Discard)
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	st, err := store.NewStore(dbPath, nil, log)
+	if err != nil {
+		t.Fatalf("NewStore = %v", err)
+	}
+	seedRecoverReleases(t, st)
+
+	q1 := NewQueue(log, st)
+	q1.EnqueuePrefetchCover(recoverRelID)
+	q1.EnqueuePrefetchArtistCover(recoverArtistID)
+
+	st = reopenStore(t, dbPath, st)
+	q2 := NewQueue(log, st)
+	if err := q2.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover = %v", err)
+	}
+	if q2.HasTask(TaskPrefetchCover, recoverRelID) {
+		t.Error("prefetch cover re-enqueued after recover, want dropped (best-effort, never persisted)")
+	}
+	if q2.HasTask(TaskPrefetchArtistCover, recoverArtistID) {
+		t.Error("prefetch artist cover re-enqueued after recover, want dropped (best-effort, never persisted)")
+	}
+	if _, ok := q2.pop(); ok {
+		t.Error("pop after recover returned a task, want empty queue")
+	}
+}
+
 func TestCanceledImportStaysRunning(t *testing.T) {
 	log := utils.NewWithWriter(io.Discard)
 	st, err := store.NewStore(filepath.Join(t.TempDir(), "test.db"), nil, log)
@@ -312,84 +339,6 @@ func TestImportFailureMarksFailedWhenRunning(t *testing.T) {
 	if got.Error == "" || got.FinishedAt == nil {
 		t.Errorf("failed status missing error/finish: %+v", got)
 	}
-}
-
-func TestRunnerStartWaitsForDetached(t *testing.T) {
-	log := utils.NewWithWriter(io.Discard)
-	st, err := store.NewStore(filepath.Join(t.TempDir(), "test.db"), nil, log)
-	if err != nil {
-		t.Fatalf("NewStore = %v", err)
-	}
-	t.Cleanup(st.Close)
-	srv := httptest.NewServer(http.NewServeMux())
-	t.Cleanup(srv.Close)
-	mb, err := musicbrainz.New(musicbrainz.Config{UserAgent: "coda-test", BaseURL: srv.URL})
-	if err != nil {
-		t.Fatalf("mb New = %v", err)
-	}
-	q := NewQueue(log, st)
-	r := NewRunner(st, mb, log, q, nil, "")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	release := make(chan struct{})
-	r.bgWg.Add(1)
-	go func() {
-		defer r.bgWg.Done()
-		<-ctx.Done()
-		close(release)
-	}()
-	done := make(chan struct{})
-	go func() {
-		r.Start(ctx)
-		close(done)
-	}()
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Start did not return after shutdown (detached work not tracked)")
-	}
-	select {
-	case <-release:
-	default:
-		t.Error("detached work still running after Start returned")
-	}
-}
-
-func TestSpawnPrefetchCancelsOnShutdown(t *testing.T) {
-	log := utils.NewWithWriter(io.Discard)
-	st, err := store.NewStore(filepath.Join(t.TempDir(), "test.db"), nil, log)
-	if err != nil {
-		t.Fatalf("NewStore = %v", err)
-	}
-	t.Cleanup(st.Close)
-	srv := httptest.NewServer(http.NewServeMux())
-	t.Cleanup(srv.Close)
-	mb, err := musicbrainz.New(musicbrainz.Config{UserAgent: "coda-test", BaseURL: srv.URL})
-	if err != nil {
-		t.Fatalf("mb New = %v", err)
-	}
-	art, err := artwork.New(artwork.Config{UserAgent: "coda-test"})
-	if err != nil {
-		t.Fatalf("artwork New = %v", err)
-	}
-	q := NewQueue(log, st)
-	r := NewRunner(st, mb, log, q, art, "")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	r.baseCtx = ctx
-	finished := make(chan struct{})
-	r.spawnPrefetch(func(bctx context.Context) {
-		<-bctx.Done()
-		close(finished)
-	}, 30*time.Minute)
-	cancel()
-	select {
-	case <-finished:
-	case <-time.After(5 * time.Second):
-		t.Fatal("detached run did not cancel on shutdown")
-	}
-	r.bgWg.Wait()
 }
 
 func TestRecoverNilStoreNoPanic(t *testing.T) {

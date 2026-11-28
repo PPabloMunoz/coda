@@ -2,7 +2,6 @@ package tasks
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/ppablomunoz/coda/internal/artwork"
@@ -21,18 +20,10 @@ type Runner struct {
 	coverDir string
 	// scanTimeout bounds the whole scan (walk + sync + auto-link + prune).
 	scanTimeout time.Duration
-	// baseCtx is the queue-run context from Start. Detached cover work
-	// derives from it (not from the finished import task) so it survives
-	// the task but still cancels on shutdown.
+	// baseCtx is the queue-run context from Start, used only to tell
+	// shutdown interruptions apart from live failures.
 	baseCtx context.Context
-	// bgWg tracks detached cover runs so Start returns only after they
-	// stop and the store is never closed while they still use it.
-	bgWg sync.WaitGroup
-	// coverPrefetch tracks background cover runs; the import task never
-	// waits for art, so overlapping refreshes must not stack duplicate runs.
-	coverMu       sync.Mutex
-	coverPrefetch map[string]struct{}
-	log           *utils.Logger
+	log     *utils.Logger
 }
 
 // defaultScanTimeout is the scan bound when no timeout is configured.
@@ -68,22 +59,10 @@ func (r *Runner) scanTimeoutOrDefault() time.Duration {
 	return defaultScanTimeout
 }
 
-// Start runs queued tasks serially until ctx is canceled, then waits for
-// detached cover work so the store is never closed while it still runs.
+// Start runs queued tasks serially until ctx is canceled.
 func (r *Runner) Start(ctx context.Context) {
 	r.baseCtx = ctx
 	r.queue.run(ctx, r.exec)
-	r.bgWg.Wait()
-}
-
-// detachedBase returns the context detached cover work derives from: the
-// queue-run context when Start has set it, Background otherwise (tests
-// driving exec directly).
-func (r *Runner) detachedBase() context.Context {
-	if r.baseCtx != nil {
-		return r.baseCtx
-	}
-	return context.Background()
 }
 
 // shuttingDown reports whether the runner is stopping. Failures observed
@@ -91,21 +70,6 @@ func (r *Runner) detachedBase() context.Context {
 // failures to record.
 func (r *Runner) shuttingDown() bool {
 	return r.baseCtx != nil && r.baseCtx.Err() != nil
-}
-
-// spawnPrefetch runs fn detached from the finished import task with its own
-// bound, canceling on runner shutdown. Start waits for all spawned runs.
-func (r *Runner) spawnPrefetch(fn func(context.Context), timeout time.Duration) {
-	if r.art == nil {
-		return
-	}
-	bctx, cancel := context.WithTimeout(r.detachedBase(), timeout)
-	r.bgWg.Add(1)
-	go func() {
-		defer cancel()
-		defer r.bgWg.Done()
-		fn(bctx)
-	}()
 }
 
 // exec dispatches a task with per-kind timeouts (configurable scan, 30m import).
@@ -135,6 +99,14 @@ func (r *Runner) exec(ctx context.Context, t Task) {
 		sctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
 		r.relinkRelease(sctx, t.ID)
+	case TaskPrefetchCover:
+		sctx, cancel := context.WithTimeout(ctx, time.Minute)
+		defer cancel()
+		r.prefetchCover(sctx, t.ID)
+	case TaskPrefetchArtistCover:
+		sctx, cancel := context.WithTimeout(ctx, time.Minute)
+		defer cancel()
+		r.prefetchArtistCoverTask(sctx, t.ID)
 	default:
 		r.log.Warnf("task unknown key %q, skipping", t.Key)
 	}
@@ -306,8 +278,8 @@ func (r *Runner) scanRoots(ctx context.Context, forcePrune bool) {
 		found, upserted, pruned, len(failed), len(kept), auto.Linked, auto.Moved, auto.SkippedConflict, tagReads, unchanged, walkMs, syncPhaseMs, tagReadMs, autolinkMs, time.Since(start))
 }
 
-// importArtist imports an artist's discography, then prefetches covers in the
-// background; removed/non-library artists are skipped as done.
+// importArtist imports an artist's discography, then queues low-priority
+// cover prefetch tasks; removed/non-library artists are skipped as done.
 func (r *Runner) importArtist(ctx context.Context, t Task) {
 	if t.ID == "" {
 		r.log.Warn("task import-discography missing artist id, skipping")
@@ -355,17 +327,79 @@ func (r *Runner) importArtist(ctx context.Context, t Task) {
 		r.log.Errorf("importing artist discography %q failed in %s: %v", t.ID, time.Since(start), err)
 		return
 	}
-	// Covers fill in in the background: the import is done as far as status
-	// is concerned, and the serial task queue stays free for other work.
-	// Gaps are always backfilled lazily on first GET .../cover. The runs
-	// derive from the runner context (not the finished task) so they
-	// survive the task but still cancel on shutdown; Start waits for them.
-	r.spawnPrefetch(func(bctx context.Context) { r.prefetchCoversBG(bctx, t.ID) }, 30*time.Minute)
-	r.spawnPrefetch(func(bctx context.Context) { r.prefetchArtistCover(bctx, t.ID, art.Name) }, 5*time.Minute)
+	// Covers fill in through the serial queue at low priority: one short
+	// task per release plus the artist photo, so user work (imports,
+	// scans) always jumps ahead. Gaps are always backfilled lazily on
+	// first GET .../cover. Prefetch is best-effort and never persisted.
+	r.enqueueCoverPrefetch(ctx, t.ID)
+	r.queue.EnqueuePrefetchArtistCover(t.ID)
 	r.cleanupCredits(ctx)
 	r.pruneArtists(ctx)
 	r.queue.markArtistImportDone(t.ID)
 	r.log.Infof("discography for %q saved in %s", t.ID, time.Since(start))
+}
+
+// enqueueCoverPrefetch lists the releases of an artist that still need a
+// cover and queues one low-priority fetch task per release. Best-effort:
+// a list failure only warns.
+func (r *Runner) enqueueCoverPrefetch(ctx context.Context, artistID string) {
+	if r.art == nil {
+		return
+	}
+	jobs, err := r.coverJobs(ctx, artistID)
+	if err != nil {
+		r.log.Warnf("cover prefetch artist %q list: %s", artistID, apperrors.LogDetail(err))
+		return
+	}
+	if len(jobs) == 0 {
+		r.log.Infof("cover prefetch artist %q: nothing to fetch", artistID)
+		return
+	}
+	r.log.Infof("cover prefetch artist %q: %d releases queued", artistID, len(jobs))
+	for _, j := range jobs {
+		r.queue.EnqueuePrefetchCover(j.releaseID)
+	}
+}
+
+// prefetchCover fetches and caches one release cover. Best-effort: a
+// missing release is a clean no-op, misses stay quiet, and other failures
+// only log. Gaps backfill lazily on first GET .../cover.
+func (r *Runner) prefetchCover(ctx context.Context, releaseID string) {
+	if r.art == nil {
+		return
+	}
+	rel, err := r.st.GetRelease(ctx, releaseID, false)
+	if err != nil {
+		if !apperrors.Is(err, apperrors.ErrNotFound) {
+			r.log.Warnf("cover prefetch release %q: %s", releaseID, apperrors.LogDetail(err))
+		}
+		return
+	}
+	artist := CreditDisplayName(rel.Credit)
+	if artist == "" {
+		artist = CreditDisplayName(rel.Group.Credit)
+	}
+	if _, _, err := EnsureCover(ctx, r.st, r.art, r.coverDir, releaseID, artist, rel.Title); err != nil {
+		if !apperrors.Is(err, apperrors.ErrNotFound) {
+			r.log.Warnf("cover prefetch release %q: %s", releaseID, apperrors.LogDetail(err))
+		}
+	}
+}
+
+// prefetchArtistCoverTask fetches and caches one artist photo. Best-effort:
+// a missing artist is a clean no-op; the photo backfills lazily on first GET.
+func (r *Runner) prefetchArtistCoverTask(ctx context.Context, artistID string) {
+	if r.art == nil {
+		return
+	}
+	art, err := r.st.GetArtistByID(ctx, artistID)
+	if err != nil {
+		if !apperrors.Is(err, apperrors.ErrNotFound) {
+			r.log.Warnf("artist cover prefetch artist %q: %s", artistID, apperrors.LogDetail(err))
+		}
+		return
+	}
+	r.prefetchArtistCover(ctx, artistID, art.Name)
 }
 
 // pruneArtists soft-deletes collaboration-only artists with no track left.

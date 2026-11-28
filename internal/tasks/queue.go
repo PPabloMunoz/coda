@@ -12,6 +12,7 @@ import (
 type Queue struct {
 	mu            sync.Mutex
 	items         []Task
+	low           []Task
 	notify        chan struct{}
 	artistImports map[string]*ArtistImportStatus
 	// scan is the observable library-scan lifecycle. Queued/running live
@@ -29,6 +30,7 @@ type Queue struct {
 func NewQueue(log *utils.Logger, st *store.Store) *Queue {
 	return &Queue{
 		items:         make([]Task, 0),
+		low:           make([]Task, 0),
 		notify:        make(chan struct{}, 1),
 		artistImports: make(map[string]*ArtistImportStatus),
 		st:            st,
@@ -45,16 +47,23 @@ func (q *Queue) signal() {
 
 // pop gets the first element in the queue
 // and move the queue one ahead. If there is no
-// item, return false
+// item, return false. Normal-priority tasks come
+// first; low-priority prefetch tasks run only when
+// no normal task is pending.
 func (q *Queue) pop() (Task, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if len(q.items) == 0 {
-		return Task{}, false
+	if len(q.items) > 0 {
+		item := q.items[0]
+		q.items = q.items[1:]
+		return item, true
 	}
-	item := q.items[0]
-	q.items = q.items[1:]
-	return item, true
+	if len(q.low) > 0 {
+		item := q.low[0]
+		q.low = q.low[1:]
+		return item, true
+	}
+	return Task{}, false
 }
 
 // run drains queued tasks serially via exec until ctx is canceled. Pending
@@ -97,6 +106,14 @@ func (q *Queue) afterExec(ctx context.Context, t Task) {
 		if item.Key == t.Key && item.ID == t.ID {
 			pending = true
 			break
+		}
+	}
+	if !pending {
+		for _, item := range q.low {
+			if item.Key == t.Key && item.ID == t.ID {
+				pending = true
+				break
+			}
 		}
 	}
 	q.mu.Unlock()
@@ -293,11 +310,54 @@ func (q *Queue) enqueueReleaseTask(key TaskKey, releaseID, kind string) {
 	q.signal()
 }
 
+// EnqueuePrefetchCover queues a low-priority cover fetch for one release.
+// Dedupes while queued: one run covers repeated enqueues. Best-effort and
+// never persisted: a restart drops pending prefetch and lazy cover GETs
+// backfill the gaps.
+func (q *Queue) EnqueuePrefetchCover(releaseID string) {
+	q.mu.Lock()
+	for _, t := range q.low {
+		if t.Key == TaskPrefetchCover && t.ID == releaseID {
+			q.mu.Unlock()
+			q.debugf("task %s already queued %q", TaskPrefetchCover, releaseID)
+			return
+		}
+	}
+	q.low = append(q.low, Task{Key: TaskPrefetchCover, ID: releaseID})
+	depth := len(q.items) + len(q.low)
+	q.mu.Unlock()
+	q.debugf("task %s queued %q (depth=%d)", TaskPrefetchCover, releaseID, depth)
+	q.signal()
+}
+
+// EnqueuePrefetchArtistCover queues a low-priority artist-photo fetch.
+// Dedupes while queued; best-effort and never persisted like cover prefetch.
+func (q *Queue) EnqueuePrefetchArtistCover(artistID string) {
+	q.mu.Lock()
+	for _, t := range q.low {
+		if t.Key == TaskPrefetchArtistCover && t.ID == artistID {
+			q.mu.Unlock()
+			q.debugf("task %s already queued %q", TaskPrefetchArtistCover, artistID)
+			return
+		}
+	}
+	q.low = append(q.low, Task{Key: TaskPrefetchArtistCover, ID: artistID})
+	depth := len(q.items) + len(q.low)
+	q.mu.Unlock()
+	q.debugf("task %s queued %q (depth=%d)", TaskPrefetchArtistCover, artistID, depth)
+	q.signal()
+}
+
 // HasTask reports whether a task with the given key and id is currently queued.
 func (q *Queue) HasTask(key TaskKey, id string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for _, t := range q.items {
+		if t.Key == key && t.ID == id {
+			return true
+		}
+	}
+	for _, t := range q.low {
 		if t.Key == key && t.ID == id {
 			return true
 		}
