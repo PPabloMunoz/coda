@@ -182,7 +182,8 @@ func (st *Store) attachReleaseSummaries(
 			(SELECT COUNT(*) FROM tracks t WHERE t.release_id = r.id),
 			(SELECT COUNT(DISTINCT lf.track_id) FROM local_files lf
 			 JOIN tracks t ON t.id = lf.track_id
-			 WHERE t.release_id = r.id)
+			 WHERE t.release_id = r.id
+			   AND lf.root_id IN (SELECT id FROM roots WHERE active = 1))
 		FROM releases r
 		WHERE r.release_group_id IN (`+ph+`)`,
 		args...,

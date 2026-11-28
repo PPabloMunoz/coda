@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ppablomunoz/coda/internal/tags"
@@ -23,10 +24,10 @@ func TestSyncIncrementalSkipsTagReads(t *testing.T) {
 	root := t.TempDir()
 	st := newTestStore(t, root)
 
-	calls := 0
+	calls := atomic.Int32{}
 	prev := syncReadTags
 	syncReadTags = func(path string) (*tags.Snapshot, error) {
-		calls++
+		calls.Add(1)
 		return &tags.Snapshot{MBReleaseTrackID: testTrackID}, nil
 	}
 	defer func() { syncReadTags = prev }()
@@ -39,18 +40,18 @@ func TestSyncIncrementalSkipsTagReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first SyncLocalFiles = %v", err)
 	}
-	if calls != 2 || stats.TagReads != 2 {
-		t.Fatalf("first sync reads = %d/%d, want 2/2 (evidence stored once)", calls, stats.TagReads)
+	if calls.Load() != 2 || stats.TagReads != 2 {
+		t.Fatalf("first sync reads = %d/%d, want 2/2 (evidence stored once)", calls.Load(), stats.TagReads)
 	}
 
 	// Second scan, identical stat: no tag reads, all unchanged.
-	calls = 0
+	calls.Store(0)
 	stats2, err := st.SyncLocalFiles(ctx(), files, "2024-06-02 00:00:00", SyncOptions{})
 	if err != nil {
 		t.Fatalf("second SyncLocalFiles = %v", err)
 	}
-	if calls != 0 || stats2.TagReads != 0 {
-		t.Errorf("settled rescan reads = %d/%d, want 0/0", calls, stats2.TagReads)
+	if calls.Load() != 0 || stats2.TagReads != 0 {
+		t.Errorf("settled rescan reads = %d/%d, want 0/0", calls.Load(), stats2.TagReads)
 	}
 	if stats2.Unchanged != 2 {
 		t.Errorf("Unchanged = %d, want 2", stats2.Unchanged)
@@ -60,14 +61,14 @@ func TestSyncIncrementalSkipsTagReads(t *testing.T) {
 	}
 
 	// A changed file re-reads exactly once.
-	calls = 0
+	calls.Store(0)
 	files[0].SizeBytes = 101
 	stats3, err := st.SyncLocalFiles(ctx(), files, "2024-06-03 00:00:00", SyncOptions{})
 	if err != nil {
 		t.Fatalf("changed SyncLocalFiles = %v", err)
 	}
-	if calls != 1 || stats3.TagReads != 1 {
-		t.Errorf("changed sync reads = %d/%d, want 1/1", calls, stats3.TagReads)
+	if calls.Load() != 1 || stats3.TagReads != 1 {
+		t.Errorf("changed sync reads = %d/%d, want 1/1", calls.Load(), stats3.TagReads)
 	}
 	if stats3.Unchanged != 1 {
 		t.Errorf("Unchanged = %d, want 1 (only the settled file)", stats3.Unchanged)

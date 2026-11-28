@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/ppablomunoz/coda/internal/artwork"
 	"github.com/ppablomunoz/coda/internal/config"
@@ -48,6 +49,9 @@ func TestRefreshCoverSuccessSwapsCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetCover = %v", err)
 	}
+	// fetched_at has millisecond precision: make sure the refresh below
+	// lands in a later millisecond so the swap is observable.
+	time.Sleep(5 * time.Millisecond)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/release/", func(w http.ResponseWriter, req *http.Request) {
