@@ -468,6 +468,8 @@ like:
 | GET    | `/artists/:id/cover/meta`    | Artist photo metadata (below)     |
 | PUT    | `/releases/:id/cover`        | Upload a release cover            |
 | PUT    | `/artists/:id/cover`         | Upload an artist photo            |
+| POST   | `/releases/:id/cover/url`    | Upload a release cover from a URL |
+| POST   | `/artists/:id/cover/url`     | Upload an artist photo from a URL |
 | DELETE | `/releases/:id/cover`        | Remove the release cover          |
 | DELETE | `/artists/:id/cover`         | Remove the artist photo           |
 | POST   | `/releases/:id/cover/refresh`| Re-fetch release cover            |
@@ -525,10 +527,27 @@ curl -X PUT localhost:8687/api/v1/releases/<mbid>/cover \
   --data-binary @cover.png -H 'Content-Type: image/png'
 ```
 
+To set art from a link instead of a file, `POST
+/releases/:id/cover/url` and `POST /artists/:id/cover/url` take a JSON
+body and fetch the image server-side (the browser never downloads it, so
+hosts without CORS headers still work):
+
+```sh
+curl -X POST localhost:8687/api/v1/releases/<mbid>/cover/url \
+  -H 'Content-Type: application/json' \
+  -d '{"url": "https://example.com/cover.png"}'
+```
+
+The URL must be a direct `http(s)` image link (no credentials, max 2 KiB
+long). The same 15MB cap and JPEG/PNG/WebP sniffing apply, and an unusable
+link answers `400 INVALID_INPUT`. A successful URL import returns the same
+metadata row shape as a raw upload, with `"source": "upload"` and
+`"source_url"` set to the fetched link.
+
 A successful upload returns `200` with the same metadata row shape as a
-refresh, with `"source": "upload"` and `"source_url": null`. Uploads work
-even when provider fetching is disabled. A later refresh discards the
-upload and fetches provider art again.
+refresh, with `"source": "upload"` and `"source_url": null` (raw upload).
+Uploads work even when provider fetching is disabled. A later refresh
+discards the upload and fetches provider art again.
 
 Uploading a release cover also queues a background task that re-embeds the
 new art into every file already linked to the release. A successful

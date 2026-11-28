@@ -328,11 +328,37 @@ export const COVER_UPLOAD_MAX_BYTES = 15 * 1024 * 1024;
 export const COVER_UPLOAD_ACCEPT = 'image/jpeg,image/png,image/webp';
 
 /**
+ * Parses a pasted image URL for a cover/photo upload. Returns `{url}` with
+ * the normalized link, or `{error}` with a message safe to show inline.
+ */
+export function parseImageURL(value) {
+  const raw = (value ?? '').trim();
+  if (!raw) return { error: 'Paste an image URL first.' };
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return { error: 'That URL doesn’t look right — paste the full link.' };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { error: 'Use an http(s) image link.' };
+  }
+  if (parsed.username || parsed.password) {
+    return { error: 'Use an http(s) image link.' };
+  }
+  return { url: parsed.toString() };
+}
+
+/**
  * Hover overlay for the detail hero art: icon-only refresh, upload and
  * remove buttons over the image, revealed on hover/focus (always visible
  * on touch). Callers render the art node, append `tools` to the same hero
  * container, and drive `setHasArt` as the image proves itself so Remove
  * only shows for real art. Busy state is the caller's via `setBusy`.
+ *
+ * When `onUploadUrl` is given, the upload button opens a small dialog with
+ * both choices — pick a file, or paste a direct image URL — instead of
+ * opening the file picker straight away.
  */
 export function coverTools(options = {}) {
   const {
@@ -340,10 +366,13 @@ export function coverTools(options = {}) {
     refreshTitle,
     uploadLabel = 'Upload',
     uploadTitle,
+    uploadDialogTitle = 'Upload image',
+    uploadDialogCopy = 'Choose an image file, or paste a direct link to a JPEG, PNG, or WebP image (max 15MB).',
     removeLabel = 'Remove',
     removeTitle,
     onRefresh,
     onUpload,
+    onUploadUrl,
     onRemove,
   } = options;
   const tools = el('div', 'hero-media__tools');
@@ -380,11 +409,19 @@ export function coverTools(options = {}) {
   refreshButton.addEventListener('click', () => {
     if (typeof onRefresh === 'function') void onRefresh();
   });
-  uploadButton.addEventListener('click', () => input.click());
+  uploadButton.addEventListener('click', () => {
+    if (typeof onUploadUrl === 'function') openUploadDialog();
+    else input.click();
+  });
   input.addEventListener('change', () => {
     const file = input.files?.[0];
     input.value = '';
-    if (!file || typeof onUpload !== 'function') return;
+    if (!file) return;
+    if (uploadDialog) {
+      chooseDialogFile(file);
+      return;
+    }
+    if (typeof onUpload !== 'function') return;
     if (file.size > COVER_UPLOAD_MAX_BYTES) {
       toast('That image is over the 15MB limit.', 'error');
       return;
@@ -398,6 +435,117 @@ export function coverTools(options = {}) {
   const source = el('span', 'hero-media__source');
   source.hidden = true;
   source.setAttribute('aria-hidden', 'true');
+
+  // The open upload dialog, if any. While set, picked files route to the
+  // dialog (inline size error or close + upload) instead of uploading
+  // straight away. Only one dialog opens at a time.
+  let uploadDialog = null;
+
+  function openUploadDialog() {
+    if (uploadDialog) {
+      uploadDialog.querySelector('input[type="url"]')?.focus();
+      return;
+    }
+    const dialog = document.createElement('dialog');
+    dialog.setAttribute('aria-label', uploadDialogTitle);
+    const form = el('form', 'dialog__panel');
+    form.method = 'dialog';
+
+    const head = el('div', 'dialog__head');
+    const headText = el('div');
+    headText.append(
+      el('p', 'eyebrow', 'Artwork'),
+      el('h2', '', uploadDialogTitle),
+    );
+    const close = el('button', 'icon-btn', '×');
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Close');
+    head.append(headText, close);
+
+    const copy = el('p', 'dialog__copy', uploadDialogCopy);
+
+    const choose = el(
+      'button',
+      'btn btn--secondary btn--icon btn--icon-upload',
+      'Choose file…',
+    );
+    choose.type = 'button';
+
+    const divider = el('div', 'dialog__divider', 'or');
+
+    const field = el('label', 'field', 'Image URL');
+    const urlInput = document.createElement('input');
+    urlInput.type = 'url';
+    urlInput.placeholder = 'https://…';
+    urlInput.autocomplete = 'off';
+    urlInput.spellcheck = false;
+    field.append(urlInput);
+
+    const status = el('p', 'form-status');
+    status.setAttribute('role', 'status');
+
+    const actions = el('div', 'dialog__actions');
+    const cancel = el('button', 'btn btn--ghost', 'Cancel');
+    cancel.type = 'button';
+    const confirm = el('button', 'btn btn--primary', 'Use URL');
+    confirm.type = 'submit';
+    actions.append(cancel, confirm);
+
+    form.append(head, copy, choose, divider, field, status, actions);
+    dialog.append(form);
+    document.body.append(dialog);
+    uploadDialog = dialog;
+
+    const closeDialog = () => {
+      uploadDialog = null;
+      dialog.close();
+      dialog.remove();
+    };
+
+    close.addEventListener('click', closeDialog);
+    cancel.addEventListener('click', closeDialog);
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) closeDialog();
+    });
+    dialog.addEventListener('cancel', () => {
+      uploadDialog = null;
+      dialog.remove();
+    });
+    choose.addEventListener('click', () => input.click());
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const parsed = parseImageURL(urlInput.value);
+      if (parsed.error) {
+        setFormStatus(status, parsed.error, 'error');
+        return;
+      }
+      const url = parsed.url;
+      closeDialog();
+      void onUploadUrl(url);
+    });
+
+    dialog.showModal();
+    urlInput.focus();
+  }
+
+  function chooseDialogFile(file) {
+    if (!uploadDialog) return;
+    const status = uploadDialog.querySelector('.form-status');
+    if (file.size > COVER_UPLOAD_MAX_BYTES) {
+      setFormStatus(
+        status,
+        'That image is over the 15MB limit.',
+        'error',
+      );
+      return;
+    }
+    const node = uploadDialog;
+    uploadDialog = null;
+    node.close();
+    node.remove();
+    if (typeof onUpload === 'function') void onUpload(file);
+  }
+
   return {
     tools,
     refreshButton,

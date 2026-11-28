@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unicode"
@@ -93,6 +94,19 @@ type Fetcher struct {
 // returns it when a provider's image exceeds maxBytes, and Fetch treats it
 // like a miss so the next provider is tried. It never escapes Fetch.
 var errImageTooLarge = errors.New("artwork: image too large")
+
+// errUnsupportedContent and errEmptyImage stay plain sentinels so both
+// download (provider chain, internal errors) and FetchURL (user-supplied
+// URL, invalid input) can classify the same bytes with errors.Is without
+// nesting AppErrors.
+var (
+	errUnsupportedContent = errors.New("unsupported content")
+	errEmptyImage         = errors.New("empty image")
+)
+
+// MaxCoverURLLen caps a pasted cover URL at 2 KiB: long enough for any real
+// image link, short enough to stay far under the JSON body cap.
+const MaxCoverURLLen = 2048
 
 // normName lowercases and strips diacritics so "Sofía Cámara" matches
 // "Sofia Camara". Same recipe as store.normalizeSearch: text-search
@@ -345,7 +359,7 @@ func (f *Fetcher) download(ctx context.Context, url string) ([]byte, string, err
 	if len(body) == 0 {
 		return nil, "", apperrors.Wrap(
 			apperrors.ErrInternal,
-			fmt.Errorf("artwork: empty image"),
+			fmt.Errorf("artwork: %w", errEmptyImage),
 		)
 	}
 	mime := http.DetectContentType(body)
@@ -355,9 +369,68 @@ func (f *Fetcher) download(ctx context.Context, url string) ([]byte, string, err
 	default:
 		return nil, "", apperrors.Wrap(
 			apperrors.ErrInternal,
-			fmt.Errorf("artwork: unsupported content %q", mime),
+			fmt.Errorf("artwork: %w %q", errUnsupportedContent, mime),
 		)
 	}
+}
+
+// FetchURL downloads a user-supplied image URL for a manual cover/photo
+// upload. It validates the URL (http/https, no embedded credentials),
+// reuses the provider download limits (timeout, 15MB cap, magic-byte
+// sniffing), and records the URL as the result source. Bad URLs, 404s,
+// non-images, and oversized bodies answer INVALID_INPUT; transport failures
+// stay internal so they read as server errors, not bad input.
+func (f *Fetcher) FetchURL(ctx context.Context, rawURL string) (*Result, error) {
+	raw := strings.TrimSpace(rawURL)
+	if raw == "" || len(raw) > MaxCoverURLLen {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("artwork: bad cover URL"),
+		)
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("artwork: bad cover URL"),
+		)
+	}
+	ctx, cancel := context.WithTimeout(ctx, f.fetchTimeout)
+	defer cancel()
+	release, err := f.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	body, mime, err := f.download(ctx, raw)
+	if err != nil {
+		switch {
+		case errors.Is(err, errImageTooLarge):
+			return nil, apperrors.Wrap(
+				apperrors.ErrInvalidInput,
+				fmt.Errorf("artwork: cover URL image exceeds size limit"),
+			)
+		case apperrors.Is(err, apperrors.ErrNotFound):
+			return nil, apperrors.Wrap(
+				apperrors.ErrInvalidInput,
+				fmt.Errorf("artwork: cover URL returned no image"),
+			)
+		case errors.Is(err, errUnsupportedContent):
+			return nil, apperrors.Wrap(
+				apperrors.ErrInvalidInput,
+				fmt.Errorf("artwork: cover URL is not a JPEG, PNG, or WebP image"),
+			)
+		case errors.Is(err, errEmptyImage):
+			return nil, apperrors.Wrap(
+				apperrors.ErrInvalidInput,
+				fmt.Errorf("artwork: cover URL returned an empty image"),
+			)
+		default:
+			return nil, err
+		}
+	}
+	f.debugf("artwork: fetched cover from URL %s", raw)
+	return &Result{Bytes: body, MIME: mime, Source: SourceUpload, SourceURL: raw}, nil
 }
 
 func (f *Fetcher) warnf(format string, args ...any) {

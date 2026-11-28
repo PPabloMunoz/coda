@@ -3,6 +3,7 @@
 
 import {
   api,
+  ApiError,
   extractMbid,
   fmtDuration,
   MBID_RE,
@@ -517,6 +518,39 @@ function initReleaseGroupPage() {
     }
   }
 
+  async function uploadCoverFromURL(url) {
+    if (!currentRelease || coverInFlight) return;
+    coverInFlight = true;
+    heroTools.setBusy(true);
+    try {
+      const row = await api.uploadReleaseCoverFromURL(currentRelease.id, url);
+      if (!row) {
+        toast('Upload finished with no cover.', 'info');
+        return;
+      }
+      renderHeroCover();
+      toast(
+        'Cover updated. Linked files are updating in the background.',
+        'ok',
+      );
+    } catch (error) {
+      toast(`Could not use that cover URL: ${urlUploadError(error)}`, 'error');
+    } finally {
+      coverInFlight = false;
+      heroTools.setBusy(false);
+    }
+  }
+
+  // The URL endpoints answer 400 for any unusable link (not a direct
+  // image, wrong type, too big), so translate that into what to paste
+  // instead of the generic API message.
+  function urlUploadError(error) {
+    if (error instanceof ApiError && error.status === 400) {
+      return 'the link must point directly at a JPEG, PNG, or WebP image under 15MB';
+    }
+    return error instanceof Error ? error.message : String(error);
+  }
+
   async function removeCover() {
     if (!currentGroup || !currentRelease || coverInFlight) return;
     if (
@@ -759,11 +793,14 @@ function initReleaseGroupPage() {
         refreshTitle:
           'Fetch the cover art again (Cover Art Archive, then Deezer)',
         uploadLabel: 'Upload cover',
-        uploadTitle: 'Upload a JPEG, PNG, or WebP cover (max 15MB)',
+        uploadTitle:
+          'Upload a JPEG, PNG, or WebP cover — file or image URL (max 15MB)',
+        uploadDialogTitle: 'Upload cover',
         removeLabel: 'Remove cover',
         removeTitle: 'Remove the cached cover',
         onRefresh: () => void refreshCover(),
         onUpload: (file) => void uploadCover(file),
+        onUploadUrl: (url) => void uploadCoverFromURL(url),
         onRemove: () => void removeCover(),
       });
       renderHeroCover();

@@ -9,6 +9,15 @@ before upgrading and back up your database (see
 
 ## [Unreleased]
 
+### Added
+
+- Cover and artist-photo uploads accept an image URL as well as a file:
+  `POST /releases/:id/cover/url` and `POST /artists/:id/cover/url` take
+  `{"url": "https://…"}` and fetch the image server-side (direct `http(s)`
+  link, JPEG/PNG/WebP, max 15MB; the fetched link is recorded as
+  `source_url`). The upload button on the artist and release-group pages
+  now opens a dialog with both choices: choose a file, or paste a URL.
+
 ## [0.3.0] - 2026-11-27
 
 ### Breaking
