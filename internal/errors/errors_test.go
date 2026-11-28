@@ -165,6 +165,57 @@ func TestNilHandling(t *testing.T) {
 	}
 }
 
+func TestLogDetail(t *testing.T) {
+	t.Run("nil", func(t *testing.T) {
+		if got := LogDetail(nil); got != "" {
+			t.Errorf("LogDetail(nil) = %q, want empty", got)
+		}
+	})
+
+	t.Run("plain error", func(t *testing.T) {
+		err := stderrors.New("disk full")
+		if got := LogDetail(err); got != "disk full" {
+			t.Errorf("LogDetail = %q, want unchanged message", got)
+		}
+	})
+
+	t.Run("app error with cause", func(t *testing.T) {
+		err := Wrap(ErrInternal, stderrors.New("database is locked"))
+		got := LogDetail(err)
+		if got != "database is locked" {
+			t.Errorf("LogDetail = %q, want the cause without the safe message", got)
+		}
+	})
+
+	t.Run("wrapped app error keeps outer context", func(t *testing.T) {
+		err := fmt.Errorf("cover refresh release=abc: %w",
+			Wrap(ErrInternal, stderrors.New("artwork: status 503")))
+		got := LogDetail(err)
+		for _, want := range []string{"cover refresh release=abc", "artwork: status 503"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("LogDetail = %q, want %q", got, want)
+			}
+		}
+	})
+
+	t.Run("nested app errors", func(t *testing.T) {
+		err := Wrap(ErrInternal, fmt.Errorf("query cover: %w", Wrap(ErrInternal, stderrors.New("disk I/O error"))))
+		got := LogDetail(err)
+		for _, want := range []string{"query cover", "disk I/O error"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("LogDetail = %q, want %q", got, want)
+			}
+		}
+	})
+
+	t.Run("safe Error unchanged", func(t *testing.T) {
+		err := Wrap(ErrInternal, stderrors.New("sensitive detail"))
+		if err.Error() != "An unexpected error occurred" {
+			t.Errorf("Error() = %q, want safe message only", err.Error())
+		}
+	})
+}
+
 func TestGet(t *testing.T) {
 	t.Run("direct sentinel", func(t *testing.T) {
 		got, ok := Get(ErrInvalidInput)

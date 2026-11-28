@@ -161,7 +161,7 @@ func (h *Handler) replaceRelease(c *gin.Context) {
 	}
 	if oldErr == nil && oldRelease.ID != newReleaseID {
 		_ = h.st.DeleteCover(ctx, oldRelease.ID)
-		removeCoverFiles(h.coverDir, oldRelease.ID)
+		h.removeCoverFiles(oldRelease.ID)
 	}
 	// The DB link is already remapped; heal tags, covers, and paths in the
 	// background so the switch stays fast.
@@ -199,7 +199,7 @@ func (h *Handler) deleteReleaseGroup(c *gin.Context) {
 	}
 	if oldErr == nil {
 		_ = h.st.DeleteCover(ctx, oldRelease.ID)
-		removeCoverFiles(h.coverDir, oldRelease.ID)
+		h.removeCoverFiles(oldRelease.ID)
 	}
 
 	c.JSON(http.StatusOK, nil)

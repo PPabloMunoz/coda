@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -67,34 +68,63 @@ func coverETag(sizeBytes int64, fetchedAt string) string {
 // The row's ETag/If-None-Match check must already have run: this only
 // serves the 200/206 body. It reports whether the file was served; an
 // unserved file means the caller should run its stale-row recovery
-// (missing dir, missing file, non-regular entry). The open is scoped to
-// the cover dir via os.Root so a symlink swapped mid-request cannot
-// redirect the read outside the cache.
-func serveCoverFile(c *gin.Context, coverDir, fullPath, mime string) bool {
+// (missing dir, missing file, non-regular entry), and the returned error
+// says why the bytes could not be opened. The open is scoped to the cover
+// dir via os.Root so a symlink swapped mid-request cannot redirect the
+// read outside the cache.
+func serveCoverFile(c *gin.Context, coverDir, fullPath, mime string) (bool, error) {
 	if coverDir == "" {
-		return false
+		return false, nil
 	}
 	_, base := filepath.Split(fullPath)
 	if base == "" || base == "." || base == "/" {
-		return false
+		return false, fmt.Errorf("cover path %q has no file name", fullPath)
 	}
 	ro, err := os.OpenRoot(coverDir)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("open cover dir %q: %w", coverDir, err)
 	}
 	defer func() { _ = ro.Close() }()
 	f, err := ro.Open(base)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("open cached cover %q: %w", fullPath, err)
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		return false
+	if err != nil {
+		return false, fmt.Errorf("stat cached cover %q: %w", fullPath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("cached cover %q is not a regular file", fullPath)
 	}
 	c.Header("Content-Type", mime)
 	http.ServeContent(c.Writer, c.Request, "", time.Time{}, f)
-	return true
+	return true, nil
+}
+
+// logCoverFileError keeps a missing cache file quiet (normal stale-row
+// recovery) and everything else visible: permissions, a directory where a
+// file should be, or a broken data dir.
+func (h *Handler) logCoverFileError(kind, entityID, path string, err error) {
+	if err == nil {
+		return
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		h.log.Debugf("%s %q cached file %q missing", kind, entityID, path)
+		return
+	}
+	h.log.Warnf("%s %q cached file %q: %s", kind, entityID, path, apperrors.LogDetail(err))
+}
+
+// dropStaleCoverRow removes a cache row whose bytes are gone so the next
+// request refetches instead of serving a 500 forever. It only logs: the
+// caller continues with its miss path either way.
+func (h *Handler) dropStaleCoverRow(kind, entityID string, drop func() error) {
+	if err := drop(); err != nil {
+		h.log.Warnf("%s %q: drop stale cache row: %s", kind, entityID, apperrors.LogDetail(err))
+		return
+	}
+	h.log.Infof("%s %q: dropped stale cache row", kind, entityID)
 }
 
 // serveCover ensures and serves the cached cover bytes for a release with
@@ -123,10 +153,12 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 			c.Status(http.StatusNotModified)
 			return
 		}
-		if path, perr := config.CoverPath(h.coverDir, releaseID, row.MIME); perr == nil {
-			if serveCoverFile(c, h.coverDir, path, row.MIME) {
-				return
-			}
+		if path, perr := config.CoverPath(h.coverDir, releaseID, row.MIME); perr != nil {
+			h.log.Warnf("cover cache release %q path: %s", releaseID, apperrors.LogDetail(perr))
+		} else if served, serr := serveCoverFile(c, h.coverDir, path, row.MIME); served {
+			return
+		} else {
+			h.logCoverFileError("cover cache release", releaseID, path, serr)
 		}
 		// Cached row without readable bytes (deleted/moved data dir):
 		// drop the stale row so the slow path below refetches instead
@@ -135,12 +167,14 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 		// a tombstone while we were reading.
 		if cur, gerr := h.st.GetCover(ctx, releaseID); gerr == nil && !cur.Removed &&
 			cur.MIME == row.MIME && cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
-			_ = h.st.DeleteCover(ctx, releaseID)
+			h.dropStaleCoverRow("cover cache release", releaseID, func() error {
+				return h.st.DeleteCover(ctx, releaseID)
+			})
 		} else if gerr == nil && cur.Removed {
 			h.writeAppError(c, apperrors.ErrNotFound)
 			return
 		} else if gerr != nil && !apperrors.Is(gerr, apperrors.ErrNotFound) {
-			h.writeAppError(c, gerr)
+			h.writeAppError(c, fmt.Errorf("cover cache release=%q recheck: %w", releaseID, gerr))
 			return
 		}
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
@@ -187,12 +221,15 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 	if err != nil {
 		h.writeAppError(c, apperrors.Wrap(
 			apperrors.ErrInternal,
-			fmt.Errorf("cover path: %w", err)),
+			fmt.Errorf("cover path release=%q: %w", releaseID, err)),
 		)
 		return
 	}
-	if serveCoverFile(c, h.coverDir, path, row.MIME) {
+	if served, serr := serveCoverFile(c, h.coverDir, path, row.MIME); served {
 		return
+	} else {
+		h.log.Warnf("cover cache release %q: just-saved file %q unreadable: %s",
+			releaseID, path, apperrors.LogDetail(serr))
 	}
 	// Row without bytes (deleted/moved data dir): drop the stale row
 	// so the next request retries instead of 500ing forever. Only drop
@@ -200,12 +237,17 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 	// have replaced it or recorded a tombstone while we were reading.
 	if cur, gerr := h.st.GetCover(ctx, releaseID); gerr == nil && !cur.Removed &&
 		cur.MIME == row.MIME && cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
-		_ = h.st.DeleteCover(ctx, releaseID)
+		h.dropStaleCoverRow("cover cache release", releaseID, func() error {
+			return h.st.DeleteCover(ctx, releaseID)
+		})
 	} else if gerr == nil && cur.Removed {
 		h.writeAppError(c, apperrors.ErrNotFound)
 		return
 	} else if apperrors.Is(gerr, apperrors.ErrNotFound) {
 		h.writeAppError(c, apperrors.ErrNotFound)
+		return
+	} else if gerr != nil {
+		h.writeAppError(c, fmt.Errorf("cover cache release=%q recheck: %w", releaseID, gerr))
 		return
 	}
 	h.writeAppError(c, apperrors.Wrap(
@@ -229,12 +271,15 @@ func (h *Handler) refreshReleaseCover(c *gin.Context) {
 		return
 	}
 
+	start := time.Now()
 	row, err := h.doRefreshReleaseCover(ctx, releaseID)
 	if err != nil {
 		h.writeAppError(c, err)
 		return
 	}
 
+	h.log.Infof("cover refresh release=%q source=%s bytes=%d done in %s; embed queued",
+		releaseID, row.Source, row.SizeBytes, time.Since(start).Round(time.Millisecond))
 	h.queue.EnqueueEmbedReleaseCover(releaseID)
 	c.JSON(http.StatusOK, row)
 }
@@ -380,15 +425,18 @@ func (h *Handler) uploadReleaseCover(c *gin.Context) {
 		h.writeAppError(c, err)
 		return
 	}
+	start := time.Now()
 	row, err := h.saveReleaseCoverBytes(ctx, releaseID, &artwork.Result{
 		Bytes:  img,
 		MIME:   mime,
 		Source: artwork.SourceUpload,
 	})
 	if err != nil {
-		h.writeAppError(c, err)
+		h.writeAppError(c, fmt.Errorf("cover upload release=%q: %w", releaseID, err))
 		return
 	}
+	h.log.Infof("cover upload release=%q bytes=%d done in %s; embed queued",
+		releaseID, row.SizeBytes, time.Since(start).Round(time.Millisecond))
 	h.queue.EnqueueEmbedReleaseCover(releaseID)
 	c.JSON(http.StatusOK, row)
 }
@@ -422,16 +470,19 @@ func (h *Handler) uploadReleaseCoverURL(c *gin.Context) {
 		))
 		return
 	}
+	start := time.Now()
 	res, err := h.art.FetchURL(ctx, raw)
 	if err != nil {
-		h.writeAppError(c, err)
+		h.writeAppError(c, fmt.Errorf("cover URL import release=%q: %w", releaseID, err))
 		return
 	}
 	row, err := h.saveReleaseCoverBytes(ctx, releaseID, res)
 	if err != nil {
-		h.writeAppError(c, err)
+		h.writeAppError(c, fmt.Errorf("cover URL upload release=%q: %w", releaseID, err))
 		return
 	}
+	h.log.Infof("cover URL upload release=%q bytes=%d done in %s; embed queued",
+		releaseID, row.SizeBytes, time.Since(start).Round(time.Millisecond))
 	h.queue.EnqueueEmbedReleaseCover(releaseID)
 	c.JSON(http.StatusOK, row)
 }
@@ -487,15 +538,18 @@ func (h *Handler) uploadArtistCover(c *gin.Context) {
 		h.writeAppError(c, err)
 		return
 	}
+	start := time.Now()
 	row, err := h.saveArtistCoverBytes(ctx, artistID, &artwork.Result{
 		Bytes:  img,
 		MIME:   mime,
 		Source: artwork.SourceUpload,
 	})
 	if err != nil {
-		h.writeAppError(c, err)
+		h.writeAppError(c, fmt.Errorf("artist cover upload artist=%q: %w", artistID, err))
 		return
 	}
+	h.log.Infof("artist cover upload artist=%q bytes=%d done in %s",
+		artistID, row.SizeBytes, time.Since(start).Round(time.Millisecond))
 	c.JSON(http.StatusOK, row)
 }
 
@@ -528,16 +582,19 @@ func (h *Handler) uploadArtistCoverURL(c *gin.Context) {
 		))
 		return
 	}
+	start := time.Now()
 	res, err := h.art.FetchURL(ctx, raw)
 	if err != nil {
-		h.writeAppError(c, err)
+		h.writeAppError(c, fmt.Errorf("artist cover URL import artist=%q: %w", artistID, err))
 		return
 	}
 	row, err := h.saveArtistCoverBytes(ctx, artistID, res)
 	if err != nil {
-		h.writeAppError(c, err)
+		h.writeAppError(c, fmt.Errorf("artist cover URL upload artist=%q: %w", artistID, err))
 		return
 	}
+	h.log.Infof("artist cover URL upload artist=%q bytes=%d done in %s",
+		artistID, row.SizeBytes, time.Since(start).Round(time.Millisecond))
 	c.JSON(http.StatusOK, row)
 }
 
@@ -564,12 +621,13 @@ func (h *Handler) deleteReleaseCover(c *gin.Context) {
 		if err := h.st.MarkCoverRemoved(ctx, releaseID); err != nil {
 			return err
 		}
-		removeCoverFiles(h.coverDir, releaseID)
+		h.removeCoverFiles(releaseID)
 		return nil
 	}); err != nil {
-		h.writeAppError(c, err)
+		h.writeAppError(c, fmt.Errorf("cover delete release=%q: %w", releaseID, err))
 		return
 	}
+	h.log.Infof("cover delete release=%q done; clear queued", releaseID)
 	h.queue.EnqueueClearReleaseCover(releaseID)
 	c.Status(http.StatusNoContent)
 }
@@ -597,12 +655,13 @@ func (h *Handler) deleteArtistCover(c *gin.Context) {
 		if err := h.st.MarkArtistCoverRemoved(ctx, artistID); err != nil {
 			return err
 		}
-		removeArtistCoverFiles(h.coverDir, artistID)
+		h.removeArtistCoverFiles(artistID)
 		return nil
 	}); err != nil {
-		h.writeAppError(c, err)
+		h.writeAppError(c, fmt.Errorf("artist cover delete artist=%q: %w", artistID, err))
 		return
 	}
+	h.log.Infof("artist cover delete artist=%q done", artistID)
 	c.Status(http.StatusNoContent)
 }
 
@@ -651,10 +710,18 @@ func readCoverUpload(c *gin.Context) ([]byte, string, error) {
 
 // removeCoverFiles deletes every cached file for a release (all extensions).
 // The DB row is expected to be gone already (FK cascade or explicit delete).
-func removeCoverFiles(coverDir, releaseID string) {
-	matches, _ := filepath.Glob(filepath.Join(coverDir, releaseID+".*"))
+// Removal failures only log: the cover GC retries leftovers on the next scan.
+func (h *Handler) removeCoverFiles(releaseID string) {
+	matches, err := filepath.Glob(filepath.Join(h.coverDir, releaseID+".*"))
+	if err != nil {
+		h.log.Warnf("cover files release %q glob: %s", releaseID, apperrors.LogDetail(err))
+		return
+	}
 	for _, m := range matches {
-		_ = os.Remove(m)
+		if err := os.Remove(m); err != nil && !os.IsNotExist(err) {
+			h.log.Warnf("cover files release %q remove %q: %s",
+				releaseID, m, apperrors.LogDetail(err))
+		}
 	}
 }
 
@@ -697,21 +764,25 @@ func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 			c.Status(http.StatusNotModified)
 			return
 		}
-		if path, perr := config.ArtistCoverPath(h.coverDir, artistID, row.MIME); perr == nil {
-			if serveCoverFile(c, h.coverDir, path, row.MIME) {
-				return
-			}
+		if path, perr := config.ArtistCoverPath(h.coverDir, artistID, row.MIME); perr != nil {
+			h.log.Warnf("artist cover cache artist %q path: %s", artistID, apperrors.LogDetail(perr))
+		} else if served, serr := serveCoverFile(c, h.coverDir, path, row.MIME); served {
+			return
+		} else {
+			h.logCoverFileError("artist cover cache artist", artistID, path, serr)
 		}
 		// Cached row without readable bytes: drop the stale row so the
 		// slow path below refetches. Only drop the row we checked.
 		if cur, gerr := h.st.GetArtistCover(ctx, artistID); gerr == nil && !cur.Removed &&
 			cur.MIME == row.MIME && cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
-			_ = h.st.DeleteArtistCover(ctx, artistID)
+			h.dropStaleCoverRow("artist cover cache artist", artistID, func() error {
+				return h.st.DeleteArtistCover(ctx, artistID)
+			})
 		} else if gerr == nil && cur.Removed {
 			h.writeAppError(c, apperrors.ErrNotFound)
 			return
 		} else if gerr != nil && !apperrors.Is(gerr, apperrors.ErrNotFound) {
-			h.writeAppError(c, gerr)
+			h.writeAppError(c, fmt.Errorf("artist cover cache artist=%q recheck: %w", artistID, gerr))
 			return
 		}
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
@@ -754,12 +825,15 @@ func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 	if err != nil {
 		h.writeAppError(c, apperrors.Wrap(
 			apperrors.ErrInternal,
-			fmt.Errorf("artist cover path: %w", err)),
+			fmt.Errorf("artist cover path artist=%q: %w", artistID, err)),
 		)
 		return
 	}
-	if serveCoverFile(c, h.coverDir, path, row.MIME) {
+	if served, serr := serveCoverFile(c, h.coverDir, path, row.MIME); served {
 		return
+	} else {
+		h.log.Warnf("artist cover cache artist %q: just-saved file %q unreadable: %s",
+			artistID, path, apperrors.LogDetail(serr))
 	}
 	// Row without bytes (deleted/moved data dir): drop the stale row
 	// so the next request retries instead of 500ing forever. Only drop
@@ -767,12 +841,17 @@ func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 	// have replaced it or recorded a tombstone while we were reading.
 	if cur, gerr := h.st.GetArtistCover(ctx, artistID); gerr == nil && !cur.Removed &&
 		cur.MIME == row.MIME && cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
-		_ = h.st.DeleteArtistCover(ctx, artistID)
+		h.dropStaleCoverRow("artist cover cache artist", artistID, func() error {
+			return h.st.DeleteArtistCover(ctx, artistID)
+		})
 	} else if gerr == nil && cur.Removed {
 		h.writeAppError(c, apperrors.ErrNotFound)
 		return
 	} else if apperrors.Is(gerr, apperrors.ErrNotFound) {
 		h.writeAppError(c, apperrors.ErrNotFound)
+		return
+	} else if gerr != nil {
+		h.writeAppError(c, fmt.Errorf("artist cover cache artist=%q recheck: %w", artistID, gerr))
 		return
 	}
 	h.writeAppError(c, apperrors.Wrap(
@@ -808,21 +887,31 @@ func (h *Handler) refreshArtistCover(c *gin.Context) {
 		return
 	}
 
+	start := time.Now()
 	row, err := tasks.RefreshArtistCover(ctx, h.st, h.art, h.coverDir, artistID, artist.Name)
 	if err != nil {
 		h.writeAppError(c, err)
 		return
 	}
 
+	h.log.Infof("artist cover refresh artist=%q source=%s bytes=%d done in %s",
+		artistID, row.Source, row.SizeBytes, time.Since(start).Round(time.Millisecond))
 	c.JSON(http.StatusOK, row)
 }
 
 // removeArtistCoverFiles deletes every cached file for an artist (all
 // extensions). Artist files carry the "artist-" prefix, so release files are
-// never touched.
-func removeArtistCoverFiles(coverDir, artistID string) {
-	matches, _ := filepath.Glob(filepath.Join(coverDir, "artist-"+artistID+".*"))
+// never touched. Removal failures only log: the cover GC retries leftovers.
+func (h *Handler) removeArtistCoverFiles(artistID string) {
+	matches, err := filepath.Glob(filepath.Join(h.coverDir, "artist-"+artistID+".*"))
+	if err != nil {
+		h.log.Warnf("artist cover files artist %q glob: %s", artistID, apperrors.LogDetail(err))
+		return
+	}
 	for _, m := range matches {
-		_ = os.Remove(m)
+		if err := os.Remove(m); err != nil && !os.IsNotExist(err) {
+			h.log.Warnf("artist cover files artist %q remove %q: %s",
+				artistID, m, apperrors.LogDetail(err))
+		}
 	}
 }

@@ -128,7 +128,7 @@ func (r *Runner) autoLinkMoves(ctx context.Context) AutoLinkStats {
 		}
 		candidates, err := r.st.ListAutoLinkCandidates(ctx, afterID, batch)
 		if err != nil {
-			r.log.Warnf("scan auto-link list candidates: %v", err)
+			r.log.Warnf("scan auto-link list candidates: %s", apperrors.LogDetail(err))
 			return stats
 		}
 		if len(candidates) == 0 {
@@ -156,7 +156,7 @@ func (r *Runner) autoLinkMoves(ctx context.Context) AutoLinkStats {
 				if apperrors.Is(err, apperrors.ErrNotFound) {
 					continue
 				}
-				r.log.Warnf("scan auto-link file=%d track=%q: %v", c.ID, c.MbTrackID, err)
+				r.log.Warnf("scan auto-link file=%d track=%q: %s", c.ID, c.MbTrackID, apperrors.LogDetail(err))
 				continue
 			}
 			if !linked {

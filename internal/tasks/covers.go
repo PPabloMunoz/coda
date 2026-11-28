@@ -199,13 +199,17 @@ func EnsureCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 			if apperrors.Is(err, apperrors.ErrNotFound) {
 				recordReleaseCoverMiss(ctx, st, art, releaseID)
 			}
-			return err
+			return fmt.Errorf("cover fetch release=%q artist=%q album=%q: %w",
+				releaseID, artist, album, err)
 		}
 		if err := SaveCover(ctx, st, coverDir, releaseID, res); err != nil {
-			return err
+			return fmt.Errorf("cover save release=%q: %w", releaseID, err)
 		}
 		row, err = st.GetCover(ctx, releaseID)
-		return err
+		if err != nil {
+			return fmt.Errorf("cover reload release=%q: %w", releaseID, err)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -241,14 +245,16 @@ func RefreshCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 					recordReleaseCoverMiss(ctx, st, art, releaseID)
 				}
 			}
-			return err
+			return fmt.Errorf("cover refresh release=%q artist=%q album=%q (previous cover kept): %w",
+				releaseID, artist, album, err)
 		}
 		if err := SaveCover(ctx, st, coverDir, releaseID, res); err != nil {
-			return err
+			return fmt.Errorf("cover refresh release=%q artist=%q album=%q save: %w",
+				releaseID, artist, album, err)
 		}
 		r, err := st.GetCover(ctx, releaseID)
 		if err != nil {
-			return err
+			return fmt.Errorf("cover refresh release=%q reload: %w", releaseID, err)
 		}
 		row = r
 		return nil
@@ -368,7 +374,7 @@ func (r *Runner) prefetchCoversBG(ctx context.Context, artistID string) {
 
 	releases, err := r.coverJobs(ctx, artistID)
 	if err != nil {
-		r.log.Warnf("cover prefetch artist %q list: %v", artistID, err)
+		r.log.Warnf("cover prefetch artist %q list: %s", artistID, apperrors.LogDetail(err))
 		return
 	}
 	if len(releases) == 0 {
@@ -387,7 +393,7 @@ func (r *Runner) prefetchCoversBG(ctx context.Context, artistID string) {
 			for j := range jobs {
 				if _, err := EnsureCover(ctx, r.st, r.art, r.coverDir, j.releaseID, j.artist, j.title); err != nil {
 					if !apperrors.Is(err, apperrors.ErrNotFound) {
-						r.log.Warnf("cover prefetch release %q: %v", j.releaseID, err)
+						r.log.Warnf("cover prefetch release %q: %s", j.releaseID, apperrors.LogDetail(err))
 					}
 				}
 			}
@@ -427,11 +433,11 @@ func (r *Runner) coverJobs(ctx context.Context, artistID string) ([]coverJob, er
 			if _, err := r.st.GetCover(ctx, g.Release.ID); err == nil {
 				continue
 			} else if !apperrors.Is(err, apperrors.ErrNotFound) {
-				r.log.Warnf("cover prefetch release %q check: %v", g.Release.ID, err)
+				r.log.Warnf("cover prefetch release %q check: %s", g.Release.ID, apperrors.LogDetail(err))
 				continue
 			}
 			if active, err := isReleaseMissActive(ctx, r.st, g.Release.ID); err != nil {
-				r.log.Warnf("cover prefetch release %q miss check: %v", g.Release.ID, err)
+				r.log.Warnf("cover prefetch release %q miss check: %s", g.Release.ID, apperrors.LogDetail(err))
 				continue
 			} else if active {
 				continue
@@ -486,7 +492,7 @@ func (r *Runner) embedReleaseCover(ctx context.Context, releaseID string) {
 	row, err := r.st.GetCover(ctx, releaseID)
 	if err != nil {
 		if !apperrors.Is(err, apperrors.ErrNotFound) {
-			r.log.Warnf("embed cover release %q check: %v", releaseID, err)
+			r.log.Warnf("embed cover release %q check: %s", releaseID, apperrors.LogDetail(err))
 		}
 		return
 	}
@@ -496,7 +502,7 @@ func (r *Runner) embedReleaseCover(ctx context.Context, releaseID string) {
 	}
 	path, err := config.CoverPath(r.coverDir, releaseID, row.MIME)
 	if err != nil {
-		r.log.Warnf("embed cover release %q path: %v", releaseID, err)
+		r.log.Warnf("embed cover release %q path: %s", releaseID, apperrors.LogDetail(err))
 		return
 	}
 	img, err := os.ReadFile(path)
@@ -511,14 +517,14 @@ func (r *Runner) embedReleaseCover(ctx context.Context, releaseID string) {
 				_ = r.st.DeleteCover(ctx, releaseID)
 			}
 		} else {
-			r.log.Warnf("embed cover release %q read: %v", releaseID, err)
+			r.log.Warnf("embed cover release %q read: %s", releaseID, apperrors.LogDetail(err))
 		}
 		return
 	}
 
 	files, err := r.st.ListFilesByRelease(ctx, releaseID)
 	if err != nil {
-		r.log.Warnf("embed cover release %q list files: %v", releaseID, err)
+		r.log.Warnf("embed cover release %q list files: %s", releaseID, apperrors.LogDetail(err))
 		return
 	}
 	if len(files) == 0 {
@@ -535,7 +541,7 @@ func (r *Runner) embedReleaseCover(ctx context.Context, releaseID string) {
 		}
 		if err := tags.WriteCover(f.Path, img); err != nil {
 			failed++
-			r.log.Warnf("embed cover release %q file=%d: %v", releaseID, f.ID, err)
+			r.log.Warnf("embed cover release %q file=%d: %s", releaseID, f.ID, apperrors.LogDetail(err))
 			continue
 		}
 		embedded++
@@ -557,7 +563,7 @@ func (r *Runner) clearReleaseCover(ctx context.Context, releaseID string) {
 	row, err := r.st.GetCover(ctx, releaseID)
 	if err != nil {
 		if !apperrors.Is(err, apperrors.ErrNotFound) {
-			r.log.Warnf("clear cover release %q check: %v", releaseID, err)
+			r.log.Warnf("clear cover release %q check: %s", releaseID, apperrors.LogDetail(err))
 		}
 		return
 	}
@@ -567,7 +573,7 @@ func (r *Runner) clearReleaseCover(ctx context.Context, releaseID string) {
 
 	files, err := r.st.ListFilesByRelease(ctx, releaseID)
 	if err != nil {
-		r.log.Warnf("clear cover release %q list files: %v", releaseID, err)
+		r.log.Warnf("clear cover release %q list files: %s", releaseID, apperrors.LogDetail(err))
 		return
 	}
 	if len(files) == 0 {
@@ -584,7 +590,7 @@ func (r *Runner) clearReleaseCover(ctx context.Context, releaseID string) {
 		}
 		if err := tags.ClearCover(f.Path); err != nil {
 			failed++
-			r.log.Warnf("clear cover release %q file=%d: %v", releaseID, f.ID, err)
+			r.log.Warnf("clear cover release %q file=%d: %s", releaseID, f.ID, apperrors.LogDetail(err))
 			continue
 		}
 		cleared++

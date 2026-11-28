@@ -70,14 +70,15 @@ func EnsureArtistCover(ctx context.Context, st *store.Store, art *artwork.Fetche
 			if apperrors.Is(err, apperrors.ErrNotFound) {
 				recordArtistCoverMiss(ctx, st, art, artistID)
 			}
-			return err
+			return fmt.Errorf("artist cover fetch artist=%q name=%q: %w",
+				artistID, artistName, err)
 		}
 		if err := SaveArtistCover(ctx, st, coverDir, artistID, res); err != nil {
-			return err
+			return fmt.Errorf("artist cover save artist=%q: %w", artistID, err)
 		}
 		r, err := st.GetArtistCover(ctx, artistID)
 		if err != nil {
-			return err
+			return fmt.Errorf("artist cover reload artist=%q: %w", artistID, err)
 		}
 		row = r
 		return nil
@@ -114,14 +115,16 @@ func RefreshArtistCover(ctx context.Context, st *store.Store, art *artwork.Fetch
 					recordArtistCoverMiss(ctx, st, art, artistID)
 				}
 			}
-			return err
+			return fmt.Errorf("artist cover refresh artist=%q name=%q (previous photo kept): %w",
+				artistID, artistName, err)
 		}
 		if err := SaveArtistCover(ctx, st, coverDir, artistID, res); err != nil {
-			return err
+			return fmt.Errorf("artist cover refresh artist=%q name=%q save: %w",
+				artistID, artistName, err)
 		}
 		r, err := st.GetArtistCover(ctx, artistID)
 		if err != nil {
-			return err
+			return fmt.Errorf("artist cover refresh artist=%q reload: %w", artistID, err)
 		}
 		row = r
 		return nil
@@ -220,18 +223,18 @@ func (r *Runner) prefetchArtistCover(ctx context.Context, artistID, artistName s
 	if _, err := r.st.GetArtistCover(ctx, artistID); err == nil {
 		return
 	} else if !apperrors.Is(err, apperrors.ErrNotFound) {
-		r.log.Warnf("artist cover prefetch artist %q check: %v", artistID, err)
+		r.log.Warnf("artist cover prefetch artist %q check: %s", artistID, apperrors.LogDetail(err))
 		return
 	}
 	if active, err := isArtistMissActive(ctx, r.st, artistID); err != nil {
-		r.log.Warnf("artist cover prefetch artist %q miss check: %v", artistID, err)
+		r.log.Warnf("artist cover prefetch artist %q miss check: %s", artistID, apperrors.LogDetail(err))
 		return
 	} else if active {
 		return
 	}
 	if _, err := EnsureArtistCover(ctx, r.st, r.art, r.coverDir, artistID, artistName); err != nil {
 		if !apperrors.Is(err, apperrors.ErrNotFound) {
-			r.log.Warnf("artist cover prefetch artist %q: %v", artistID, err)
+			r.log.Warnf("artist cover prefetch artist %q: %s", artistID, apperrors.LogDetail(err))
 		}
 	}
 }
