@@ -10,8 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 
 	"github.com/ppablomunoz/coda/internal/artwork"
 	"github.com/ppablomunoz/coda/internal/config"
@@ -195,6 +197,72 @@ func (h *Handler) getReleaseCoverMeta(c *gin.Context) {
 	c.JSON(http.StatusOK, row)
 }
 
+// saveReleaseCoverBytes stores res under the release cover lock and returns
+// the fresh metadata row. Raw file uploads and URL imports share it (lock,
+// atomic write, tombstone clear); callers queue the re-embed.
+func (h *Handler) saveReleaseCoverBytes(ctx context.Context, releaseID string, res *artwork.Result) (*store.CoverParams, error) {
+	var row *store.CoverParams
+	if err := tasks.WithReleaseCoverLock(releaseID, func() error {
+		if err := tasks.SaveCover(ctx, h.st, h.coverDir, releaseID, res); err != nil {
+			return err
+		}
+		r, err := h.st.GetCover(ctx, releaseID)
+		if err != nil {
+			return err
+		}
+		row = r
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+// saveArtistCoverBytes stores res under the artist cover lock and returns
+// the fresh metadata row. Raw file uploads and URL imports share it.
+func (h *Handler) saveArtistCoverBytes(ctx context.Context, artistID string, res *artwork.Result) (*store.ArtistCoverParams, error) {
+	var row *store.ArtistCoverParams
+	if err := tasks.WithArtistCoverLock(artistID, func() error {
+		if err := tasks.SaveArtistCover(ctx, h.st, h.coverDir, artistID, res); err != nil {
+			return err
+		}
+		r, err := h.st.GetArtistCover(ctx, artistID)
+		if err != nil {
+			return err
+		}
+		row = r
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+type coverURLBody struct {
+	URL string `json:"url" binding:"required"`
+}
+
+// requireCoverURL parses the {"url": ...} body of the cover-URL endpoints.
+// The bounds mirror the fetcher cap (2 KiB) so an overlong URL fails fast
+// here instead of after validation downstream.
+func requireCoverURL(c *gin.Context) (string, error) {
+	var body coverURLBody
+	if err := c.ShouldBindBodyWith(&body, binding.JSON); err != nil {
+		return "", apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("body invalid: %w", err),
+		)
+	}
+	raw := strings.TrimSpace(body.URL)
+	if raw == "" || len(raw) > artwork.MaxCoverURLLen {
+		return "", apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("cover url invalid"),
+		)
+	}
+	return raw, nil
+}
+
 // uploadReleaseCover replaces the cached cover for a release with
 // caller-supplied image bytes and queues a background re-embed into the
 // release's linked files. The body is the raw image (Content-Type is only
@@ -218,22 +286,55 @@ func (h *Handler) uploadReleaseCover(c *gin.Context) {
 		h.writeAppError(c, err)
 		return
 	}
-	var row *store.CoverParams
-	if err := tasks.WithReleaseCoverLock(releaseID, func() error {
-		if err := tasks.SaveCover(ctx, h.st, h.coverDir, releaseID, &artwork.Result{
-			Bytes:  img,
-			MIME:   mime,
-			Source: artwork.SourceUpload,
-		}); err != nil {
-			return err
-		}
-		r, err := h.st.GetCover(ctx, releaseID)
-		if err != nil {
-			return err
-		}
-		row = r
-		return nil
-	}); err != nil {
+	row, err := h.saveReleaseCoverBytes(ctx, releaseID, &artwork.Result{
+		Bytes:  img,
+		MIME:   mime,
+		Source: artwork.SourceUpload,
+	})
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	h.queue.EnqueueEmbedReleaseCover(releaseID)
+	c.JSON(http.StatusOK, row)
+}
+
+// uploadReleaseCoverURL fetches a user-supplied image URL server-side and
+// caches it as the release cover, recording the URL as the row's source.
+// The browser never fetches the image itself (most hosts lack CORS
+// headers). Like a raw upload it queues a background re-embed into the
+// release's linked files.
+func (h *Handler) uploadReleaseCoverURL(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	releaseID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetRelease(ctx, releaseID, false); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	raw, err := requireCoverURL(c)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if h.art == nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("cover URL import unavailable"),
+		))
+		return
+	}
+	res, err := h.art.FetchURL(ctx, raw)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	row, err := h.saveReleaseCoverBytes(ctx, releaseID, res)
+	if err != nil {
 		h.writeAppError(c, err)
 		return
 	}
@@ -292,22 +393,54 @@ func (h *Handler) uploadArtistCover(c *gin.Context) {
 		h.writeAppError(c, err)
 		return
 	}
-	var row *store.ArtistCoverParams
-	if err := tasks.WithArtistCoverLock(artistID, func() error {
-		if err := tasks.SaveArtistCover(ctx, h.st, h.coverDir, artistID, &artwork.Result{
-			Bytes:  img,
-			MIME:   mime,
-			Source: artwork.SourceUpload,
-		}); err != nil {
-			return err
-		}
-		r, err := h.st.GetArtistCover(ctx, artistID)
-		if err != nil {
-			return err
-		}
-		row = r
-		return nil
-	}); err != nil {
+	row, err := h.saveArtistCoverBytes(ctx, artistID, &artwork.Result{
+		Bytes:  img,
+		MIME:   mime,
+		Source: artwork.SourceUpload,
+	})
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, row)
+}
+
+// uploadArtistCoverURL fetches a user-supplied image URL server-side and
+// caches it as the artist photo, recording the URL as the row's source.
+// The browser never fetches the image itself (most hosts lack CORS
+// headers). Artist photos are display-only, so no background work is
+// queued.
+func (h *Handler) uploadArtistCoverURL(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	artistID, err := requireMBID(c.Param("id"))
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if _, err := h.st.GetArtistByID(ctx, artistID); err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	raw, err := requireCoverURL(c)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	if h.art == nil {
+		h.writeAppError(c, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("cover URL import unavailable"),
+		))
+		return
+	}
+	res, err := h.art.FetchURL(ctx, raw)
+	if err != nil {
+		h.writeAppError(c, err)
+		return
+	}
+	row, err := h.saveArtistCoverBytes(ctx, artistID, res)
+	if err != nil {
 		h.writeAppError(c, err)
 		return
 	}

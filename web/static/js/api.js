@@ -319,6 +319,18 @@ export const api = {
         body: file,
       },
     ),
+  uploadArtistCoverFromURL: (id, url) =>
+    request(`/api/v1/artists/${encodeURIComponent(id)}/cover/url`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    }),
+  uploadReleaseCoverFromURL: (id, url) =>
+    request(`/api/v1/releases/${encodeURIComponent(id)}/cover/url`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    }),
 
   link: (fileID, trackID) =>
     fetch(`/api/v1/files/${fileID}/link`, {

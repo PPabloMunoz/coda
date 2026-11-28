@@ -3,6 +3,7 @@
 
 import {
   api,
+  ApiError,
   creditName,
   mbUrl,
 } from './api.js';
@@ -369,6 +370,36 @@ function initArtistPage() {
       coverInFlight = false;
       heroTools.setBusy(false);
     }
+  }
+
+  async function uploadArtistPhotoFromURL(url) {
+    if (!artist || coverInFlight) return;
+    coverInFlight = true;
+    heroTools.setBusy(true);
+    try {
+      const row = await api.uploadArtistCoverFromURL(artist.id, url);
+      if (!row) {
+        toast('Upload finished with no photo.', 'info');
+        return;
+      }
+      renderHeroPhoto();
+      toast('Artist photo uploaded.', 'ok');
+    } catch (error) {
+      toast(`Could not use that photo URL: ${urlUploadError(error)}`, 'error');
+    } finally {
+      coverInFlight = false;
+      heroTools.setBusy(false);
+    }
+  }
+
+  // The URL endpoints answer 400 for any unusable link (not a direct
+  // image, wrong type, too big), so translate that into what to paste
+  // instead of the generic API message.
+  function urlUploadError(error) {
+    if (error instanceof ApiError && error.status === 400) {
+      return 'the link must point directly at a JPEG, PNG, or WebP image under 15MB';
+    }
+    return error instanceof Error ? error.message : String(error);
   }
 
   async function removeArtistPhoto() {
@@ -775,11 +806,14 @@ function initArtistPage() {
         refreshTitle:
           'Fetch the artist photo again (Deezer, then Wikimedia Commons)',
         uploadLabel: 'Upload photo',
-        uploadTitle: 'Upload a JPEG, PNG, or WebP photo (max 15MB)',
+        uploadTitle:
+          'Upload a JPEG, PNG, or WebP photo — file or image URL (max 15MB)',
+        uploadDialogTitle: 'Upload artist photo',
         removeLabel: 'Remove photo',
         removeTitle: 'Remove the cached photo',
         onRefresh: () => void refreshArtistCover(),
         onUpload: (file) => void uploadArtistPhoto(file),
+        onUploadUrl: (url) => void uploadArtistPhotoFromURL(url),
         onRemove: () => void removeArtistPhoto(),
       });
       renderHeroPhoto();
