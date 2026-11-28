@@ -1,9 +1,17 @@
 package tasks
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/ppablomunoz/coda/internal/musicbrainz"
+	"github.com/ppablomunoz/coda/internal/store"
+	"github.com/ppablomunoz/coda/internal/utils"
 )
 
 func TestArtistFromMB(t *testing.T) {
@@ -107,5 +115,64 @@ func TestFullReleaseFromMBStoreRoundTrip(t *testing.T) {
 	got := FullReleaseFromMB(r)
 	if got.Group.Type != "Single" {
 		t.Errorf("type = %q", got.Group.Type)
+	}
+}
+
+func TestImportDiscographyPartialProgress(t *testing.T) {
+	const (
+		artistID = "d5b32d03-2aaf-4baf-ba5d-3721d095b833"
+		rel1     = "33333333-4444-4555-b666-777777777777"
+		group1   = "11111111-2222-4333-8444-555555555555"
+		track1   = "55555555-6666-4777-b888-999999999999"
+		rec1     = "77777777-8888-4999-baaa-bbbbbbbbbbbb"
+		rel2     = "44444444-5555-4666-b777-888888888888"
+	)
+	log := utils.NewWithWriter(io.Discard)
+	st, err := store.NewStore(filepath.Join(t.TempDir(), "test.db"), nil, log)
+	if err != nil {
+		t.Fatalf("NewStore = %v", err)
+	}
+	t.Cleanup(st.Close)
+	if err := st.CreateArtist(context.Background(), store.Artist{ID: artistID, Name: "Test"}); err != nil {
+		t.Fatalf("CreateArtist = %v", err)
+	}
+
+	mkRelease := func(id, group, track, rec, title string) musicbrainz.Release {
+		return musicbrainz.Release{
+			ID: id, Title: title, Status: "Official",
+			ReleaseGroup: musicbrainz.ReleaseGroup{ID: group, Title: title + " Group", PrimaryType: "Album"},
+			Media: []musicbrainz.Medium{{Position: 1, Tracks: []musicbrainz.ReleaseTrack{{
+				ID: track, Position: 1, Number: "1", Title: title + " Track",
+				Recording: musicbrainz.RecordingRef{ID: rec},
+			}}}},
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("offset") == "0" || r.URL.Query().Get("offset") == "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"release-count": 2,
+				"releases":      []musicbrainz.Release{mkRelease(rel1, group1, track1, rec1, "First")},
+			})
+			return
+		}
+		// Second page fails fast (400, no retries): page 1 must stay saved.
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	t.Cleanup(srv.Close)
+	mb, err := musicbrainz.New(musicbrainz.Config{UserAgent: "coda-test", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("mb New = %v", err)
+	}
+	q := NewQueue(log, st)
+	runner := NewRunner(st, mb, log, q, nil, "")
+
+	if err := runner.importDiscography(context.Background(), artistID); err == nil {
+		t.Fatal("importDiscography = nil, want error from second page")
+	}
+	if _, err := st.GetRelease(context.Background(), rel1, false); err != nil {
+		t.Errorf("page 1 release missing after partial import: %v", err)
+	}
+	if _, err := st.GetRelease(context.Background(), rel2, false); err == nil {
+		t.Errorf("page 2 release present, want missing after failed page")
 	}
 }

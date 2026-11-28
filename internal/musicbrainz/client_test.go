@@ -3,12 +3,15 @@ package musicbrainz
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
+
+var errCallbackStop = errors.New("callback stop")
 
 func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
 	t.Helper()
@@ -112,12 +115,84 @@ func TestGetReleasesFilters(t *testing.T) {
 			},
 		})
 	})
-	got, err := c.GetReleasesWithTracksByArtist(context.Background(), "artist-1")
+	var got []Release
+	err := c.BrowseReleasesByArtist(context.Background(), "artist-1", func(page []Release) error {
+		got = append(got, page...)
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("GetReleases = %v", err)
+		t.Fatalf("Browse = %v", err)
 	}
 	if len(got) != 1 || got[0].ID != "r1" {
 		t.Errorf("filtered = %v, want only r1", got)
+	}
+}
+
+func TestBrowseReleasesPaginates(t *testing.T) {
+	var offsets []string
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		offsets = append(offsets, r.URL.Query().Get("offset"))
+		offset := r.URL.Query().Get("offset")
+		switch offset {
+		case "", "0":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"release-count": 3,
+				"releases": []Release{
+					{ID: "r1", Title: "R1", Status: "Official", ReleaseGroup: ReleaseGroup{ID: "g1", PrimaryType: "Album"}},
+					{ID: "r2", Title: "R2", Status: "Official", ReleaseGroup: ReleaseGroup{ID: "g2", PrimaryType: "Album"}},
+				},
+			})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"release-count": 3,
+				"releases": []Release{
+					{ID: "r3", Title: "R3", Status: "Official", ReleaseGroup: ReleaseGroup{ID: "g3", PrimaryType: "Single"}},
+				},
+			})
+		}
+	})
+	var got []Release
+	pages := 0
+	err := c.BrowseReleasesByArtist(context.Background(), "artist-1", func(page []Release) error {
+		pages++
+		got = append(got, page...)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Browse = %v", err)
+	}
+	if pages != 2 {
+		t.Errorf("pages = %d, want 2", pages)
+	}
+	if len(got) != 3 || got[0].ID != "r1" || got[1].ID != "r2" || got[2].ID != "r3" {
+		t.Errorf("got %v, want r1 r2 r3 in order", got)
+	}
+	// Offset advances by returned count (2 then 3), not by limit.
+	if len(offsets) != 2 || offsets[0] != "0" || offsets[1] != "2" {
+		t.Errorf("offsets = %v, want [0 2]", offsets)
+	}
+}
+
+func TestBrowseReleasesStopsOnCallbackError(t *testing.T) {
+	calls := 0
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"release-count": 2,
+			"releases": []Release{
+				{ID: "r1", Title: "R1", Status: "Official", ReleaseGroup: ReleaseGroup{ID: "g1", PrimaryType: "Album"}},
+			},
+		})
+	})
+	sentinel := errCallbackStop
+	err := c.BrowseReleasesByArtist(context.Background(), "artist-1", func([]Release) error {
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Errorf("err = %v, want sentinel passthrough", err)
+	}
+	if calls != 1 {
+		t.Errorf("calls = %d, want 1 (stop after callback error)", calls)
 	}
 }
 

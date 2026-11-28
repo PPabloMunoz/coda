@@ -49,14 +49,20 @@ type RecordingRef struct {
 	ArtistCredit []ArtistCredit `json:"artist-credit"`
 }
 
-// GetReleasesWithTracksByArtist batches what used to be N+1 requests into one
-// paginated browse: releases with their parent release-group and tracklists.
-// Query filters are lowercase (official); response Status is capitalized
-// (Official), so compare case-insensitively.
-func (c *Client) GetReleasesWithTracksByArtist(ctx context.Context, id string) ([]Release, error) {
-	var out []Release
+// BrowseReleasesByArtist streams official albums/EPs/singles with tracks
+// from MusicBrainz one page at a time, invoking fn per page so callers
+// never retain the whole discography in memory. Query filters are
+// lowercase (official); response Status is capitalized (Official), so
+// compare case-insensitively. Pages with no kept releases are skipped.
+// A fn error stops pagination and is returned unwrapped.
+// Releases are capped at 500 tracks per page, so the offset advances by
+// what was actually returned, not by limit.
+func (c *Client) BrowseReleasesByArtist(ctx context.Context, id string, fn func([]Release) error) error {
 	offset := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		q := url.Values{}
 		q.Set("artist", id)
 		q.Set("type", "album|ep|single")
@@ -69,8 +75,9 @@ func (c *Client) GetReleasesWithTracksByArtist(ctx context.Context, id string) (
 			Releases []Release `json:"releases"`
 		}
 		if err := c.getJSON(ctx, "/release", q, &res); err != nil {
-			return nil, fmt.Errorf("musicbrainz: releases: %w", err)
+			return fmt.Errorf("musicbrainz: releases: %w", err)
 		}
+		filtered := make([]Release, 0, len(res.Releases))
 		for _, r := range res.Releases {
 			if r.Status != "" && !strings.EqualFold(r.Status, "official") {
 				continue
@@ -83,16 +90,19 @@ func (c *Client) GetReleasesWithTracksByArtist(ctx context.Context, id string) (
 					continue
 				}
 			}
-			out = append(out, r)
+			filtered = append(filtered, r)
 		}
-		// Releases are capped at 500 tracks per page, so advance by what
-		// we actually got, not by limit.
+		if len(filtered) > 0 {
+			if err := fn(filtered); err != nil {
+				return err
+			}
+		}
 		offset += len(res.Releases)
 		if offset >= res.Count || len(res.Releases) == 0 {
 			break
 		}
 	}
-	return out, nil
+	return nil
 }
 
 // GetReleaseByID fetches a single release with its parent release-group and
