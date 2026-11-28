@@ -17,8 +17,8 @@ binaries; build from source instead.
 ## Install script
 
 Best for a Proxmox LXC/VM or any bare-metal Linux host. POSIX `sh`, needs
-only `curl` or `wget` (installed for you via the system package manager
-when missing):
+`curl` or `wget` plus `sha256sum` or `shasum` already on the host (the
+script reports what is missing instead of installing it for you):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/PPabloMunoz/coda/main/scripts/install.sh | sudo sh
@@ -32,38 +32,78 @@ curl -fsSL https://raw.githubusercontent.com/PPabloMunoz/coda/main/scripts/insta
 ```
 
 The script downloads the latest release binary, verifies it against
-`checksums.txt`, installs it to `/usr/local/bin/coda`, creates a `coda`
-service user, writes a service definition (systemd unit, or OpenRC script
-plus `conf.d` — env-only config, no YAML editing; OpenRC also gets a
-logrotate config at `/etc/logrotate.d/coda`), and starts the service.
-On hosts with neither init system it installs the binary and prints how to
-run it by hand.
+`checksums.txt`, and installs it to `/usr/local/bin/coda`. Unless
+`--no-service` is passed, it also creates a `coda` service user, writes a
+service definition (systemd unit, or OpenRC script plus `conf.d` — env-only
+config, no YAML editing; OpenRC also gets a logrotate config at
+`/etc/logrotate.d/coda`), and starts the service. On hosts with neither init
+system, or with `--no-service`, it installs the binary only and prints how
+to run it by hand.
+
+The script does not fix your system: a missing tool, a missing music dir, a
+bad flag, or a permission problem is reported as an error — you fix it and
+re-run. All flags are validated before the installed binary is replaced, so
+an invalid flag never leaves a new binary behind with an old service config.
+Values containing `"`, `\`, `$`, backtick, `%`, or a newline are rejected
+(they cannot be written to the service definition).
+
+Coda has no authentication and listens on all interfaces by default, so only
+run it on trusted LANs. To bind loopback instead, edit the service
+definition by hand after installing and restart:
+
+```sh
+# systemd: add to /etc/systemd/system/coda.service, then
+#   systemctl daemon-reload && systemctl restart coda
+Environment="CODA_HOST=127.0.0.1"
+Environment="CODA_ALLOWED_HOSTS=coda.example.com"
+
+# OpenRC: add to /etc/conf.d/coda, then
+#   rc-service coda restart
+export CODA_HOST="127.0.0.1"
+export CODA_ALLOWED_HOSTS="coda.example.com"
+```
+
+An upgrade keeps hand-added lines like these. Put Coda behind a reverse
+proxy for anything beyond the LAN.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--version X.Y.Z` | latest | release to install |
-| `--port PORT` | `8687` | port coda listens on |
-| `--roots PATHS` | `/mnt/music` | existing music dirs, `:`-separated like `CODA_ROOTS` |
-| `--data-dir DIR` | `/var/lib/coda` | state dir for DB, covers and config |
-| `--user USER` | `coda` | service user to create/run as |
-| `--no-service` | — | install the binary only |
+| `--port PORT` | `8687` | port coda listens on (1–65535) |
+| `--roots PATHS` | none | optional music dirs, `:`-separated like `CODA_ROOTS` (service installs only) |
+| `--data-dir DIR` | `/var/lib/coda` | state dir for DB, covers and config (an absolute path, never `/`) |
+| `--user USER` | `coda` | service user to create/run as (never `root`) |
+| `--no-service` | — | install the binary only: skip the service user, data dir, roots checks and service setup |
 
-Each `--roots` entry must already exist (create or mount it before running
-the installer). The script never creates library directories and never
-changes their ownership. It warns when the service user cannot read/write a
-root — linking moves files, so it needs write access; fix ownership
-yourself (e.g. `chown -R coda:coda /mnt/music`) or pass `--user` naming an
-account that already can.
+Roots are optional: if you skip `--roots`, Coda starts with no roots (it
+creates a default `config.yaml` on first run) — point `roots` at your
+library later, or re-run the installer with `--roots ...`, then rescan. If
+you pass `--roots`, each entry must already exist (create or mount it before
+running the installer). The script never creates library directories and
+never changes their ownership — make sure the service user can read/write
+them yourself (linking moves files, so it needs write access, e.g.
+`chown -R coda:coda /mnt/music`). The state dir is created when missing and
+owned by the service user.
 
 **Upgrade:** re-run the script. It keeps the previous port, roots, data
-dir and user; a flag you pass overrides them. Back up first on 0.x (see
-[operations.md](operations.md#backup-and-restore)).
+dir and user (plus any hand-added `CODA_HOST` / `CODA_ALLOWED_HOSTS` lines);
+a flag you pass overrides the corresponding setting. Back up first on 0.x
+(see [operations.md](operations.md#backup-and-restore)).
 
 **Uninstall:**
 
 ```sh
+sudo ./scripts/uninstall.sh                              # service + binary; keeps state and user
+sudo ./scripts/uninstall.sh --remove-state --remove-user # also delete the state dir and service user
+```
+
+State and user are kept by default. The script reads both from the
+installed service definition; with no service definition installed, pass
+`--data-dir DIR` / `--user USER` explicitly. Or by hand:
+
+```sh
 sudo systemctl disable --now coda          # or: rc-service coda stop; rc-update del coda
-sudo rm -f /usr/local/bin/coda /etc/systemd/system/coda.service /etc/conf.d/coda /etc/init.d/coda /etc/logrotate.d/coda
+sudo rm -f /usr/local/bin/coda /etc/systemd/system/coda.service /etc/conf.d/coda /etc/init.d/coda /etc/logrotate.d/coda /var/log/coda.log
 sudo userdel coda                          # if you don't want the user anymore
 sudo rm -rf /var/lib/coda                  # state: DB + covers + config
 ```
