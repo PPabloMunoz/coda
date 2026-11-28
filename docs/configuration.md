@@ -123,10 +123,16 @@ The compose file reads:
 
 `scripts/install.sh` accepts `--version`, `--port`, `--roots`,
 `--data-dir`, `--user`, `--no-service`, `--help`. Defaults: port `8687`,
-roots `/mnt/music`, data dir `/var/lib/coda`, user `coda`. Roots must
-already exist; the installer never creates or chowns library directories.
+data dir `/var/lib/coda`, user `coda`; roots default to none (the app
+creates a default config on first run — add roots later or pass `--roots`).
+Passed roots must already exist (service installs only); the installer never
+creates or chowns library directories — the service user needs read/write on
+them, which you arrange yourself. `--no-service` installs the binary only. There are no
+`--host` / `--allowed-hosts` flags: to bind loopback, add
+`CODA_HOST=127.0.0.1` (plus `CODA_ALLOWED_HOSTS` for the public name) to the
+service definition by hand after installing; upgrades keep those lines.
 Re-running the installer keeps the previous settings; a flag you pass
-overrides them.
+overrides the corresponding setting.
 
 ## Data locations
 
