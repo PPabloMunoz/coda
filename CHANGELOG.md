@@ -9,6 +9,13 @@ before upgrading and back up your database (see
 
 ## [Unreleased]
 
+### Changed
+
+- Cover and artist-photo responses stream the cached file from disk
+  (`http.ServeContent`) instead of loading it into memory, with
+  `Accept-Ranges: bytes` and `206 Partial Content` support for `Range`
+  requests.
+
 ## [0.3.1] - 2026-11-28
 
 ### Added

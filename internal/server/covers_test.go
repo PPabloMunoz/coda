@@ -10,10 +10,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/ppablomunoz/coda/internal/artwork"
+	apperrors "github.com/ppablomunoz/coda/internal/errors"
 	"github.com/ppablomunoz/coda/internal/store"
 	"github.com/ppablomunoz/coda/internal/tasks"
 )
@@ -292,6 +295,108 @@ func TestArtistCoverRevalidates(t *testing.T) {
 		map[string]string{"If-None-Match": etag})
 	if w.Code != http.StatusNotModified {
 		t.Fatalf("revalidate = %d, want 304", w.Code)
+	}
+}
+
+func TestReleaseCoverServesRangeFromDisk(t *testing.T) {
+	env := newTestEnv(t)
+	seedUploadRelease(t, env)
+
+	w := doRawRequest(t, env, "PUT", "/api/v1/releases/"+uploadRelID+"/cover", tinyPNG, "image/png")
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload = %d, want 200", w.Code)
+	}
+
+	w = doGetWithHeaders(t, env, "/api/v1/releases/"+uploadRelID+"/cover",
+		map[string]string{"Range": "bytes=0-9"})
+	if w.Code != http.StatusPartialContent {
+		t.Fatalf("range = %d, want 206", w.Code)
+	}
+	if got := w.Header().Get("Accept-Ranges"); got != "bytes" {
+		t.Errorf("accept-ranges = %q, want bytes", got)
+	}
+	wantRange := "bytes 0-9/" + strconv.Itoa(len(tinyPNG))
+	if got := w.Header().Get("Content-Range"); got != wantRange {
+		t.Errorf("content-range = %q, want %q", got, wantRange)
+	}
+	if !bytes.Equal(w.Body.Bytes(), tinyPNG[:10]) {
+		t.Errorf("range body = %d bytes, want first 10 of cover", w.Body.Len())
+	}
+	if cl := w.Header().Get("Content-Length"); cl != "10" {
+		t.Errorf("content-length = %q, want 10", cl)
+	}
+}
+
+func TestArtistCoverServesRangeFromDisk(t *testing.T) {
+	env := newTestEnv(t)
+	seedUploadRelease(t, env)
+
+	w := doRawRequest(t, env, "PUT", "/api/v1/artists/"+uploadArtistID+"/cover", tinyPNG, "image/png")
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload = %d, want 200", w.Code)
+	}
+
+	w = doGetWithHeaders(t, env, "/api/v1/artists/"+uploadArtistID+"/cover",
+		map[string]string{"Range": "bytes=0-9"})
+	if w.Code != http.StatusPartialContent {
+		t.Fatalf("range = %d, want 206", w.Code)
+	}
+	if !bytes.Equal(w.Body.Bytes(), tinyPNG[:10]) {
+		t.Errorf("range body = %d bytes, want first 10 of photo", w.Body.Len())
+	}
+}
+
+func TestReleaseCoverStaleFileRecovers(t *testing.T) {
+	env := newTestEnv(t)
+	seedUploadRelease(t, env)
+
+	w := doRawRequest(t, env, "PUT", "/api/v1/releases/"+uploadRelID+"/cover", tinyPNG, "image/png")
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload = %d, want 200", w.Code)
+	}
+
+	entries, err := os.ReadDir(env.coverDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("cover dir = %v, %v, want 1 file", entries, err)
+	}
+	if err := os.Remove(filepath.Join(env.coverDir, entries[0].Name())); err != nil {
+		t.Fatalf("remove cover file = %v", err)
+	}
+
+	// Missing bytes must not 500: the stale row is dropped and the
+	// request falls through to a refetch (no fetcher here, so 404).
+	w = doRequest(t, env.router, "GET", "/api/v1/releases/"+uploadRelID+"/cover", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("get with missing file = %d, want 404", w.Code)
+	}
+	if _, err := env.st.GetCover(context.Background(), uploadRelID); !apperrors.Is(err, apperrors.ErrNotFound) {
+		t.Errorf("stale row survives, want it dropped (err=%v)", err)
+	}
+}
+
+func TestArtistCoverStaleFileRecovers(t *testing.T) {
+	env := newTestEnv(t)
+	seedUploadRelease(t, env)
+
+	w := doRawRequest(t, env, "PUT", "/api/v1/artists/"+uploadArtistID+"/cover", tinyPNG, "image/png")
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload = %d, want 200", w.Code)
+	}
+
+	entries, err := os.ReadDir(env.coverDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("cover dir = %v, %v, want 1 file", entries, err)
+	}
+	if err := os.Remove(filepath.Join(env.coverDir, entries[0].Name())); err != nil {
+		t.Fatalf("remove photo file = %v", err)
+	}
+
+	w = doRequest(t, env.router, "GET", "/api/v1/artists/"+uploadArtistID+"/cover", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("get with missing file = %d, want 404", w.Code)
+	}
+	if _, err := env.st.GetArtistCover(context.Background(), uploadArtistID); !apperrors.Is(err, apperrors.ErrNotFound) {
+		t.Errorf("stale row survives, want it dropped (err=%v)", err)
 	}
 }
 

@@ -63,11 +63,46 @@ func coverETag(sizeBytes int64, fetchedAt string) string {
 	return `"` + strconv.FormatInt(sizeBytes, 10) + "-" + fetchedAt + `"`
 }
 
+// serveCoverFile streams a cached cover file from disk with Range support.
+// The row's ETag/If-None-Match check must already have run: this only
+// serves the 200/206 body. It reports whether the file was served; an
+// unserved file means the caller should run its stale-row recovery
+// (missing dir, missing file, non-regular entry). The open is scoped to
+// the cover dir via os.Root so a symlink swapped mid-request cannot
+// redirect the read outside the cache.
+func serveCoverFile(c *gin.Context, coverDir, fullPath, mime string) bool {
+	if coverDir == "" {
+		return false
+	}
+	_, base := filepath.Split(fullPath)
+	if base == "" || base == "." || base == "/" {
+		return false
+	}
+	ro, err := os.OpenRoot(coverDir)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = ro.Close() }()
+	f, err := ro.Open(base)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	c.Header("Content-Type", mime)
+	http.ServeContent(c.Writer, c.Request, "", time.Time{}, f)
+	return true
+}
+
 // serveCover ensures and serves the cached cover bytes for a release with
 // ETag revalidation. The endpoint answers no-cache (store, but revalidate
 // every use) so uploads and refreshes show up without a hard reload; the
 // ETag validator rides on 200 and 304 alike, and even misses carry
-// no-cache so a removed cover never sticks in the browser.
+// no-cache so a removed cover never sticks in the browser. Bodies stream
+// from disk (Range-capable) instead of loading into memory.
 //
 // Fast path: a live cached row serves 304/200 without loading the release
 // (a cover row implies its release exists via FK cascade). The release is
@@ -89,8 +124,7 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 			return
 		}
 		if path, perr := config.CoverPath(h.coverDir, releaseID, row.MIME); perr == nil {
-			if data, rerr := os.ReadFile(path); rerr == nil {
-				c.Data(http.StatusOK, row.MIME, data)
+			if serveCoverFile(c, h.coverDir, path, row.MIME) {
 				return
 			}
 		}
@@ -157,30 +191,27 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 		)
 		return
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		// Row without bytes (deleted/moved data dir): drop the stale row
-		// so the next request retries instead of 500ing forever. Only drop
-		// the row we served: a concurrent upload, refresh, or delete may
-		// have replaced it or recorded a tombstone while we were reading.
-		if cur, gerr := h.st.GetCover(ctx, releaseID); gerr == nil && !cur.Removed &&
-			cur.MIME == row.MIME && cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
-			_ = h.st.DeleteCover(ctx, releaseID)
-		} else if gerr == nil && cur.Removed {
-			h.writeAppError(c, apperrors.ErrNotFound)
-			return
-		} else if apperrors.Is(gerr, apperrors.ErrNotFound) {
-			h.writeAppError(c, apperrors.ErrNotFound)
-			return
-		}
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("cover file=%q read -> %w", releaseID, err)),
-		)
+	if serveCoverFile(c, h.coverDir, path, row.MIME) {
 		return
 	}
-
-	c.Data(http.StatusOK, row.MIME, data)
+	// Row without bytes (deleted/moved data dir): drop the stale row
+	// so the next request retries instead of 500ing forever. Only drop
+	// the row we served: a concurrent upload, refresh, or delete may
+	// have replaced it or recorded a tombstone while we were reading.
+	if cur, gerr := h.st.GetCover(ctx, releaseID); gerr == nil && !cur.Removed &&
+		cur.MIME == row.MIME && cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
+		_ = h.st.DeleteCover(ctx, releaseID)
+	} else if gerr == nil && cur.Removed {
+		h.writeAppError(c, apperrors.ErrNotFound)
+		return
+	} else if apperrors.Is(gerr, apperrors.ErrNotFound) {
+		h.writeAppError(c, apperrors.ErrNotFound)
+		return
+	}
+	h.writeAppError(c, apperrors.Wrap(
+		apperrors.ErrInternal,
+		fmt.Errorf("cover file=%q unreadable", releaseID)),
+	)
 }
 
 // refreshReleaseCover fetches provider art again and swaps the cache only
@@ -644,7 +675,8 @@ func (h *Handler) getArtistCover(c *gin.Context) {
 // with ETag revalidation. The endpoint answers no-cache (store, but
 // revalidate every use) so uploads and refreshes show up without a hard
 // reload; the ETag validator rides on 200 and 304 alike, and even misses
-// carry no-cache so a removed photo never sticks in the browser.
+// carry no-cache so a removed photo never sticks in the browser. Bodies
+// stream from disk (Range-capable) instead of loading into memory.
 //
 // Fast path: a live cached row serves 304/200 without loading the artist
 // (a photo row implies its artist exists via FK cascade). The artist is
@@ -666,8 +698,7 @@ func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 			return
 		}
 		if path, perr := config.ArtistCoverPath(h.coverDir, artistID, row.MIME); perr == nil {
-			if data, rerr := os.ReadFile(path); rerr == nil {
-				c.Data(http.StatusOK, row.MIME, data)
+			if serveCoverFile(c, h.coverDir, path, row.MIME) {
 				return
 			}
 		}
@@ -727,30 +758,27 @@ func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 		)
 		return
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		// Row without bytes (deleted/moved data dir): drop the stale row
-		// so the next request retries instead of 500ing forever. Only drop
-		// the row we served: a concurrent upload, refresh, or delete may
-		// have replaced it or recorded a tombstone while we were reading.
-		if cur, gerr := h.st.GetArtistCover(ctx, artistID); gerr == nil && !cur.Removed &&
-			cur.MIME == row.MIME && cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
-			_ = h.st.DeleteArtistCover(ctx, artistID)
-		} else if gerr == nil && cur.Removed {
-			h.writeAppError(c, apperrors.ErrNotFound)
-			return
-		} else if apperrors.Is(gerr, apperrors.ErrNotFound) {
-			h.writeAppError(c, apperrors.ErrNotFound)
-			return
-		}
-		h.writeAppError(c, apperrors.Wrap(
-			apperrors.ErrInternal,
-			fmt.Errorf("artist cover artist=%q read -> %w", artistID, err)),
-		)
+	if serveCoverFile(c, h.coverDir, path, row.MIME) {
 		return
 	}
-
-	c.Data(http.StatusOK, row.MIME, data)
+	// Row without bytes (deleted/moved data dir): drop the stale row
+	// so the next request retries instead of 500ing forever. Only drop
+	// the row we served: a concurrent upload, refresh, or delete may
+	// have replaced it or recorded a tombstone while we were reading.
+	if cur, gerr := h.st.GetArtistCover(ctx, artistID); gerr == nil && !cur.Removed &&
+		cur.MIME == row.MIME && cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
+		_ = h.st.DeleteArtistCover(ctx, artistID)
+	} else if gerr == nil && cur.Removed {
+		h.writeAppError(c, apperrors.ErrNotFound)
+		return
+	} else if apperrors.Is(gerr, apperrors.ErrNotFound) {
+		h.writeAppError(c, apperrors.ErrNotFound)
+		return
+	}
+	h.writeAppError(c, apperrors.Wrap(
+		apperrors.ErrInternal,
+		fmt.Errorf("artist cover artist=%q unreadable", artistID)),
+	)
 }
 
 // refreshArtistCover fetches the photo again (Deezer, then Wikimedia) and

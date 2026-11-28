@@ -47,7 +47,9 @@ Requests flow: UI or scripts → Gin (`/api/v1`) → handler → store → SQLit
 Handlers do touch the filesystem: link/unlink/refresh handlers move audio
 files (via `internal/library` path building) and rewrite tags and embedded
 covers (via `internal/tags` atomic temp-copy + rename), and cover handlers
-read and write the covers dir. Mutation handlers serialize through
+read and write the covers dir. Image responses stream the cached files
+from disk via `http.ServeContent` (never buffered into memory) with
+`Range` support. Mutation handlers serialize through
 fine-grained locks (per-file, per-release/per-artist cover,
 per-destination) shared with the background queue.
 

@@ -475,12 +475,14 @@ like:
 | POST   | `/releases/:id/cover/refresh`| Re-fetch release cover            |
 | POST   | `/artists/:id/cover/refresh` | Re-fetch artist photo             |
 
-GET responses are raw image bytes with an `image/*` Content-Type, an `ETag`
-of `"<size>-<fetched_at>"`, and `Cache-Control: no-cache`. The browser
-stores the image but revalidates it on every use: send `If-None-Match` with
-that ETag to get `304` when the image is unchanged, or `200` with the new
-bytes after an upload or refresh. Misses (unknown id, no art, removed art)
-also answer `no-cache` so a deleted cover never sticks in the browser. On
+GET responses stream the cached file from disk with an `image/*`
+Content-Type, an `ETag` of `"<size>-<fetched_at>"`, `Cache-Control:
+no-cache`, and `Accept-Ranges: bytes` (`Range` requests answer `206
+Partial Content`). The browser stores the image but revalidates it on
+every use: send `If-None-Match` with that ETag to get `304` when the
+image is unchanged, or `200` with the new bytes after an upload or
+refresh. Misses (unknown id, no art, removed art) also answer `no-cache`
+so a deleted cover never sticks in the browser. On
 a cache miss the cover is fetched (release covers from Cover Art Archive,
 then Deezer and iTunes; artist photos from Deezer, then Wikimedia) and
 cached. When no provider yields usable art the answer is `404` and the
