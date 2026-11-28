@@ -115,8 +115,39 @@ fi
 if [ -z "$DATA_DIR" ] && [ -n "$EXISTING_CONFIG" ]; then
   DATA_DIR="$(dirname "$EXISTING_CONFIG")"
 fi
+# Last resort when no service definition was found: the installer's default,
+# and only when it actually exists. Anything else must be passed explicitly
+# with --data-dir — never guessed.
+if [ -z "$DATA_DIR" ] && [ -d /var/lib/coda ]; then
+  DATA_DIR="/var/lib/coda"
+fi
 if [ -z "$SERVICE_USER" ]; then
   if [ -n "$EXISTING_USER" ]; then SERVICE_USER="$EXISTING_USER"; else SERVICE_USER="coda"; fi
+fi
+
+# Validate the destructive flags before touching anything: a refused flag
+# must never leave a half-removed install behind.
+if [ "$REMOVE_STATE" -eq 1 ]; then
+  [ -n "$DATA_DIR" ] || fail "cannot determine the state dir (no service definition installed and no /var/lib/coda); pass --data-dir DIR"
+  case "$DATA_DIR" in
+  /*) ;;
+  *) fail "--data-dir must be absolute: $DATA_DIR" ;;
+  esac
+  while [ "${DATA_DIR%/}" != "$DATA_DIR" ] && [ "$DATA_DIR" != "/" ]; do
+    DATA_DIR="${DATA_DIR%/}"
+  done
+  case "$DATA_DIR" in
+  /) fail "refusing to delete /" ;;
+  /bin | /boot | /dev | /etc | /home | /lib | /lib64 | /media | /mnt | /opt | /proc | /root | /run | /sbin | /srv | /sys | /tmp | /usr | /var | /var/lib | /var/log)
+    fail "refusing to delete '$DATA_DIR' (a system directory); delete what you need by hand"
+    ;;
+  esac
+fi
+if [ "$REMOVE_USER" -eq 1 ]; then
+  case "$SERVICE_USER" in
+  "") fail "--user must not be empty" ;;
+  root) fail "--user must not be root (will not delete the root user)" ;;
+  esac
 fi
 
 # Stop and disable the service first. The files are removed below even when
@@ -146,20 +177,6 @@ if [ "$INIT" = "systemd" ] && have systemctl; then
 fi
 
 if [ "$REMOVE_STATE" -eq 1 ]; then
-  [ -n "$DATA_DIR" ] || fail "cannot determine the state dir (no service definition installed); pass --data-dir DIR"
-  case "$DATA_DIR" in
-  /*) ;;
-  *) fail "--data-dir must be absolute: $DATA_DIR" ;;
-  esac
-  while [ "${DATA_DIR%/}" != "$DATA_DIR" ] && [ "$DATA_DIR" != "/" ]; do
-    DATA_DIR="${DATA_DIR%/}"
-  done
-  case "$DATA_DIR" in
-  /) fail "refusing to delete /" ;;
-  /bin | /boot | /dev | /etc | /home | /lib | /lib64 | /media | /mnt | /opt | /proc | /root | /run | /sbin | /srv | /sys | /tmp | /usr | /var | /var/lib | /var/log)
-    fail "refusing to delete '$DATA_DIR' (a system directory); delete what you need by hand"
-    ;;
-  esac
   if [ -e "$DATA_DIR" ]; then
     log "removing state dir ${DATA_DIR}..."
     rm -rf "$DATA_DIR" || fail "cannot remove ${DATA_DIR}"
@@ -169,10 +186,6 @@ if [ "$REMOVE_STATE" -eq 1 ]; then
 fi
 
 if [ "$REMOVE_USER" -eq 1 ]; then
-  case "$SERVICE_USER" in
-  "") fail "--user must not be empty" ;;
-  root) fail "--user must not be root (will not delete the root user)" ;;
-  esac
   if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
     log "user ${SERVICE_USER} does not exist; nothing to remove."
   else

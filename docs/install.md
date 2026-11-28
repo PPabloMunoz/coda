@@ -97,9 +97,12 @@ sudo ./scripts/uninstall.sh                              # service + binary; kee
 sudo ./scripts/uninstall.sh --remove-state --remove-user # also delete the state dir and service user
 ```
 
-State and user are kept by default. The script reads both from the
-installed service definition; with no service definition installed, pass
-`--data-dir DIR` / `--user USER` explicitly. Or by hand:
+State and user are kept unless asked for. The script reads both from the
+installed service definition and validates `--remove-state` / `--remove-user`
+before deleting anything, so a refused flag never leaves a half-removed
+install behind. With no service definition installed, the state dir falls
+back to `/var/lib/coda` when it exists — anything else needs `--data-dir DIR`
+passed explicitly (it is never guessed). Or by hand:
 
 ```sh
 sudo systemctl disable --now coda          # or: rc-service coda stop; rc-update del coda
