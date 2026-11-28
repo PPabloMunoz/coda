@@ -23,11 +23,21 @@ const (
 
 	// maxDecodePixels bounds the decoded pixel count before a full
 	// decode, so a crafted small file with huge dimensions cannot blow
-	// up memory. 40MP covers anything a provider serves.
-	maxDecodePixels = 40_000_000
+	// up memory. 20MP is well above the 1200px cache target (a 1200px
+	// image is ~1.4MP) while keeping one RGBA canvas (~80MB at 20MP)
+	// survivable on small hosts. Providers are asked for 1200px
+	// thumbnails first, so normal covers never approach this cap.
+	maxDecodePixels = 20_000_000
 	// maxDecodeSide bounds a single image side for the same reason.
 	maxDecodeSide = 10_000
 )
+
+// decodeSem serializes full image decodes process-wide. The RGBA canvas
+// alone is 4 bytes per pixel (plus the decoded source image), so two
+// concurrent large decodes can exceed a gigabyte; one at a time keeps
+// the peak bounded. Only the full-decode path takes the slot —
+// DecodeConfig and already-small JPEGs never wait on it.
+var decodeSem = make(chan struct{}, 1)
 
 // Normalize decodes data (JPEG, PNG, or WebP), downscales the longest
 // side to MaxCoverDimension, flattens transparency onto white, and
@@ -58,6 +68,13 @@ func Normalize(data []byte) ([]byte, string, error) {
 	if format == "jpeg" && cfg.Width <= MaxCoverDimension && cfg.Height <= MaxCoverDimension {
 		return data, "image/jpeg", nil
 	}
+
+	// One full decode at a time process-wide: the canvas below is 4
+	// bytes/pixel, so concurrent large decodes stack into hundreds of
+	// megabytes. The slot is held across decode, canvas, scale, and
+	// encode so the peak stays to a single image.
+	decodeSem <- struct{}{}
+	defer func() { <-decodeSem }()
 
 	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
