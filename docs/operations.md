@@ -137,6 +137,21 @@ remembered (6h at first, doubling up to 7 days) so pages stop hammering
 providers; refresh endpoints exist per artist, release group and release
 (see [api.md](api.md)) and always fetch immediately, bypassing the wait.
 
+**Cover refresh fails with "An unexpected error occurred".** The API keeps
+that safe message for clients; the server log has the detail. A failed
+provider chain logs one line naming the release/artist, every provider
+tried, and the outcome, for example:
+
+```text
+WARN artwork: release <mbid> ("Artist" - "Album"): CAA: artwork: status 503; Deezer: no match; iTunes: no match in 2.6s
+WARN cover prefetch release "<mbid>": cover fetch release="<mbid>" artist="Artist" album="Album": artwork: status 503
+```
+
+A failed explicit refresh/upload names the release/artist and says whether
+the previous cached art was kept. A missing cached file is recovered
+automatically (the stale row is dropped and the image refetched); normal
+`404` cover misses are logged only when `CODA_DEBUG=1` is enabled.
+
 **HTTP 421 host not allowed.** The `Host` header is not localhost, an IP
 literal, the configured `host`, or a name in `allowed_hosts`. Add the name
 you browse by to `allowed_hosts` in `config.yaml` (or `CODA_ALLOWED_HOSTS`)

@@ -104,6 +104,39 @@ var (
 	errEmptyImage         = errors.New("empty image")
 )
 
+// providerAttempt renders one provider's outcome for the fetch summary log.
+// A miss and an oversized image are control-flow outcomes, not failures, so
+// they stay short; everything else carries its full cause via LogDetail.
+func providerAttempt(provider string, err error) string {
+	switch {
+	case apperrors.Is(err, apperrors.ErrNotFound):
+		return provider + ": no match"
+	case errors.Is(err, errImageTooLarge):
+		return provider + ": image too large"
+	default:
+		return provider + ": " + apperrors.LogDetail(err)
+	}
+}
+
+// fetchSummary logs one line describing every provider tried. It is a warning
+// when the fetch failed (so operators see the attempts without digging through
+// interleaved per-provider lines) and debug when all providers simply had no
+// art, which is a normal miss.
+func (f *Fetcher) fetchSummary(kind, id, artist, album string, attempts []string, started time.Time, failed bool) {
+	label := fmt.Sprintf("%q", artist)
+	if album != "" {
+		label += " - " + fmt.Sprintf("%q", album)
+	}
+	msg := fmt.Sprintf("artwork: %s %s (%s): %s in %s",
+		kind, id, label, strings.Join(attempts, "; "),
+		time.Since(started).Round(time.Millisecond))
+	if failed {
+		f.warnf("%s", msg)
+		return
+	}
+	f.debugf("%s", msg)
+}
+
 // MaxCoverURLLen caps a pasted cover URL at 2 KiB: long enough for any real
 // image link, short enough to stay far under the JSON body cap.
 const MaxCoverURLLen = 2048
@@ -203,6 +236,8 @@ func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) 
 	}
 	defer release()
 	f.debugf("artwork: fetch release %s", releaseMBID)
+	started := time.Now()
+	attempts := make([]string, 0, 3)
 
 	var caaErr, deezerErr, itunesErr error
 	if res, err := f.fetchCAA(ctx, releaseMBID); err == nil {
@@ -210,11 +245,14 @@ func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) 
 		return res, nil
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
 		f.debugf("artwork: no CAA art for release %s", releaseMBID)
+		attempts = append(attempts, providerAttempt("CAA", err))
 	} else if errors.Is(err, errImageTooLarge) {
 		f.debugf("artwork: CAA art for release %s exceeds size limit, trying fallback", releaseMBID)
+		attempts = append(attempts, providerAttempt("CAA", err))
 	} else {
 		caaErr = err
-		f.warnf("artwork: CAA fetch for release %s failed: %v", releaseMBID, err)
+		attempts = append(attempts, providerAttempt("CAA", err))
+		f.warnf("artwork: CAA fetch for release %s failed: %s", releaseMBID, apperrors.LogDetail(err))
 	}
 
 	if res, err := f.fetchDeezer(ctx, artist, album); err == nil {
@@ -222,11 +260,14 @@ func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) 
 		return res, nil
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
 		f.debugf("artwork: no Deezer art for release %s", releaseMBID)
+		attempts = append(attempts, providerAttempt("Deezer", err))
 	} else if errors.Is(err, errImageTooLarge) {
 		f.debugf("artwork: Deezer art for release %s exceeds size limit, trying fallback", releaseMBID)
+		attempts = append(attempts, providerAttempt("Deezer", err))
 	} else {
 		deezerErr = err
-		f.warnf("artwork: Deezer fetch for release %s failed: %v", releaseMBID, err)
+		attempts = append(attempts, providerAttempt("Deezer", err))
+		f.warnf("artwork: Deezer fetch for release %s failed: %s", releaseMBID, apperrors.LogDetail(err))
 	}
 
 	if res, err := f.fetchiTunes(ctx, artist, album); err == nil {
@@ -234,25 +275,29 @@ func (f *Fetcher) Fetch(ctx context.Context, releaseMBID, artist, album string) 
 		return res, nil
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
 		f.debugf("artwork: no iTunes art for release %s", releaseMBID)
+		attempts = append(attempts, providerAttempt("iTunes", err))
 	} else if errors.Is(err, errImageTooLarge) {
 		f.debugf("artwork: iTunes art for release %s exceeds size limit", releaseMBID)
+		attempts = append(attempts, providerAttempt("iTunes", err))
 	} else {
 		itunesErr = err
-		f.warnf("artwork: iTunes fetch for release %s failed: %v", releaseMBID, err)
+		attempts = append(attempts, providerAttempt("iTunes", err))
+		f.warnf("artwork: iTunes fetch for release %s failed: %s", releaseMBID, apperrors.LogDetail(err))
 	}
 
 	// Prefer surfacing a real failure over a miss so callers don't treat an
-	// outage as "no art exists".
-	if caaErr != nil {
+	// outage as "no art exists". The summary line names every provider tried
+	// so an outage is not confused with "nothing matched".
+	failed := caaErr != nil || deezerErr != nil || itunesErr != nil
+	f.fetchSummary("release", releaseMBID, artist, album, attempts, started, failed)
+	switch {
+	case caaErr != nil:
 		return nil, caaErr
-	}
-	if deezerErr != nil {
+	case deezerErr != nil:
 		return nil, deezerErr
-	}
-	if itunesErr != nil {
+	case itunesErr != nil:
 		return nil, itunesErr
 	}
-	f.debugf("artwork: no art for release %s", releaseMBID)
 	return nil, apperrors.ErrNotFound
 }
 
@@ -273,6 +318,8 @@ func (f *Fetcher) FetchArtist(ctx context.Context, artistMBID, artistName string
 	}
 	defer release()
 	f.debugf("artwork: fetch artist %s", artistMBID)
+	started := time.Now()
+	attempts := make([]string, 0, 2)
 
 	var deezerErr, wikiErr error
 	if res, err := f.fetchDeezerArtist(ctx, artistName); err == nil {
@@ -280,11 +327,14 @@ func (f *Fetcher) FetchArtist(ctx context.Context, artistMBID, artistName string
 		return res, nil
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
 		f.debugf("artwork: no Deezer photo for artist %s", artistMBID)
+		attempts = append(attempts, providerAttempt("Deezer", err))
 	} else if errors.Is(err, errImageTooLarge) {
 		f.debugf("artwork: Deezer photo for artist %s exceeds size limit, trying fallback", artistMBID)
+		attempts = append(attempts, providerAttempt("Deezer", err))
 	} else {
 		deezerErr = err
-		f.warnf("artwork: Deezer photo fetch for artist %s failed: %v", artistMBID, err)
+		attempts = append(attempts, providerAttempt("Deezer", err))
+		f.warnf("artwork: Deezer photo fetch for artist %s failed: %s", artistMBID, apperrors.LogDetail(err))
 	}
 
 	if res, err := f.fetchWikimedia(ctx, artistName); err == nil {
@@ -292,20 +342,24 @@ func (f *Fetcher) FetchArtist(ctx context.Context, artistMBID, artistName string
 		return res, nil
 	} else if apperrors.Is(err, apperrors.ErrNotFound) {
 		f.debugf("artwork: no Wikimedia photo for artist %s", artistMBID)
+		attempts = append(attempts, providerAttempt("Wikimedia", err))
 	} else if errors.Is(err, errImageTooLarge) {
 		f.debugf("artwork: Wikimedia photo for artist %s exceeds size limit", artistMBID)
+		attempts = append(attempts, providerAttempt("Wikimedia", err))
 	} else {
 		wikiErr = err
-		f.warnf("artwork: Wikimedia fetch for artist %s failed: %v", artistMBID, err)
+		attempts = append(attempts, providerAttempt("Wikimedia", err))
+		f.warnf("artwork: Wikimedia fetch for artist %s failed: %s", artistMBID, apperrors.LogDetail(err))
 	}
 
-	if deezerErr != nil {
+	failed := deezerErr != nil || wikiErr != nil
+	f.fetchSummary("artist", artistMBID, artistName, "", attempts, started, failed)
+	switch {
+	case deezerErr != nil:
 		return nil, deezerErr
-	}
-	if wikiErr != nil {
+	case wikiErr != nil:
 		return nil, wikiErr
 	}
-	f.debugf("artwork: no photo for artist %s", artistMBID)
 	return nil, apperrors.ErrNotFound
 }
 

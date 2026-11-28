@@ -15,6 +15,12 @@ before upgrading and back up your database (see
   (`http.ServeContent`) instead of loading it into memory, with
   `Accept-Ranges: bytes` and `206 Partial Content` support for `Range`
   requests.
+- Cover and artist-photo failure logs now include the real cause chain
+  instead of only the client-safe message. Failed provider chains log
+  every provider attempted and its outcome, HTTP error lines name the
+  release/artist from the request path, stale-file recovery records what
+  was dropped, and explicit refreshes/uploads/deletes log completion.
+  Normal `404` cover misses now log only at debug level.
 
 ## [0.3.1] - 2026-11-28
 

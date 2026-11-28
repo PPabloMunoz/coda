@@ -59,7 +59,10 @@ All errors are `internal/errors.AppError`. Service code wraps at the
 origin with a stable `Code`; `server/errors.go` maps Code → HTTP status
 (`NOT_FOUND` 404, `ALREADY_EXISTS` 409, `INVALID_ID`/`INVALID_INPUT` 400,
 `MUSICBRAINZ_FAILED` 502, else 500) and returns only the safe `Message`
-to clients. Codes are the API contract — never rename one.
+to clients. Codes are the API contract — never rename one. Server logs
+render the cause chain with `apperrors.LogDetail`; that string is
+log-only and must never be returned to a client (`Error()` remains the
+safe message).
 
 ## Background tasks
 

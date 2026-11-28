@@ -36,7 +36,7 @@ func PruneOrphanCovers(
 			return 0
 		}
 		if log != nil {
-			log.Warnf("cover GC dir %q: %v", coverDir, err)
+			log.Warnf("cover GC dir %q: %s", coverDir, apperrors.LogDetail(err))
 		}
 		return 0
 	}
@@ -99,7 +99,7 @@ func pruneStaleCoverTemp(full string, e os.DirEntry, log *utils.Logger) bool {
 	}
 	if err := os.Remove(full); err != nil {
 		if !os.IsNotExist(err) && log != nil {
-			log.Warnf("cover GC removing stale temp %q: %v", full, err)
+			log.Warnf("cover GC removing stale temp %q: %s", full, apperrors.LogDetail(err))
 		}
 		return false
 	}
@@ -142,7 +142,7 @@ func pruneOrphanReleaseCover(
 		if !strings.EqualFold(ext, "."+want) {
 			if rerr := os.Remove(full); rerr != nil && !os.IsNotExist(rerr) {
 				if log != nil {
-					log.Warnf("cover GC removing %q: %v", full, rerr)
+					log.Warnf("cover GC removing %q: %s", full, apperrors.LogDetail(rerr))
 				}
 				return nil
 			}
@@ -151,7 +151,7 @@ func pruneOrphanReleaseCover(
 		return nil
 	})
 	if err != nil && log != nil {
-		log.Warnf("cover GC release %q: %v", releaseID, err)
+		log.Warnf("cover GC release %q: %s", releaseID, apperrors.LogDetail(err))
 	}
 	return removed
 }
@@ -183,7 +183,7 @@ func pruneOrphanArtistCover(
 		if !strings.EqualFold(ext, "."+want) {
 			if rerr := os.Remove(full); rerr != nil && !os.IsNotExist(rerr) {
 				if log != nil {
-					log.Warnf("cover GC removing %q: %v", full, rerr)
+					log.Warnf("cover GC removing %q: %s", full, apperrors.LogDetail(rerr))
 				}
 				return nil
 			}
@@ -192,7 +192,7 @@ func pruneOrphanArtistCover(
 		return nil
 	})
 	if err != nil && log != nil {
-		log.Warnf("cover GC artist %q: %v", artistID, err)
+		log.Warnf("cover GC artist %q: %s", artistID, apperrors.LogDetail(err))
 	}
 	return removed
 }
@@ -203,7 +203,7 @@ func removeCoverFile(coverDir, releaseID string, log *utils.Logger) {
 	matches, _ := filepath.Glob(filepath.Join(coverDir, releaseID+".*"))
 	for _, m := range matches {
 		if err := os.Remove(m); err != nil && !os.IsNotExist(err) && log != nil {
-			log.Warnf("cover GC removing %q: %v", m, err)
+			log.Warnf("cover GC removing %q: %s", m, apperrors.LogDetail(err))
 		}
 	}
 }
@@ -214,7 +214,7 @@ func removeArtistCoverFile(coverDir, artistID string, log *utils.Logger) {
 	matches, _ := filepath.Glob(filepath.Join(coverDir, "artist-"+artistID+".*"))
 	for _, m := range matches {
 		if err := os.Remove(m); err != nil && !os.IsNotExist(err) && log != nil {
-			log.Warnf("cover GC removing %q: %v", m, err)
+			log.Warnf("cover GC removing %q: %s", m, apperrors.LogDetail(err))
 		}
 	}
 }

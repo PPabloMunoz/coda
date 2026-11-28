@@ -1,6 +1,9 @@
 package errors
 
-import stderrors "errors"
+import (
+	stderrors "errors"
+	"strings"
+)
 
 // AppError is a stable, machine-readable application error with a safe
 // public message and an optional internal cause. The cause is inspectable
@@ -82,4 +85,48 @@ func Get(err error) (*AppError, bool) {
 	}
 	appErr, ok := stderrors.AsType[*AppError](err)
 	return appErr, ok
+}
+
+// LogDetail renders err for server logs: the cause chain behind any AppError,
+// keeping plain fmt wrapping context but dropping the client-safe AppError
+// message. AppError.Error() deliberately hides the cause, so logging err
+// directly says "An unexpected error occurred" and nothing else. Never send
+// this string to a client.
+func LogDetail(err error) string {
+	return logDetail(err, 0)
+}
+
+// logDetail walks AppError causes at most maxLogDetailDepth levels deep so a
+// malformed cycle cannot hang a log line.
+func logDetail(err error, depth int) string {
+	if err == nil {
+		return ""
+	}
+	const maxLogDetailDepth = 16
+	if depth >= maxLogDetailDepth {
+		return err.Error()
+	}
+	appErr, ok := Get(err)
+	if !ok || appErr == nil || appErr.Cause == nil {
+		return err.Error()
+	}
+
+	cause := logDetail(appErr.Cause, depth+1)
+	if err.Error() == appErr.Message {
+		// Direct AppError (or a wrapper with no extra context): the safe
+		// message is generic, so log only the cause.
+		return cause
+	}
+	// A plain fmt wrapper (for example "cover refresh release=..."): keep its
+	// context and replace the embedded safe message with the cause.
+	msg := err.Error()
+	if !strings.HasSuffix(msg, appErr.Message) {
+		return msg + ": " + cause
+	}
+	prefix := strings.TrimSuffix(msg, appErr.Message)
+	prefix = strings.TrimSuffix(prefix, ": ")
+	if prefix == "" {
+		return cause
+	}
+	return prefix + ": " + cause
 }
