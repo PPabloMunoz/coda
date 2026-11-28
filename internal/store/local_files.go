@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
@@ -456,6 +457,12 @@ type AutoLinkCandidate struct {
 // connection is yielded between chunks.
 const syncUpsertBatch = 500
 
+// syncTagReadWorkers bounds parallel tag parses within one chunk. Tag reads
+// run outside any write tx (filesystem + WASM work, one module per call),
+// so a small pool cuts scan time on large libraries while keeping memory
+// bounded to a few files' tags.
+const syncTagReadWorkers = 4
+
 // SyncChunkSize is the walk-streaming chunk size (exported for the runner).
 const SyncChunkSize = syncUpsertBatch
 
@@ -638,7 +645,8 @@ func (st *Store) queryKnownChunk(ctx context.Context, paths []string) (map[strin
 }
 
 // SyncFileChunk upserts one bounded walk chunk: tag reads happen outside any
-// write tx, then one short tx applies batched multi-row upserts. It never
+// write tx (in parallel across a small worker pool), then one short tx
+// applies batched multi-row upserts. It never
 // touches track_id (linking is the auto-link pass's job); it only stores
 // mb_track_id evidence and tags_read_at. Unchanged files (same size+mtime
 // with evidence) skip the tag parse. A failed read preserves the old
@@ -672,8 +680,12 @@ func (st *Store) SyncFileChunk(ctx context.Context, files []ScannedFile, scanSta
 		return SyncStats{}, err
 	}
 
+	// First pass (no I/O): split settled files from files needing a tag
+	// read, so workers only parse what changed.
 	var unchanged, readOK, readFailed []chunkRow
-	for _, f := range files {
+	bases := make([]chunkRow, len(files))
+	toRead := make([]int, 0, len(files))
+	for i, f := range files {
 		select {
 		case <-ctx.Done():
 			return SyncStats{}, ctx.Err()
@@ -681,27 +693,78 @@ func (st *Store) SyncFileChunk(ctx context.Context, files []ScannedFile, scanSta
 		}
 		id := rootIDs[f.LibraryRoot]
 		base := chunkRow{rootID: id, path: f.Path, size: f.SizeBytes, mtime: f.MtimeNs, hint: f.FormatHint}
+		bases[i] = base
 		if prev, ok := known[f.Path]; ok && prev.mtime == f.MtimeNs && prev.size == f.SizeBytes && prev.tagsReadAt != nil {
 			unchanged = append(unchanged, base)
 			stats.Unchanged++
 			continue
 		}
-		t0 := time.Now()
-		snap, rerr := syncReadTags(f.Path)
-		stats.TagReadMs += time.Since(t0).Milliseconds()
-		stats.TagReads++
-		if rerr != nil {
-			st.log.Warnf("scan sync file=%q read tags: %v", f.Path, rerr)
-			stats.Failed = append(stats.Failed, f.Path)
-			readFailed = append(readFailed, base)
-			continue
+		toRead = append(toRead, i)
+	}
+
+	// Second pass: tag reads in parallel. Each read owns its WASM module
+	// and only touches its own result slot; aggregation below stays
+	// sequential so Failed order and logs match a sequential scan.
+	type tagReadOut struct {
+		mb    string
+		err   error
+		durMs int64
+	}
+	outs := make([]tagReadOut, len(files))
+	if len(toRead) > 0 {
+		workers := syncTagReadWorkers
+		if len(toRead) < workers {
+			workers = len(toRead)
 		}
-		if raw := strings.TrimSpace(snap.MBReleaseTrackID); raw != "" {
-			if utils.ValidateMBID(raw) == nil {
-				base.mb = raw
+		jobs := make(chan int)
+		var wg sync.WaitGroup
+		for range workers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for idx := range jobs {
+					t0 := time.Now()
+					snap, rerr := syncReadTags(files[idx].Path)
+					outs[idx].durMs = time.Since(t0).Milliseconds()
+					if rerr != nil {
+						outs[idx].err = rerr
+						continue
+					}
+					if raw := strings.TrimSpace(snap.MBReleaseTrackID); raw != "" {
+						if utils.ValidateMBID(raw) == nil {
+							outs[idx].mb = raw
+						}
+					}
+				}
+			}()
+		}
+	feed:
+		for _, idx := range toRead {
+			select {
+			case <-ctx.Done():
+				break feed
+			case jobs <- idx:
 			}
 		}
-		readOK = append(readOK, base)
+		close(jobs)
+		wg.Wait()
+		if err := ctx.Err(); err != nil {
+			return SyncStats{}, err
+		}
+		for _, idx := range toRead {
+			out := outs[idx]
+			stats.TagReadMs += out.durMs
+			stats.TagReads++
+			base := bases[idx]
+			if out.err != nil {
+				st.log.Warnf("scan sync file=%q read tags: %v", files[idx].Path, out.err)
+				stats.Failed = append(stats.Failed, files[idx].Path)
+				readFailed = append(readFailed, base)
+				continue
+			}
+			base.mb = out.mb
+			readOK = append(readOK, base)
+		}
 	}
 
 	if err := st.upsertChunkTx(ctx, scanStart, unchanged, readOK, readFailed); err != nil {
