@@ -168,6 +168,7 @@ func (st *Store) attachTrackFiles(
 		FROM local_files lf
 		JOIN tracks t ON t.id = lf.track_id
 		WHERE t.release_id = ?
+		  AND lf.root_id IN (SELECT id FROM roots WHERE active = 1)
 		ORDER BY lf.path`,
 		releaseID,
 	)
