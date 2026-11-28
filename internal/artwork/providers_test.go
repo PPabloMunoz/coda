@@ -132,7 +132,7 @@ func TestFetchCAA(t *testing.T) {
 	t.Run("hit", func(t *testing.T) {
 		var gotUA string
 		mux := http.NewServeMux()
-		mux.HandleFunc("/release/"+providerMBID+"/front", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("/release/"+providerMBID+"/front-1200", func(w http.ResponseWriter, r *http.Request) {
 			gotUA = r.Header.Get("User-Agent")
 			servePNG(w, r)
 		})
@@ -161,6 +161,29 @@ func TestFetchCAA(t *testing.T) {
 		}
 		if gotUA != "coda-test" {
 			t.Errorf("User-Agent = %q, want coda-test", gotUA)
+		}
+	})
+
+	t.Run("thumbnail fallback", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/release/"+providerMBID+"/front-1200", func(w http.ResponseWriter, r *http.Request) {
+			// Thumbnail not derived yet: fall back to the original.
+			w.WriteHeader(http.StatusNotFound)
+		})
+		mux.HandleFunc("/release/"+providerMBID+"/front", servePNG)
+		srv := httptest.NewServer(mux)
+		t.Cleanup(srv.Close)
+
+		f, err := New(Config{UserAgent: "coda-test", CAABaseURL: srv.URL})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := f.fetchCAA(ctx, providerMBID)
+		if err != nil {
+			t.Fatalf("fetchCAA fallback = %v", err)
+		}
+		if want := srv.URL + "/release/" + providerMBID + "/front"; res.SourceURL != want {
+			t.Errorf("sourceURL = %q, want %q (fallback original)", res.SourceURL, want)
 		}
 	})
 

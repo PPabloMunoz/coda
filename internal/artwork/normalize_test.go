@@ -3,6 +3,8 @@ package artwork
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -141,11 +143,11 @@ func TestFetchCAANormalizesLargeJPEG(t *testing.T) {
 	smallMBID := "11111111-2222-4333-a444-000000000002"
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/release/"+largeMBID+"/front", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/release/"+largeMBID+"/front-1200", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		_, _ = w.Write(large)
 	})
-	mux.HandleFunc("/release/"+smallMBID+"/front", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/release/"+smallMBID+"/front-1200", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		_, _ = w.Write(small)
 	})
@@ -200,5 +202,41 @@ func TestNormalizeRejectsGarbage(t *testing.T) {
 				t.Error("Normalize = nil, want error")
 			}
 		})
+	}
+}
+
+// largeDimsPNG builds a minimal PNG whose IHDR claims w×h without pixel
+// data: DecodeConfig reads the header, so the pixel cap rejects it before
+// any large allocation happens.
+func largeDimsPNG(w, h int) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A})
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:4], uint32(w))
+	binary.BigEndian.PutUint32(ihdr[4:8], uint32(h))
+	ihdr[8] = 8 // bit depth
+	ihdr[9] = 2 // truecolor
+	writeChunk(&buf, "IHDR", ihdr)
+	return buf.Bytes()
+}
+
+func writeChunk(buf *bytes.Buffer, typ string, data []byte) {
+	var ln [4]byte
+	binary.BigEndian.PutUint32(ln[:], uint32(len(data)))
+	buf.Write(ln[:])
+	buf.WriteString(typ)
+	buf.Write(data)
+	crc := crc32.NewIEEE()
+	crc.Write([]byte(typ))
+	crc.Write(data)
+	var sum [4]byte
+	binary.BigEndian.PutUint32(sum[:], crc.Sum32())
+	buf.Write(sum[:])
+}
+
+func TestNormalizeRejectsOversize(t *testing.T) {
+	// 5000×5001 ≈ 25MP exceeds the 20MP cap with both sides in range.
+	if _, _, err := Normalize(largeDimsPNG(5000, 5001)); err == nil {
+		t.Error("Normalize 25MP = nil, want out-of-range error")
 	}
 }

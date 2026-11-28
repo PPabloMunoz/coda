@@ -44,6 +44,10 @@ before upgrading and back up your database (see
   of detached per-artist worker pools, so imports and scans always jump
   ahead and only one fetch runs at a time. Prefetch tasks are best-effort
   and never persisted; lazy cover `GET`s backfill gaps after a restart.
+- Artwork decoding is serialized process-wide and capped at 20MP, and CAA
+  is asked for the 1200px thumbnail first (falling back to the original),
+  so concurrent large covers can no longer stack hundreds of megabytes of
+  transient decode memory.
 
 ## [0.3.1] - 2026-11-28
 
