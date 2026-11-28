@@ -204,10 +204,16 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 	if artist == "" {
 		artist = tasks.CreditDisplayName(rel.Group.Credit)
 	}
-	row, err := tasks.EnsureCover(ctx, h.st, h.art, h.coverDir, releaseID, artist, rel.Title)
+	row, fetched, err := tasks.EnsureCover(ctx, h.st, h.art, h.coverDir, releaseID, artist, rel.Title)
 	if err != nil {
 		h.writeAppError(c, err)
 		return
+	}
+	if fetched {
+		// Fresh provider art for an already-linked release: queue the
+		// same background re-embed uploads and refreshes use, so the
+		// new cover reaches the audio files without manual action.
+		h.queue.EnqueueEmbedReleaseCover(releaseID)
 	}
 
 	etag := coverETag(row.SizeBytes, row.FetchedAt)

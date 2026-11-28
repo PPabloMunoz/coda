@@ -363,6 +363,27 @@ func (f *Fetcher) FetchArtist(ctx context.Context, artistMBID, artistName string
 	return nil, apperrors.ErrNotFound
 }
 
+// normalizeResult downscales and recompresses provider bytes into the
+// cached form (max 1200px JPEG). A corrupt or absurd image from a
+// provider is that provider's failure, so it wraps as an internal error
+// and the fetch chain falls through to the next provider instead of
+// caching garbage that would then be embedded into the user's files.
+func (f *Fetcher) normalizeResult(source, sourceURL string, body []byte) (*Result, error) {
+	norm, mime, err := Normalize(body)
+	if err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInternal,
+			fmt.Errorf("artwork: normalize %s image: %w", source, err),
+		)
+	}
+	return &Result{
+		Bytes:     norm,
+		MIME:      mime,
+		Source:    source,
+		SourceURL: sourceURL,
+	}, nil
+}
+
 // download GETs url, capping the body at maxBytes, and sniffs the MIME type
 // from magic bytes so an HTML error page never passes as art. Non-200s map
 // to ErrNotFound (404) or a wrapped internal error.
@@ -456,7 +477,7 @@ func (f *Fetcher) FetchURL(ctx context.Context, rawURL string) (*Result, error) 
 		return nil, err
 	}
 	defer release()
-	body, mime, err := f.download(ctx, raw)
+	body, _, err := f.download(ctx, raw)
 	if err != nil {
 		switch {
 		case errors.Is(err, errImageTooLarge):
@@ -484,7 +505,14 @@ func (f *Fetcher) FetchURL(ctx context.Context, rawURL string) (*Result, error) 
 		}
 	}
 	f.debugf("artwork: fetched cover from URL %s", raw)
-	return &Result{Bytes: body, MIME: mime, Source: SourceUpload, SourceURL: raw}, nil
+	norm, mime, err := Normalize(body)
+	if err != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("artwork: cover URL image is not a usable JPEG, PNG, or WebP image"),
+		)
+	}
+	return &Result{Bytes: norm, MIME: mime, Source: SourceUpload, SourceURL: raw}, nil
 }
 
 func (f *Fetcher) warnf(format string, args ...any) {

@@ -15,10 +15,6 @@ import (
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
-// biggerPNG is distinct upload bytes that still sniff as PNG (magic prefix
-// intact), so a successful refresh is observable on disk and in the row.
-var biggerPNG = append(append([]byte(nil), embedPNG...), 0x00)
-
 func newTestFetcher(t *testing.T, baseURL string) *artwork.Fetcher {
 	t.Helper()
 	f, err := artwork.New(artwork.Config{
@@ -40,8 +36,9 @@ func TestRefreshCoverSuccessSwapsCache(t *testing.T) {
 	seedEmbedRelease(t, st)
 	ctx := context.Background()
 
+	oldArt := testJPEG(t, 21)
 	if err := SaveCover(ctx, st, r.coverDir, embedRelID, &artwork.Result{
-		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+		Bytes: oldArt, MIME: "image/jpeg", Source: artwork.SourceUpload,
 	}); err != nil {
 		t.Fatalf("SaveCover = %v", err)
 	}
@@ -53,10 +50,11 @@ func TestRefreshCoverSuccessSwapsCache(t *testing.T) {
 	// lands in a later millisecond so the swap is observable.
 	time.Sleep(5 * time.Millisecond)
 
+	newArt := testJPEG(t, 22)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/release/", func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "image/png")
-		_, _ = w.Write(biggerPNG)
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(newArt)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -75,8 +73,8 @@ func TestRefreshCoverSuccessSwapsCache(t *testing.T) {
 	if row.Removed {
 		t.Error("Removed = true after successful refresh, want false")
 	}
-	if row.SizeBytes != int64(len(biggerPNG)) {
-		t.Errorf("size = %d, want %d", row.SizeBytes, len(biggerPNG))
+	if row.SizeBytes != int64(len(newArt)) {
+		t.Errorf("size = %d, want %d", row.SizeBytes, len(newArt))
 	}
 	if row.FetchedAt == before.FetchedAt {
 		t.Error("fetched_at unchanged after successful refresh")
@@ -89,7 +87,7 @@ func TestRefreshCoverSuccessSwapsCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile = %v", err)
 	}
-	if !bytes.Equal(got, biggerPNG) {
+	if !bytes.Equal(got, newArt) {
 		t.Error("cached bytes are not the refreshed art")
 	}
 }
@@ -100,8 +98,9 @@ func TestRefreshCoverFailureKeepsOldArt(t *testing.T) {
 	seedEmbedRelease(t, st)
 	ctx := context.Background()
 
+	oldArt := testJPEG(t, 23)
 	if err := SaveCover(ctx, st, r.coverDir, embedRelID, &artwork.Result{
-		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+		Bytes: oldArt, MIME: "image/jpeg", Source: artwork.SourceUpload,
 	}); err != nil {
 		t.Fatalf("SaveCover = %v", err)
 	}
@@ -140,7 +139,7 @@ func TestRefreshCoverFailureKeepsOldArt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile after failed refresh = %v (old bytes lost)", err)
 	}
-	if !bytes.Equal(got, embedPNG) {
+	if !bytes.Equal(got, oldArt) {
 		t.Error("cached bytes changed by failed refresh")
 	}
 }
@@ -151,8 +150,9 @@ func TestRefreshCoverNotFoundKeepsOldArt(t *testing.T) {
 	seedEmbedRelease(t, st)
 	ctx := context.Background()
 
+	oldArt := testJPEG(t, 23)
 	if err := SaveCover(ctx, st, r.coverDir, embedRelID, &artwork.Result{
-		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+		Bytes: oldArt, MIME: "image/jpeg", Source: artwork.SourceUpload,
 	}); err != nil {
 		t.Fatalf("SaveCover = %v", err)
 	}
@@ -185,7 +185,7 @@ func TestRefreshCoverNotFoundKeepsOldArt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CoverPath = %v", err)
 	}
-	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, embedPNG) {
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, oldArt) {
 		t.Errorf("cached bytes changed by no-art refresh (err=%v)", err)
 	}
 }
@@ -196,8 +196,9 @@ func TestRefreshCoverClearsTombstone(t *testing.T) {
 	seedEmbedRelease(t, st)
 	ctx := context.Background()
 
+	oldArt := testJPEG(t, 23)
 	if err := SaveCover(ctx, st, r.coverDir, embedRelID, &artwork.Result{
-		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+		Bytes: oldArt, MIME: "image/jpeg", Source: artwork.SourceUpload,
 	}); err != nil {
 		t.Fatalf("SaveCover = %v", err)
 	}
@@ -207,8 +208,8 @@ func TestRefreshCoverClearsTombstone(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/release/", func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "image/png")
-		_, _ = w.Write(biggerPNG)
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(testJPEG(t, 26))
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -232,8 +233,9 @@ func TestRefreshArtistCoverFailureKeepsOldPhoto(t *testing.T) {
 	seedEmbedRelease(t, st)
 	ctx := context.Background()
 
+	oldPhoto := testJPEG(t, 24)
 	if err := SaveArtistCover(ctx, st, r.coverDir, embedArtistID, &artwork.Result{
-		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+		Bytes: oldPhoto, MIME: "image/jpeg", Source: artwork.SourceUpload,
 	}); err != nil {
 		t.Fatalf("SaveArtistCover = %v", err)
 	}
@@ -268,7 +270,7 @@ func TestRefreshArtistCoverFailureKeepsOldPhoto(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ArtistCoverPath = %v", err)
 	}
-	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, embedPNG) {
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, oldPhoto) {
 		t.Errorf("cached photo changed by failed refresh (err=%v)", err)
 	}
 }
@@ -279,8 +281,9 @@ func TestRefreshArtistCoverSuccessSwapsPhoto(t *testing.T) {
 	seedEmbedRelease(t, st)
 	ctx := context.Background()
 
+	oldPhoto := testJPEG(t, 24)
 	if err := SaveArtistCover(ctx, st, r.coverDir, embedArtistID, &artwork.Result{
-		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+		Bytes: oldPhoto, MIME: "image/jpeg", Source: artwork.SourceUpload,
 	}); err != nil {
 		t.Fatalf("SaveArtistCover = %v", err)
 	}
@@ -296,9 +299,10 @@ func TestRefreshArtistCoverSuccessSwapsPhoto(t *testing.T) {
 			`"picture_medium":` + strconv.Quote(pic) + `,` +
 			`"picture":` + strconv.Quote(pic) + `}]}`))
 	})
+	newPhoto := testJPEG(t, 25)
 	mux.HandleFunc("/pic.png", func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "image/png")
-		_, _ = w.Write(biggerPNG)
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(newPhoto)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -321,7 +325,7 @@ func TestRefreshArtistCoverSuccessSwapsPhoto(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ArtistCoverPath = %v", err)
 	}
-	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, biggerPNG) {
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, newPhoto) {
 		t.Errorf("cached photo is not the refreshed art (err=%v)", err)
 	}
 }
@@ -332,8 +336,9 @@ func TestRefreshArtistCoverNotFoundKeepsOldPhoto(t *testing.T) {
 	seedEmbedRelease(t, st)
 	ctx := context.Background()
 
+	oldPhoto := testJPEG(t, 24)
 	if err := SaveArtistCover(ctx, st, r.coverDir, embedArtistID, &artwork.Result{
-		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+		Bytes: oldPhoto, MIME: "image/jpeg", Source: artwork.SourceUpload,
 	}); err != nil {
 		t.Fatalf("SaveArtistCover = %v", err)
 	}

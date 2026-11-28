@@ -6,6 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ppablomunoz/coda/internal/artwork"
@@ -24,6 +28,37 @@ import (
 // tinyPNG is a valid 1x1 PNG; the handler sniffs magic bytes, so the body
 // must be a real image, not arbitrary bytes.
 var tinyPNG = mustDecodeB64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+// tinyJPEG builds a small deterministic JPEG: distinct seeds give distinct
+// bytes, and small JPEGs pass cover normalization unchanged, so plumbing
+// tests can assert exact bytes.
+func tinyJPEG(t *testing.T, seed uint8) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	for y := range 8 {
+		for x := range 8 {
+			img.Set(x, y, color.RGBA{R: seed, G: uint8(x * 32), B: uint8(y * 32), A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatalf("jpeg.Encode = %v", err)
+	}
+	return buf.Bytes()
+}
+
+// assertCoverJPEG checks that served bytes are a JPEG of the expected
+// dimensions — i.e. the cache holds normalized art, not provider bytes.
+func assertCoverJPEG(t *testing.T, data []byte, w, h int) {
+	t.Helper()
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("DecodeConfig = %v", err)
+	}
+	if format != "jpeg" || cfg.Width != w || cfg.Height != h {
+		t.Errorf("served = %s %dx%d, want jpeg %dx%d", format, cfg.Width, cfg.Height, w, h)
+	}
+}
 
 func mustDecodeB64(s string) []byte {
 	b, err := base64.StdEncoding.DecodeString(s)
@@ -106,8 +141,9 @@ func TestUploadReleaseCoverRoundTrip(t *testing.T) {
 	if row["source"] != "upload" {
 		t.Errorf("source = %v, want upload", row["source"])
 	}
-	if row["mime"] != "image/png" {
-		t.Errorf("mime = %v, want image/png", row["mime"])
+	// The PNG upload is normalized to JPEG on save.
+	if row["mime"] != "image/jpeg" {
+		t.Errorf("mime = %v, want image/jpeg (normalized)", row["mime"])
 	}
 	if row["release_id"] != uploadRelID {
 		t.Errorf("release_id = %v, want %q", row["release_id"], uploadRelID)
@@ -117,12 +153,10 @@ func TestUploadReleaseCoverRoundTrip(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("get after upload = %d, want 200", w.Code)
 	}
-	if ct := w.Header().Get("Content-Type"); ct != "image/png" {
-		t.Errorf("content-type = %q, want image/png", ct)
+	if ct := w.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Errorf("content-type = %q, want image/jpeg", ct)
 	}
-	if !bytes.Equal(w.Body.Bytes(), tinyPNG) {
-		t.Errorf("get bytes differ from uploaded (%d vs %d bytes)", w.Body.Len(), len(tinyPNG))
-	}
+	assertCoverJPEG(t, w.Body.Bytes(), 1, 1)
 }
 
 func TestUploadReleaseCoverRejectsNonImage(t *testing.T) {
@@ -189,9 +223,8 @@ func TestUploadArtistCoverRoundTrip(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("get after upload = %d, want 200", w.Code)
 	}
-	if !bytes.Equal(w.Body.Bytes(), tinyPNG) {
-		t.Errorf("get bytes differ from uploaded")
-	}
+	// The PNG upload is normalized to JPEG on save.
+	assertCoverJPEG(t, w.Body.Bytes(), 1, 1)
 }
 
 func TestUploadArtistCoverUnknownArtist(t *testing.T) {
@@ -218,8 +251,9 @@ func doGetWithHeaders(t *testing.T, env *testEnv, path string, headers map[strin
 func TestReleaseCoverRevalidates(t *testing.T) {
 	env := newTestEnv(t)
 	seedUploadRelease(t, env)
+	first := tinyJPEG(t, 31)
 
-	w := doRawRequest(t, env, "PUT", "/api/v1/releases/"+uploadRelID+"/cover", tinyPNG, "image/png")
+	w := doRawRequest(t, env, "PUT", "/api/v1/releases/"+uploadRelID+"/cover", first, "image/jpeg")
 	if w.Code != http.StatusOK {
 		t.Fatalf("upload = %d, want 200", w.Code)
 	}
@@ -253,8 +287,8 @@ func TestReleaseCoverRevalidates(t *testing.T) {
 	}
 
 	// New bytes under the same URL: the old validator no longer matches.
-	bigger := append(append([]byte(nil), tinyPNG...), 0x00)
-	w = doRawRequest(t, env, "PUT", "/api/v1/releases/"+uploadRelID+"/cover", bigger, "image/png")
+	bigger := tinyJPEG(t, 32)
+	w = doRawRequest(t, env, "PUT", "/api/v1/releases/"+uploadRelID+"/cover", bigger, "image/jpeg")
 	if w.Code != http.StatusOK {
 		t.Fatalf("re-upload = %d, want 200", w.Code)
 	}
@@ -301,8 +335,9 @@ func TestArtistCoverRevalidates(t *testing.T) {
 func TestReleaseCoverServesRangeFromDisk(t *testing.T) {
 	env := newTestEnv(t)
 	seedUploadRelease(t, env)
+	cover := tinyJPEG(t, 33)
 
-	w := doRawRequest(t, env, "PUT", "/api/v1/releases/"+uploadRelID+"/cover", tinyPNG, "image/png")
+	w := doRawRequest(t, env, "PUT", "/api/v1/releases/"+uploadRelID+"/cover", cover, "image/jpeg")
 	if w.Code != http.StatusOK {
 		t.Fatalf("upload = %d, want 200", w.Code)
 	}
@@ -315,11 +350,11 @@ func TestReleaseCoverServesRangeFromDisk(t *testing.T) {
 	if got := w.Header().Get("Accept-Ranges"); got != "bytes" {
 		t.Errorf("accept-ranges = %q, want bytes", got)
 	}
-	wantRange := "bytes 0-9/" + strconv.Itoa(len(tinyPNG))
+	wantRange := "bytes 0-9/" + strconv.Itoa(len(cover))
 	if got := w.Header().Get("Content-Range"); got != wantRange {
 		t.Errorf("content-range = %q, want %q", got, wantRange)
 	}
-	if !bytes.Equal(w.Body.Bytes(), tinyPNG[:10]) {
+	if !bytes.Equal(w.Body.Bytes(), cover[:10]) {
 		t.Errorf("range body = %d bytes, want first 10 of cover", w.Body.Len())
 	}
 	if cl := w.Header().Get("Content-Length"); cl != "10" {
@@ -330,8 +365,9 @@ func TestReleaseCoverServesRangeFromDisk(t *testing.T) {
 func TestArtistCoverServesRangeFromDisk(t *testing.T) {
 	env := newTestEnv(t)
 	seedUploadRelease(t, env)
+	photo := tinyJPEG(t, 34)
 
-	w := doRawRequest(t, env, "PUT", "/api/v1/artists/"+uploadArtistID+"/cover", tinyPNG, "image/png")
+	w := doRawRequest(t, env, "PUT", "/api/v1/artists/"+uploadArtistID+"/cover", photo, "image/jpeg")
 	if w.Code != http.StatusOK {
 		t.Fatalf("upload = %d, want 200", w.Code)
 	}
@@ -341,7 +377,7 @@ func TestArtistCoverServesRangeFromDisk(t *testing.T) {
 	if w.Code != http.StatusPartialContent {
 		t.Fatalf("range = %d, want 206", w.Code)
 	}
-	if !bytes.Equal(w.Body.Bytes(), tinyPNG[:10]) {
+	if !bytes.Equal(w.Body.Bytes(), photo[:10]) {
 		t.Errorf("range body = %d bytes, want first 10 of photo", w.Body.Len())
 	}
 }
@@ -573,21 +609,43 @@ func newCoverTestFetcher(t *testing.T, baseURL string) *artwork.Fetcher {
 	return f
 }
 
-func saveServerUploadCover(t *testing.T, env *testEnv) {
+func saveServerUploadCover(t *testing.T, env *testEnv) []byte {
 	t.Helper()
+	cover := tinyJPEG(t, 35)
 	if err := tasks.SaveCover(context.Background(), env.st, env.coverDir, uploadRelID, &artwork.Result{
-		Bytes: tinyPNG, MIME: "image/png", Source: artwork.SourceUpload,
+		Bytes: cover, MIME: "image/jpeg", Source: artwork.SourceUpload,
 	}); err != nil {
 		t.Fatalf("SaveCover = %v", err)
+	}
+	return cover
+}
+
+// TestLazyCoverFetchEnqueuesEmbed: a GET that lazily fetches provider art
+// queues the same background re-embed uploads and refreshes use, so files
+// linked before the art arrived pick it up without manual action.
+func TestLazyCoverFetchEnqueuesEmbed(t *testing.T) {
+	var calls atomic.Int64
+	srv := countingCoverServer(t, &calls, true)
+	env := newTestEnvWithArt(t, newCoverTestFetcher(t, srv.URL))
+	seedUploadRelease(t, env)
+
+	w := doRequest(t, env.router, "GET", "/api/v1/releases/"+uploadRelID+"/cover", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get = %d %q, want 200", w.Code, w.Body.String())
+	}
+	// Provider PNG arrives normalized.
+	assertCoverJPEG(t, w.Body.Bytes(), 1, 1)
+	if !env.queue.HasTask(tasks.TaskEmbedReleaseCover, uploadRelID) {
+		t.Error("no embed task queued after lazy cover fetch")
 	}
 }
 
 func TestRefreshReleaseCoverSuccessSwapsAndEnqueuesEmbed(t *testing.T) {
-	bigger := append(append([]byte(nil), tinyPNG...), 0x00)
+	refreshed := tinyJPEG(t, 36)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/release/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/png")
-		_, _ = w.Write(bigger)
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(refreshed)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -613,7 +671,7 @@ func TestRefreshReleaseCoverSuccessSwapsAndEnqueuesEmbed(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("get after refresh = %d, want 200", w.Code)
 	}
-	if !bytes.Equal(w.Body.Bytes(), bigger) {
+	if !bytes.Equal(w.Body.Bytes(), refreshed) {
 		t.Error("get bytes are not the refreshed art")
 	}
 	if !env.queue.HasTask(tasks.TaskEmbedReleaseCover, uploadRelID) {
@@ -631,7 +689,7 @@ func TestRefreshReleaseCoverFailureKeepsOldArt(t *testing.T) {
 
 	env := newTestEnvWithArt(t, newCoverTestFetcher(t, srv.URL))
 	seedUploadRelease(t, env)
-	saveServerUploadCover(t, env)
+	old := saveServerUploadCover(t, env)
 
 	w := doRequest(t, env.router, "POST", "/api/v1/releases/"+uploadRelID+"/cover/refresh", nil)
 	if w.Code != http.StatusInternalServerError {
@@ -642,7 +700,7 @@ func TestRefreshReleaseCoverFailureKeepsOldArt(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("get after failed refresh = %d, want 200 (old art survives)", w.Code)
 	}
-	if !bytes.Equal(w.Body.Bytes(), tinyPNG) {
+	if !bytes.Equal(w.Body.Bytes(), old) {
 		t.Error("get bytes changed by failed refresh")
 	}
 	w = doRequest(t, env.router, "GET", "/api/v1/releases/"+uploadRelID+"/cover/meta", nil)
@@ -667,7 +725,7 @@ func TestRefreshReleaseCoverNotFoundKeepsOldArt(t *testing.T) {
 
 	env := newTestEnvWithArt(t, newCoverTestFetcher(t, srv.URL))
 	seedUploadRelease(t, env)
-	saveServerUploadCover(t, env)
+	old := saveServerUploadCover(t, env)
 
 	w := doRequest(t, env.router, "POST", "/api/v1/releases/"+uploadRelID+"/cover/refresh", nil)
 	if w.Code != http.StatusNotFound {
@@ -678,7 +736,7 @@ func TestRefreshReleaseCoverNotFoundKeepsOldArt(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("get after no-art refresh = %d, want 200 (old art survives)", w.Code)
 	}
-	if !bytes.Equal(w.Body.Bytes(), tinyPNG) {
+	if !bytes.Equal(w.Body.Bytes(), old) {
 		t.Error("get bytes changed by no-art refresh")
 	}
 	if env.queue.HasTask(tasks.TaskEmbedReleaseCover, uploadRelID) {
@@ -696,8 +754,9 @@ func TestRefreshArtistCoverFailureKeepsOldPhoto(t *testing.T) {
 
 	env := newTestEnvWithArt(t, newCoverTestFetcher(t, srv.URL))
 	seedUploadRelease(t, env)
+	old := tinyJPEG(t, 37)
 
-	w := doRawRequest(t, env, "PUT", "/api/v1/artists/"+uploadArtistID+"/cover", tinyPNG, "image/png")
+	w := doRawRequest(t, env, "PUT", "/api/v1/artists/"+uploadArtistID+"/cover", old, "image/jpeg")
 	if w.Code != http.StatusOK {
 		t.Fatalf("upload = %d, want 200", w.Code)
 	}
@@ -711,7 +770,7 @@ func TestRefreshArtistCoverFailureKeepsOldPhoto(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("get after failed refresh = %d, want 200 (old photo survives)", w.Code)
 	}
-	if !bytes.Equal(w.Body.Bytes(), tinyPNG) {
+	if !bytes.Equal(w.Body.Bytes(), old) {
 		t.Error("get bytes changed by failed refresh")
 	}
 }

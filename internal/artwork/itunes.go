@@ -130,17 +130,12 @@ func (f *Fetcher) fetchiTunes(ctx context.Context, artist, album string) (*Resul
 	// Already-600 URLs are untouched by the replacement.
 	coverURL = strings.Replace(coverURL, "100x100", "600x600", 1)
 
-	body, mime, err := f.download(ctx, coverURL)
+	body, _, err := f.download(ctx, coverURL)
 	if err != nil {
 		if apperrors.Is(err, apperrors.ErrNotFound) {
 			return nil, apperrors.ErrNotFound
 		}
 		return nil, err
 	}
-	return &Result{
-		Bytes:     body,
-		MIME:      mime,
-		Source:    SourceiTunes,
-		SourceURL: coverURL,
-	}, nil
+	return f.normalizeResult(SourceiTunes, coverURL, body)
 }

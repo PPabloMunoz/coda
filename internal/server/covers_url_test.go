@@ -64,9 +64,8 @@ func TestUploadReleaseCoverFromURLRoundTrip(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("get after url upload = %d, want 200", w.Code)
 	}
-	if !bytes.Equal(w.Body.Bytes(), tinyPNG) {
-		t.Error("get bytes differ from URL-fetched image")
-	}
+	// The fetched PNG is normalized to JPEG on save.
+	assertCoverJPEG(t, w.Body.Bytes(), 1, 1)
 }
 
 func TestUploadArtistCoverFromURLRoundTrip(t *testing.T) {
@@ -94,9 +93,8 @@ func TestUploadArtistCoverFromURLRoundTrip(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("get after url upload = %d, want 200", w.Code)
 	}
-	if !bytes.Equal(w.Body.Bytes(), tinyPNG) {
-		t.Error("get bytes differ from URL-fetched image")
-	}
+	// The fetched PNG is normalized to JPEG on save.
+	assertCoverJPEG(t, w.Body.Bytes(), 1, 1)
 }
 
 func TestUploadCoverFromURLUnknownEntity(t *testing.T) {

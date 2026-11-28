@@ -86,14 +86,15 @@ func TestPruneOrphanCovers(t *testing.T) {
 		t.Fatalf("MarkCoverRemoved = %v", err)
 	}
 
-	// Stale sibling: row is png, jpg sibling goes, png stays.
+	// Stale sibling: the row is a normalized JPEG, a planted png sibling
+	// from an earlier MIME goes, the jpg stays.
 	seedGCRel(t, st, "c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c0c0", gcGroupStale, gcStaleRel)
 	if err := SaveCover(ctx, st, coverDir, gcStaleRel, &artwork.Result{
 		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
 	}); err != nil {
 		t.Fatalf("SaveCover stale = %v", err)
 	}
-	writeGCFile(t, coverDir, gcStaleRel+".jpg")
+	writeGCFile(t, coverDir, gcStaleRel+".png")
 
 	// Live artist photo stays.
 	if err := st.CreateArtist(ctx, store.Artist{ID: gcLiveArtist, Name: "Live"}); err != nil {
@@ -144,9 +145,9 @@ func TestPruneOrphanCovers(t *testing.T) {
 	}
 
 	kept := []string{
-		gcLiveRel + ".png",
-		gcStaleRel + ".png",
-		"artist-" + gcLiveArtist + ".png",
+		gcLiveRel + ".jpg",
+		gcStaleRel + ".jpg",
+		"artist-" + gcLiveArtist + ".jpg",
 		"notes.txt",
 		"not-a-uuid.jpg",
 		".coda-cover-" + gcLiveRel + "-fresh.tmp",
@@ -158,10 +159,10 @@ func TestPruneOrphanCovers(t *testing.T) {
 	}
 	gone := []string{
 		gcOrphanRel + ".jpg",
-		gcTombRel + ".png",
-		gcStaleRel + ".jpg",
+		gcTombRel + ".jpg",
+		gcStaleRel + ".png",
 		"artist-" + gcOrphanArt + ".jpg",
-		"artist-" + gcTombArtist + ".png",
+		"artist-" + gcTombArtist + ".jpg",
 		".coda-cover-" + gcLiveRel + "-old.tmp",
 	}
 	for _, k := range gone {

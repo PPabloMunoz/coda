@@ -9,6 +9,17 @@ before upgrading and back up your database (see
 
 ## [Unreleased]
 
+### Added
+
+- Cover and artist-photo images are normalized on save: every provider
+  image, URL import, and file upload is downscaled to 1200px on the longest
+  side (never upscaled), flattened onto white, and stored as JPEG quality
+  85. The cache holds one small JPEG per release/artist instead of the
+  multi-MB provider original, and the same compact bytes are embedded as
+  the front cover of linked files. A `GET` that lazily fetches provider art
+  for an already-linked release now queues the background re-embed, so the
+  new cover reaches the audio files without a manual refresh.
+
 ### Changed
 
 - Cover and artist-photo responses stream the cached file from disk

@@ -140,41 +140,45 @@ func recordArtistCoverMiss(ctx context.Context, st *store.Store, art *artwork.Fe
 }
 
 // EnsureCover returns the cached cover row for a release, fetching it first
-// when missing. A user-removed cover (tombstone) answers ErrNotFound without
-// fetching, so a deletion is never undone by a later GET; a recorded
-// provider miss does the same until its retry time. Concurrent misses
-// for one release collapse into a single fetch: the first caller fetches,
-// waiters re-check the cache and reuse its row. Artist/album feed the Deezer
-// text fallback only. A nil fetcher disables fetching (tests): the existing
-// cache still serves, a miss answers ErrNotFound.
+// when missing. The fetched flag reports whether this call fetched and
+// saved fresh bytes (vs serving the cache): callers queue the background
+// re-embed only on a fresh fetch, so linked files pick up art that arrived
+// after they were linked. A user-removed cover (tombstone) answers
+// ErrNotFound without fetching, so a deletion is never undone by a later
+// GET; a recorded provider miss does the same until its retry time.
+// Concurrent misses for one release collapse into a single fetch: the first
+// caller fetches, waiters re-check the cache and reuse its row.
+// Artist/album feed the Deezer text fallback only. A nil fetcher disables
+// fetching (tests): the existing cache still serves, a miss answers
+// ErrNotFound.
 func EnsureCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 	coverDir, releaseID, artist, album string,
-) (*store.CoverParams, error) {
+) (row *store.CoverParams, fetched bool, err error) {
 	if row, err := st.GetCover(ctx, releaseID); err == nil {
 		if row.Removed {
-			return nil, apperrors.ErrNotFound
+			return nil, false, apperrors.ErrNotFound
 		}
 		if art != nil {
 			art.Debugf("artwork: cover cache hit release %s", releaseID)
 		}
-		return row, nil
+		return row, false, nil
 	} else if !apperrors.Is(err, apperrors.ErrNotFound) {
-		return nil, err
+		return nil, false, err
 	}
 	if active, err := isReleaseMissActive(ctx, st, releaseID); err != nil {
-		return nil, err
+		return nil, false, err
 	} else if active {
 		if art != nil {
 			art.Debugf("artwork: cover miss cache hit release %s", releaseID)
 		}
-		return nil, apperrors.ErrNotFound
+		return nil, false, apperrors.ErrNotFound
 	}
 	if art == nil {
-		return nil, apperrors.ErrNotFound
+		return nil, false, apperrors.ErrNotFound
 	}
 
-	var row *store.CoverParams
-	err := WithReleaseCoverLock(releaseID, func() error {
+	var didFetch bool
+	err = WithReleaseCoverLock(releaseID, func() error {
 		// Another caller may have fetched while we waited.
 		if cached, err := st.GetCover(ctx, releaseID); err == nil {
 			if cached.Removed {
@@ -209,12 +213,13 @@ func EnsureCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 		if err != nil {
 			return fmt.Errorf("cover reload release=%q: %w", releaseID, err)
 		}
+		didFetch = true
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return row, nil
+	return row, didFetch, nil
 }
 
 // RefreshCover fetches provider art first and only swaps the cache on
@@ -267,8 +272,10 @@ func RefreshCover(ctx context.Context, st *store.Store, art *artwork.Fetcher,
 
 // SaveCover writes fetched bytes to the cache dir (atomic tmp+rename,
 // dropping stale sibling extensions from an earlier MIME) and upserts the
-// DB row. A DB failure removes the just-written file so rows and bytes
-// never drift apart.
+// DB row. Bytes are normalized first (max 1200px JPEG), so raw uploads —
+// the one path that bypasses the fetcher — land in the same compact form
+// as provider art; fetcher results pass through unchanged. A DB failure
+// removes the just-written file so rows and bytes never drift apart.
 func SaveCover(ctx context.Context, st *store.Store, coverDir, releaseID string,
 	res *artwork.Result,
 ) error {
@@ -278,6 +285,14 @@ func SaveCover(ctx context.Context, st *store.Store, coverDir, releaseID string,
 			fmt.Errorf("artwork: empty result"),
 		)
 	}
+	norm, mime, err := artwork.Normalize(res.Bytes)
+	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("artwork: unusable cover image: %w", err),
+		)
+	}
+	res = &artwork.Result{Bytes: norm, MIME: mime, Source: res.Source, SourceURL: res.SourceURL}
 	path, err := config.CoverPath(coverDir, releaseID, res.MIME)
 	if err != nil {
 		return apperrors.Wrap(
@@ -391,7 +406,7 @@ func (r *Runner) prefetchCoversBG(ctx context.Context, artistID string) {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				if _, err := EnsureCover(ctx, r.st, r.art, r.coverDir, j.releaseID, j.artist, j.title); err != nil {
+				if _, _, err := EnsureCover(ctx, r.st, r.art, r.coverDir, j.releaseID, j.artist, j.title); err != nil {
 					if !apperrors.Is(err, apperrors.ErrNotFound) {
 						r.log.Warnf("cover prefetch release %q: %s", j.releaseID, apperrors.LogDetail(err))
 					}

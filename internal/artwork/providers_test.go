@@ -1,9 +1,11 @@
 package artwork
 
 import (
+	"bytes"
 	"context"
 	stderrors "errors"
 	"fmt"
+	"image"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -148,8 +150,14 @@ func TestFetchCAA(t *testing.T) {
 		if res.Source != SourceCoverArtArchive {
 			t.Errorf("source = %q, want %q", res.Source, SourceCoverArtArchive)
 		}
-		if res.MIME != "image/png" {
-			t.Errorf("mime = %q, want image/png", res.MIME)
+		// The served PNG is normalized to JPEG on fetch.
+		if res.MIME != "image/jpeg" {
+			t.Errorf("mime = %q, want image/jpeg (normalized)", res.MIME)
+		}
+		if cfg, format, err := image.DecodeConfig(bytes.NewReader(res.Bytes)); err != nil {
+			t.Errorf("DecodeConfig = %v", err)
+		} else if format != "jpeg" || cfg.Width != 1 || cfg.Height != 1 {
+			t.Errorf("normalized = %s %dx%d, want jpeg 1x1", format, cfg.Width, cfg.Height)
 		}
 		if gotUA != "coda-test" {
 			t.Errorf("User-Agent = %q, want coda-test", gotUA)

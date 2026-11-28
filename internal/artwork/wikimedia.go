@@ -138,17 +138,12 @@ func (f *Fetcher) fetchWikimedia(ctx context.Context, name string) (*Result, err
 		return nil, apperrors.ErrNotFound
 	}
 
-	body, mime, err := f.download(ctx, photoURL)
+	body, _, err := f.download(ctx, photoURL)
 	if err != nil {
 		if apperrors.Is(err, apperrors.ErrNotFound) {
 			return nil, apperrors.ErrNotFound
 		}
 		return nil, err
 	}
-	return &Result{
-		Bytes:     body,
-		MIME:      mime,
-		Source:    SourceWikimedia,
-		SourceURL: photoURL,
-	}, nil
+	return f.normalizeResult(SourceWikimedia, photoURL, body)
 }

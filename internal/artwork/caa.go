@@ -12,17 +12,12 @@ import (
 // untouched so their Code survives for errors.Is.
 func (f *Fetcher) fetchCAA(ctx context.Context, releaseMBID string) (*Result, error) {
 	url := f.caaBase + "/release/" + releaseMBID + "/front"
-	body, mime, err := f.download(ctx, url)
+	body, _, err := f.download(ctx, url)
 	if err != nil {
 		if apperrors.Is(err, apperrors.ErrNotFound) {
 			return nil, apperrors.ErrNotFound
 		}
 		return nil, err
 	}
-	return &Result{
-		Bytes:     body,
-		MIME:      mime,
-		Source:    SourceCoverArtArchive,
-		SourceURL: url,
-	}, nil
+	return f.normalizeResult(SourceCoverArtArchive, url, body)
 }

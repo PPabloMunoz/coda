@@ -23,6 +23,8 @@ writes only standard frames — see the full key list in
   trigger a rescan in Navidrome so it picks up the new paths and tags.
 - **Covers are embedded.** Linked files carry the release cover as their
   front cover picture, so Navidrome shows art without sidecar files.
+  Covers are cached as 1200px JPEGs, so the embedded art is a few hundred
+  KB per file, not the multi-MB original.
   Uploading a new release cover in Coda re-embeds it into the release's
   linked files in the background (and removing a cover clears it), as does
   a successful cover refresh — rescan Navidrome afterwards to pick up the

@@ -8,6 +8,7 @@ require (
 	github.com/pressly/goose/v3 v3.30.1
 	go.senan.xyz/taglib v0.15.0
 	go.yaml.in/yaml/v4 v4.0.0
+	golang.org/x/image v0.48.0
 	golang.org/x/sys v0.50.0
 	golang.org/x/text v0.44.0
 	golang.org/x/time v0.16.0

@@ -160,7 +160,11 @@ Hover the hero image on the artist page or the release-group page for the
 refresh, upload and remove actions (icon-only; always visible on touch
 screens). A small badge over the image shows where the cached art came
 from ("From Cover Art Archive", "Uploaded", …). Upload replaces Coda's
-cached image with a JPEG, PNG, or WebP file up to 15MB. No library rescan
+cached image with a JPEG, PNG, or WebP file up to 15MB. Every image —
+provider art, URL import, or file upload — is normalized before caching:
+downscaled to 1200px on the longest side, transparency flattened onto
+white, and stored as JPEG quality 85, so the cache and the front cover
+embedded into linked files stay small. No library rescan
 is needed: the next cover GET serves the upload, with `"source": "upload"`
 in the metadata row.
 
