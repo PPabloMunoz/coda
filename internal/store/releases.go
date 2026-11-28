@@ -10,23 +10,34 @@ import (
 	apperrors "github.com/ppablomunoz/coda/internal/errors"
 )
 
-// GetReleaseOfGroup returns the single release kept for a release-group.
-// One release per group is enforced by the UNIQUE on releases.release_group_id.
-func (st *Store) GetReleaseOfGroup(ctx context.Context,
-	groupID string, includeFiles bool,
-) (*FullReleaseParams, error) {
+// GetReleaseIDOfGroup returns the id of the single release kept for a
+// release-group without loading tracks or credits. Cover serving uses it
+// to avoid a full release load on every image request.
+func (st *Store) GetReleaseIDOfGroup(ctx context.Context, groupID string) (string, error) {
 	var releaseID string
 	if err := st.db.QueryRowContext(ctx,
 		`SELECT id FROM releases WHERE release_group_id = ?`,
 		groupID,
 	).Scan(&releaseID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, apperrors.ErrNotFound
+			return "", apperrors.ErrNotFound
 		}
-		return nil, apperrors.Wrap(
+		return "", apperrors.Wrap(
 			apperrors.ErrInternal,
 			fmt.Errorf("query release by group: %w", err),
 		)
+	}
+	return releaseID, nil
+}
+
+// GetReleaseOfGroup returns the single release kept for a release-group.
+// One release per group is enforced by the UNIQUE on releases.release_group_id.
+func (st *Store) GetReleaseOfGroup(ctx context.Context,
+	groupID string, includeFiles bool,
+) (*FullReleaseParams, error) {
+	releaseID, err := st.GetReleaseIDOfGroup(ctx, groupID)
+	if err != nil {
+		return nil, err
 	}
 
 	return st.GetRelease(ctx, releaseID, includeFiles)

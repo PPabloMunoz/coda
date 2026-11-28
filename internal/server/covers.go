@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -46,12 +47,20 @@ func (h *Handler) getReleaseGroupCover(c *gin.Context) {
 		return
 	}
 
-	release, err := h.st.GetReleaseOfGroup(ctx, groupID, false)
+	// Lightweight id lookup: serveCover's fast path serves cached bytes
+	// without loading the release, so a full GetReleaseOfGroup here would
+	// defeat it on every image request.
+	releaseID, err := h.st.GetReleaseIDOfGroup(ctx, groupID)
 	if err != nil {
 		h.writeAppError(c, err)
 		return
 	}
-	h.serveCover(c, release.ID)
+	h.serveCover(c, releaseID)
+}
+
+// coverETag builds the validator for a cached cover row.
+func coverETag(sizeBytes int64, fetchedAt string) string {
+	return `"` + strconv.FormatInt(sizeBytes, 10) + "-" + fetchedAt + `"`
 }
 
 // serveCover ensures and serves the cached cover bytes for a release with
@@ -59,9 +68,63 @@ func (h *Handler) getReleaseGroupCover(c *gin.Context) {
 // every use) so uploads and refreshes show up without a hard reload; the
 // ETag validator rides on 200 and 304 alike, and even misses carry
 // no-cache so a removed cover never sticks in the browser.
+//
+// Fast path: a live cached row serves 304/200 without loading the release
+// (a cover row implies its release exists via FK cascade). The release is
+// only loaded on a cache miss or stale bytes, when artist/title are needed
+// to fetch providers.
 func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 	c.Header("Cache-Control", "no-cache")
 	ctx := c.Request.Context()
+
+	if row, err := h.st.GetCover(ctx, releaseID); err == nil {
+		if row.Removed {
+			h.writeAppError(c, apperrors.ErrNotFound)
+			return
+		}
+		etag := coverETag(row.SizeBytes, row.FetchedAt)
+		c.Header("ETag", etag)
+		if c.GetHeader("If-None-Match") == etag {
+			c.Status(http.StatusNotModified)
+			return
+		}
+		if path, perr := config.CoverPath(h.coverDir, releaseID, row.MIME); perr == nil {
+			if data, rerr := os.ReadFile(path); rerr == nil {
+				c.Data(http.StatusOK, row.MIME, data)
+				return
+			}
+		}
+		// Cached row without readable bytes (deleted/moved data dir):
+		// drop the stale row so the slow path below refetches instead
+		// of 500ing. Only drop the row we checked: a concurrent
+		// upload, refresh, or delete may have replaced it or recorded
+		// a tombstone while we were reading.
+		if cur, gerr := h.st.GetCover(ctx, releaseID); gerr == nil && !cur.Removed &&
+			cur.MIME == row.MIME && cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
+			_ = h.st.DeleteCover(ctx, releaseID)
+		} else if gerr == nil && cur.Removed {
+			h.writeAppError(c, apperrors.ErrNotFound)
+			return
+		} else if gerr != nil && !apperrors.Is(gerr, apperrors.ErrNotFound) {
+			h.writeAppError(c, gerr)
+			return
+		}
+	} else if apperrors.Is(err, apperrors.ErrNotFound) {
+		// No cached row: an active negative-cache entry is a 404
+		// without loading the release or touching providers.
+		if m, merr := h.st.GetReleaseCoverMiss(ctx, releaseID); merr == nil {
+			if m.Active(time.Now()) {
+				h.writeAppError(c, apperrors.ErrNotFound)
+				return
+			}
+		} else if !apperrors.Is(merr, apperrors.ErrNotFound) {
+			h.writeAppError(c, merr)
+			return
+		}
+	} else {
+		h.writeAppError(c, err)
+		return
+	}
 
 	rel, err := h.st.GetRelease(ctx, releaseID, false)
 	if err != nil {
@@ -79,7 +142,7 @@ func (h *Handler) serveCover(c *gin.Context, releaseID string) {
 		return
 	}
 
-	etag := `"` + strconv.FormatInt(row.SizeBytes, 10) + "-" + row.FetchedAt + `"`
+	etag := coverETag(row.SizeBytes, row.FetchedAt)
 	c.Header("ETag", etag)
 	if c.GetHeader("If-None-Match") == etag {
 		c.Status(http.StatusNotModified)
@@ -582,9 +645,60 @@ func (h *Handler) getArtistCover(c *gin.Context) {
 // revalidate every use) so uploads and refreshes show up without a hard
 // reload; the ETag validator rides on 200 and 304 alike, and even misses
 // carry no-cache so a removed photo never sticks in the browser.
+//
+// Fast path: a live cached row serves 304/200 without loading the artist
+// (a photo row implies its artist exists via FK cascade). The artist is
+// only loaded on a cache miss or stale bytes, when the name is needed to
+// fetch providers.
 func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 	c.Header("Cache-Control", "no-cache")
 	ctx := c.Request.Context()
+
+	if row, err := h.st.GetArtistCover(ctx, artistID); err == nil {
+		if row.Removed {
+			h.writeAppError(c, apperrors.ErrNotFound)
+			return
+		}
+		etag := coverETag(row.SizeBytes, row.FetchedAt)
+		c.Header("ETag", etag)
+		if c.GetHeader("If-None-Match") == etag {
+			c.Status(http.StatusNotModified)
+			return
+		}
+		if path, perr := config.ArtistCoverPath(h.coverDir, artistID, row.MIME); perr == nil {
+			if data, rerr := os.ReadFile(path); rerr == nil {
+				c.Data(http.StatusOK, row.MIME, data)
+				return
+			}
+		}
+		// Cached row without readable bytes: drop the stale row so the
+		// slow path below refetches. Only drop the row we checked.
+		if cur, gerr := h.st.GetArtistCover(ctx, artistID); gerr == nil && !cur.Removed &&
+			cur.MIME == row.MIME && cur.SizeBytes == row.SizeBytes && cur.FetchedAt == row.FetchedAt {
+			_ = h.st.DeleteArtistCover(ctx, artistID)
+		} else if gerr == nil && cur.Removed {
+			h.writeAppError(c, apperrors.ErrNotFound)
+			return
+		} else if gerr != nil && !apperrors.Is(gerr, apperrors.ErrNotFound) {
+			h.writeAppError(c, gerr)
+			return
+		}
+	} else if apperrors.Is(err, apperrors.ErrNotFound) {
+		// No cached photo: an active negative-cache entry is a 404
+		// without loading the artist or touching providers.
+		if m, merr := h.st.GetArtistCoverMiss(ctx, artistID); merr == nil {
+			if m.Active(time.Now()) {
+				h.writeAppError(c, apperrors.ErrNotFound)
+				return
+			}
+		} else if !apperrors.Is(merr, apperrors.ErrNotFound) {
+			h.writeAppError(c, merr)
+			return
+		}
+	} else {
+		h.writeAppError(c, err)
+		return
+	}
 
 	artist, err := h.st.GetArtistByID(ctx, artistID)
 	if err != nil {
@@ -598,7 +712,7 @@ func (h *Handler) serveArtistCover(c *gin.Context, artistID string) {
 		return
 	}
 
-	etag := `"` + strconv.FormatInt(row.SizeBytes, 10) + "-" + row.FetchedAt + `"`
+	etag := coverETag(row.SizeBytes, row.FetchedAt)
 	c.Header("ETag", etag)
 	if c.GetHeader("If-None-Match") == etag {
 		c.Status(http.StatusNotModified)
