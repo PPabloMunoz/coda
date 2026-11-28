@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"io"
 	"os"
 	"path/filepath"
@@ -42,6 +45,24 @@ func TestEnqueueEmbedReleaseCoverDedup(t *testing.T) {
 
 // tinyPNG is a valid 1x1 PNG for embed round-trips.
 var embedPNG = mustDecodeB64Embed("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+// testJPEG builds a small deterministic JPEG: distinct seeds give distinct
+// bytes, and small JPEGs pass cover normalization unchanged, so plumbing
+// tests can save exact bytes and assert them back on disk and in files.
+func testJPEG(t *testing.T, seed uint8) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	for y := range 8 {
+		for x := range 8 {
+			img.Set(x, y, color.RGBA{R: seed, G: uint8(x * 32), B: uint8(y * 32), A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatalf("jpeg.Encode = %v", err)
+	}
+	return buf.Bytes()
+}
 
 func mustDecodeB64Embed(s string) []byte {
 	b, err := base64.StdEncoding.DecodeString(s)
@@ -170,8 +191,9 @@ func TestEmbedReleaseCoverRoundTrip(t *testing.T) {
 	seedEmbedRelease(t, st)
 	path := syncAndLinkWav(t, st, root, "song.wav")
 
+	coverArt := testJPEG(t, 11)
 	if err := SaveCover(context.Background(), st, r.coverDir, embedRelID, &artwork.Result{
-		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+		Bytes: coverArt, MIME: "image/jpeg", Source: artwork.SourceUpload,
 	}); err != nil {
 		t.Fatalf("SaveCover = %v", err)
 	}
@@ -182,8 +204,8 @@ func TestEmbedReleaseCoverRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadImage = %v", err)
 	}
-	if !bytes.Equal(got, embedPNG) {
-		t.Errorf("embedded bytes differ (%d vs %d bytes)", len(got), len(embedPNG))
+	if !bytes.Equal(got, coverArt) {
+		t.Errorf("embedded bytes differ (%d vs %d bytes)", len(got), len(coverArt))
 	}
 }
 
@@ -267,7 +289,7 @@ func TestEnsureCoverRemovedNeverFetches(t *testing.T) {
 	// The cached row exists but must not be served, and no fetch happens
 	// (nil fetcher would answer NotFound for a plain miss too — the point
 	// is the live row is suppressed).
-	if _, err := EnsureCover(context.Background(), st, nil, r.coverDir, embedRelID, "", ""); !apperrors.Is(err, apperrors.ErrNotFound) {
+	if _, _, err := EnsureCover(context.Background(), st, nil, r.coverDir, embedRelID, "", ""); !apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Errorf("EnsureCover removed = %v, want NOT_FOUND", err)
 	}
 }
@@ -303,13 +325,14 @@ func TestClearReleaseCoverRoundTrip(t *testing.T) {
 	r, st := newEmbedRunner(t, root)
 	seedEmbedRelease(t, st)
 	path := syncAndLinkWav(t, st, root, "song.wav")
+	coverArt := testJPEG(t, 12)
 	if err := SaveCover(context.Background(), st, r.coverDir, embedRelID, &artwork.Result{
-		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+		Bytes: coverArt, MIME: "image/jpeg", Source: artwork.SourceUpload,
 	}); err != nil {
 		t.Fatalf("SaveCover = %v", err)
 	}
 	r.embedReleaseCover(context.Background(), embedRelID)
-	if got, err := taglib.ReadImage(path); err != nil || !bytes.Equal(got, embedPNG) {
+	if got, err := taglib.ReadImage(path); err != nil || !bytes.Equal(got, coverArt) {
 		t.Fatalf("embedded setup = %d bytes, %v; want uploaded art", len(got), err)
 	}
 
@@ -334,8 +357,9 @@ func TestClearReleaseCoverSkipsLiveCover(t *testing.T) {
 	r, st := newEmbedRunner(t, root)
 	seedEmbedRelease(t, st)
 	path := syncAndLinkWav(t, st, root, "song.wav")
+	coverArt := testJPEG(t, 13)
 	if err := SaveCover(context.Background(), st, r.coverDir, embedRelID, &artwork.Result{
-		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+		Bytes: coverArt, MIME: "image/jpeg", Source: artwork.SourceUpload,
 	}); err != nil {
 		t.Fatalf("SaveCover = %v", err)
 	}
@@ -347,13 +371,13 @@ func TestClearReleaseCoverSkipsLiveCover(t *testing.T) {
 		t.Fatalf("MarkCoverRemoved = %v", err)
 	}
 	if err := SaveCover(context.Background(), st, r.coverDir, embedRelID, &artwork.Result{
-		Bytes: embedPNG, MIME: "image/png", Source: artwork.SourceUpload,
+		Bytes: coverArt, MIME: "image/jpeg", Source: artwork.SourceUpload,
 	}); err != nil {
 		t.Fatalf("re-SaveCover = %v", err)
 	}
 	r.clearReleaseCover(context.Background(), embedRelID)
 
-	if got, err := taglib.ReadImage(path); err != nil || !bytes.Equal(got, embedPNG) {
+	if got, err := taglib.ReadImage(path); err != nil || !bytes.Equal(got, coverArt) {
 		t.Errorf("embedded bytes after skipped clear differ, err=%v", err)
 	}
 }

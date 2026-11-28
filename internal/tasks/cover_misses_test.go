@@ -72,7 +72,7 @@ func TestEnsureCoverNegativeCache(t *testing.T) {
 	srv := missTestServer(t, &calls, "notFound")
 	art := newTestFetcher(t, srv.URL)
 
-	if _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); !apperrors.Is(err, apperrors.ErrNotFound) {
+	if _, _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); !apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Fatalf("first EnsureCover = %v, want NOT_FOUND", err)
 	}
 	first := calls.Load()
@@ -88,7 +88,7 @@ func TestEnsureCoverNegativeCache(t *testing.T) {
 	}
 
 	// A known miss makes no provider calls until the TTL expires.
-	if _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); !apperrors.Is(err, apperrors.ErrNotFound) {
+	if _, _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); !apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Fatalf("second EnsureCover = %v, want NOT_FOUND", err)
 	}
 	if got := calls.Load(); got != first {
@@ -100,7 +100,7 @@ func TestEnsureCoverNegativeCache(t *testing.T) {
 	if err := st.UpsertReleaseCoverMiss(ctx, embedRelID, 1, past, past); err != nil {
 		t.Fatalf("expire miss = %v", err)
 	}
-	if _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); !apperrors.Is(err, apperrors.ErrNotFound) {
+	if _, _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); !apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Fatalf("EnsureCover after expiry = %v, want NOT_FOUND", err)
 	}
 	if got := calls.Load(); got <= first {
@@ -125,14 +125,14 @@ func TestEnsureCoverTransientNotCached(t *testing.T) {
 	srv := missTestServer(t, &calls, "fail")
 	art := newTestFetcher(t, srv.URL)
 
-	if _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); apperrors.Is(err, apperrors.ErrNotFound) {
+	if _, _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Fatalf("EnsureCover on outage = NOT_FOUND, want upstream error")
 	}
 	if _, err := st.GetReleaseCoverMiss(ctx, embedRelID); !apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Errorf("miss recorded on transient failure, want none")
 	}
 	first := calls.Load()
-	if _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); apperrors.Is(err, apperrors.ErrNotFound) {
+	if _, _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Fatalf("second EnsureCover on outage = NOT_FOUND, want upstream error")
 	}
 	if got := calls.Load(); got <= first {
@@ -159,7 +159,7 @@ func TestEnsureCoverTombstoneBeatsMiss(t *testing.T) {
 	if err := st.MarkCoverRemoved(ctx, embedRelID); err != nil {
 		t.Fatalf("MarkCoverRemoved = %v", err)
 	}
-	if _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); !apperrors.Is(err, apperrors.ErrNotFound) {
+	if _, _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); !apperrors.Is(err, apperrors.ErrNotFound) {
 		t.Fatalf("EnsureCover removed = %v, want NOT_FOUND", err)
 	}
 	if got := calls.Load(); got != 0 {
@@ -172,7 +172,7 @@ func TestEnsureCoverTombstoneBeatsMiss(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveCover = %v", err)
 	}
-	if _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); err != nil {
+	if _, _, err := EnsureCover(ctx, st, art, r.coverDir, embedRelID, "Embed Artist", "Embed Release"); err != nil {
 		t.Fatalf("EnsureCover after upload = %v, want row", err)
 	}
 	if got := calls.Load(); got != 0 {

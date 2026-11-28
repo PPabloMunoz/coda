@@ -19,7 +19,7 @@ Inside it:
 | `coda.db-wal`, `coda.db-shm` | WAL sidecars; part of the database while running |
 | `coda.db.lock` | single-instance lock file; a second process on the same data dir exits immediately instead of starting |
 | `coda.db.bak-*` | automatic pre-migration snapshots (`bak-<schema-version>`); see below |
-| `covers/` | cached release covers (`<release-mbid>.jpg|png|webp`) and artist photos (`artist-<mbid>.*`) |
+| `covers/` | cached release covers (`<release-mbid>.jpg`, normalized to 1200px JPEG) and artist photos (`artist-<mbid>.jpg`) |
 | `config.yaml` | config (created on first start; the installer runs env-only) |
 
 Everything is disposable except the database and covers: files are read

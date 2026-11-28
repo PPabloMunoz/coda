@@ -156,19 +156,14 @@ func (f *Fetcher) fetchDeezer(ctx context.Context, artist, album string) (*Resul
 		return nil, apperrors.ErrNotFound
 	}
 
-	body, mime, err := f.download(ctx, coverURL)
+	body, _, err := f.download(ctx, coverURL)
 	if err != nil {
 		if apperrors.Is(err, apperrors.ErrNotFound) {
 			return nil, apperrors.ErrNotFound
 		}
 		return nil, err
 	}
-	return &Result{
-		Bytes:     body,
-		MIME:      mime,
-		Source:    SourceDeezer,
-		SourceURL: coverURL,
-	}, nil
+	return f.normalizeResult(SourceDeezer, coverURL, body)
 }
 
 // deezerArtistSearch is the subset of /search/artist we read.
@@ -265,17 +260,12 @@ func (f *Fetcher) fetchDeezerArtist(ctx context.Context, name string) (*Result, 
 		return nil, apperrors.ErrNotFound
 	}
 
-	body, mime, err := f.download(ctx, pictureURL)
+	body, _, err := f.download(ctx, pictureURL)
 	if err != nil {
 		if apperrors.Is(err, apperrors.ErrNotFound) {
 			return nil, apperrors.ErrNotFound
 		}
 		return nil, err
 	}
-	return &Result{
-		Bytes:     body,
-		MIME:      mime,
-		Source:    SourceDeezer,
-		SourceURL: pictureURL,
-	}, nil
+	return f.normalizeResult(SourceDeezer, pictureURL, body)
 }

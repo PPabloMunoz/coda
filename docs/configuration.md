@@ -145,8 +145,8 @@ overrides the corresponding setting.
 | Installer | `/var/lib/coda/config.yaml` | `/var/lib/coda/` |
 
 The cover cache is a `covers/` directory next to the database file: one
-file per release (`<release-mbid>.jpg|png|webp`) plus `artist-<mbid>.*`
-photos. Files orphaned by deletes are swept on the next scan. The
+normalized JPEG per release (`<release-mbid>.jpg`, max 1200px) plus
+`artist-<mbid>.jpg` photos. Files orphaned by deletes are swept on the next scan. The
 `coda.db.lock` single-instance lock and automatic `coda.db.bak-*`
 pre-migration snapshots live next to the database too. See
 [operations.md](operations.md) for backups.

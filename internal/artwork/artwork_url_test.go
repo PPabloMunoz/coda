@@ -1,7 +1,9 @@
 package artwork
 
 import (
+	"bytes"
 	"context"
+	"image"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,11 +37,16 @@ func TestFetchURLRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchURL = %v, want success", err)
 	}
-	if string(res.Bytes) != string(testPNG) {
-		t.Error("bytes differ from served image")
+	// The served PNG is normalized to a small JPEG on fetch.
+	if res.MIME != "image/jpeg" {
+		t.Errorf("MIME = %q, want image/jpeg (normalized)", res.MIME)
 	}
-	if res.MIME != "image/png" {
-		t.Errorf("MIME = %q, want image/png", res.MIME)
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(res.Bytes))
+	if err != nil {
+		t.Fatalf("DecodeConfig = %v", err)
+	}
+	if format != "jpeg" || cfg.Width != 1 || cfg.Height != 1 {
+		t.Errorf("normalized = %s %dx%d, want jpeg 1x1", format, cfg.Width, cfg.Height)
 	}
 	if res.Source != SourceUpload {
 		t.Errorf("Source = %q, want upload", res.Source)

@@ -136,7 +136,10 @@ func RefreshArtistCover(ctx context.Context, st *store.Store, art *artwork.Fetch
 }
 
 // SaveArtistCover writes fetched bytes to the cache dir (atomic tmp+rename,
-// dropping stale sibling extensions) and upserts the DB row.
+// dropping stale sibling extensions) and upserts the DB row. Bytes are
+// normalized first (max 1200px JPEG), so raw uploads — the one path that
+// bypasses the fetcher — land in the same compact form as provider
+// photos; fetcher results pass through unchanged.
 func SaveArtistCover(ctx context.Context, st *store.Store, coverDir, artistID string,
 	res *artwork.Result,
 ) error {
@@ -146,6 +149,14 @@ func SaveArtistCover(ctx context.Context, st *store.Store, coverDir, artistID st
 			fmt.Errorf("artwork: empty result"),
 		)
 	}
+	norm, mime, err := artwork.Normalize(res.Bytes)
+	if err != nil {
+		return apperrors.Wrap(
+			apperrors.ErrInvalidInput,
+			fmt.Errorf("artwork: unusable artist photo: %w", err),
+		)
+	}
+	res = &artwork.Result{Bytes: norm, MIME: mime, Source: res.Source, SourceURL: res.SourceURL}
 	path, err := config.ArtistCoverPath(coverDir, artistID, res.MIME)
 	if err != nil {
 		return apperrors.Wrap(
