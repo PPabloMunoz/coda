@@ -33,6 +33,13 @@ before upgrading and back up your database (see
   was dropped, and explicit refreshes/uploads/deletes log completion.
   Normal `404` cover misses now log only at debug level.
 
+### Fixed
+
+- Discography imports stream one MusicBrainz page at a time (one
+  transaction per page) instead of retaining the whole discography in
+  memory, so large discographies stay memory-flat. Earlier pages stay
+  saved when a later page fails; the next refresh fills the gap.
+
 ## [0.3.1] - 2026-11-28
 
 ### Added

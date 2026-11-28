@@ -11,27 +11,39 @@ import (
 	"github.com/ppablomunoz/coda/internal/utils"
 )
 
-// importDiscography fetches official albums/EPs/singles with tracks from MusicBrainz
-// and saves them, logging fetch vs save time.
+// importDiscography streams official albums/EPs/singles with tracks from
+// MusicBrainz one page at a time, saving each page in its own transaction
+// so a large discography never sits fully in memory. Earlier pages stay
+// saved when a later page fails; the next refresh upserts the missing
+// pages. Logs per-page progress and totals.
 func (r *Runner) importDiscography(ctx context.Context, id string) error {
-	mbStart := time.Now()
-	mbReleases, err := r.mb.GetReleasesWithTracksByArtist(ctx, id)
+	start := time.Now()
+	pages := 0
+	total := 0
+	var saveTook time.Duration
+
+	err := r.mb.BrowseReleasesByArtist(ctx, id, func(page []musicbrainz.Release) error {
+		releases := make([]store.FullReleaseParams, 0, len(page))
+		for _, rel := range page {
+			releases = append(releases, FullReleaseFromMB(rel))
+		}
+
+		saveStart := time.Now()
+		if err := r.st.SaveArtistDiscography(ctx, id, releases); err != nil {
+			return err
+		}
+		saveTook += time.Since(saveStart)
+		pages++
+		total += len(releases)
+		return nil
+	})
 	if err != nil {
+		r.log.Warnf("discography for %q stopped after %d pages (%d releases saved): %v",
+			id, pages, total, err)
 		return fmt.Errorf("discography releases: %w", err)
 	}
-	mbTook := time.Since(mbStart)
-
-	releases := []store.FullReleaseParams{}
-	for _, r := range mbReleases {
-		releases = append(releases, FullReleaseFromMB(r))
-	}
-
-	saveStart := time.Now()
-	if err := r.st.SaveArtistDiscography(ctx, id, releases); err != nil {
-		return err
-	}
-	r.log.Infof("discography for %q: musicbrainz %s, save %s (%d releases)",
-		id, mbTook.Round(time.Millisecond), time.Since(saveStart).Round(time.Millisecond), len(releases))
+	r.log.Infof("discography for %q: %d pages, %d releases, save %s, total %s",
+		id, pages, total, saveTook.Round(time.Millisecond), time.Since(start).Round(time.Millisecond))
 
 	return nil
 }
