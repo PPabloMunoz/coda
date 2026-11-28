@@ -89,7 +89,7 @@ use it to validate a new setup or container environment:
 
 ```sh
 $ coda --check-config
-coda 0.3.0
+coda 0.3.1
 host: 127.0.0.1
 port: 8687
 listen: 127.0.0.1:8687
@@ -117,7 +117,7 @@ The compose file reads:
 | `DATA_DIR` | `./data` | host path mounted at `/data` (config, DB, covers) |
 | `CODA_PORT` | `8687` | host-side port of the published mapping |
 | `CODA_BIND_ADDR` | `127.0.0.1` | host interface to publish on; `0.0.0.0` exposes Coda to the LAN (trusted networks only — Coda has no authentication) |
-| `CODA_TAG` | `latest` | image tag (`latest`, `0.3`, `0.3.0`) |
+| `CODA_TAG` | `latest` | image tag (`latest`, `0.3`, `0.3.1`) |
 
 ## Installer flags
 
