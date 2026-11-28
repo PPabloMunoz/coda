@@ -30,7 +30,7 @@ fully static (`CGO_ENABLED=0`).
 | `internal/artwork` | cover/artist-photo fetcher with provider fallback, shared concurrency cap and per-fetch deadline |
 | `internal/musicbrainz` | rate-limited WS/2 client (~1 req/1.1s, retries, mandatory User-Agent) |
 | `internal/server` | Gin handlers, `/api/v1` routes, embedded UI serving, error→status mapping |
-| `internal/tasks` | serial FIFO task queue: scans, imports, prunes; scheduler ticks |
+| `internal/tasks` | serial FIFO task queue: scans, imports, prunes, cover prefetch; scheduler ticks |
 | `internal/utils` | tiny logger, MBID validation, path sanitization |
 | `web/` | vanilla HTML/CSS/JS, embedded via `go:embed` (see `web/README.md`) |
 
@@ -66,13 +66,11 @@ safe message).
 
 ## Background tasks
 
-A serial FIFO queue runs every queued job (scans, imports, prunes, file
-jobs) one at a time — but it is not the only thing running. Cover prefetch
-runs detached from the queue (a 4-worker pool per artist plus the artist
-photo, derived from the runner context so it survives the finished import
-task but cancels on shutdown; `Start` waits for it), and HTTP handlers run
-concurrently with the queue (cover lazy-fetch, uploads, link/unlink tag
-writes). Serialization across queue and handlers comes from fine-grained
+A serial FIFO queue runs every queued job one at a time: scans, imports,
+prunes, file jobs, and low-priority cover prefetch (one short task per
+release plus one per artist photo; normal tasks always jump ahead, so user
+work never waits behind art). HTTP handlers run concurrently with the queue
+(cover lazy-fetch, uploads, link/unlink tag writes). Serialization across queue and handlers comes from fine-grained
 locks: per-file operation locks, per-release/per-artist cover locks, and
 per-destination move locks. The scheduler ticks: scan every 6h,
 orphan-credit prune (`prune-artists`) every 24h, `delete-inactive-artists`
@@ -91,9 +89,8 @@ relinks) are durable: they persist in `artist_imports` and
 resumes an interrupted import instead of resetting its status to idle,
 and a promised cover embed still reaches linked files. Scans and periodic
 prunes are not persisted — the startup scan and the scheduler re-enqueue
-them. Detached cover prefetch work derives from the runner context and
-`Start` waits for it, so shutdown cancels it within the grace period and
-the store closes only after background workers stop.
+them. Cover prefetch tasks are best-effort and never persisted: a restart
+drops them and lazy cover GETs backfill the gaps.
 
 ## Scan pipeline
 

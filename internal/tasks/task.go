@@ -10,6 +10,8 @@ const (
 	TaskEmbedReleaseCover     TaskKey = "embed-release-cover"
 	TaskClearReleaseCover     TaskKey = "clear-release-cover"
 	TaskRelinkRelease         TaskKey = "relink-release"
+	TaskPrefetchCover         TaskKey = "prefetch-cover"
+	TaskPrefetchArtistCover   TaskKey = "prefetch-artist-cover"
 )
 
 type Task struct {

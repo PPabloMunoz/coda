@@ -39,6 +39,11 @@ before upgrading and back up your database (see
   transaction per page) instead of retaining the whole discography in
   memory, so large discographies stay memory-flat. Earlier pages stay
   saved when a later page fails; the next refresh fills the gap.
+- Cover and artist-photo prefetch runs through the serial task queue at
+  low priority (one short task per release plus the artist photo) instead
+  of detached per-artist worker pools, so imports and scans always jump
+  ahead and only one fetch runs at a time. Prefetch tasks are best-effort
+  and never persisted; lazy cover `GET`s backfill gaps after a restart.
 
 ## [0.3.1] - 2026-11-28
 

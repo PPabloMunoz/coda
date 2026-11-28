@@ -180,3 +180,62 @@ func TestWithCoverLockSerializesSameRelease(t *testing.T) {
 			counter, goroutines*perGoroutine)
 	}
 }
+
+func TestPrefetchTasksAreLowPriority(t *testing.T) {
+	q := NewQueue(nil, nil)
+	q.EnqueuePrefetchCover("rel-1")
+	q.EnqueuePrefetchArtistCover("artist-1")
+	q.EnqueueScan(false)
+	q.EnqueueRefreshArtist("artist-2")
+
+	// Normal tasks first, in FIFO order; prefetch drains afterwards.
+	want := []Task{
+		{Key: TaskScanRoots},
+		{Key: TaskImportDiscography, ID: "artist-2"},
+		{Key: TaskPrefetchCover, ID: "rel-1"},
+		{Key: TaskPrefetchArtistCover, ID: "artist-1"},
+	}
+	for i, w := range want {
+		got, ok := q.pop()
+		if !ok {
+			t.Fatalf("pop %d: queue empty, want %s %q", i, w.Key, w.ID)
+		}
+		if got.Key != w.Key || got.ID != w.ID {
+			t.Errorf("task[%d] = %s %q, want %s %q", i, got.Key, got.ID, w.Key, w.ID)
+		}
+	}
+	if _, ok := q.pop(); ok {
+		t.Error("pop after drain returned a task, want empty")
+	}
+}
+
+func TestPrefetchDedupe(t *testing.T) {
+	q := NewQueue(nil, nil)
+	q.EnqueuePrefetchCover("rel-1")
+	q.EnqueuePrefetchCover("rel-1")
+	q.EnqueuePrefetchArtistCover("a1")
+	q.EnqueuePrefetchArtistCover("a1")
+	q.EnqueuePrefetchCover("rel-2")
+
+	if !q.HasTask(TaskPrefetchCover, "rel-1") {
+		t.Error("HasTask prefetch cover rel-1 = false, want true")
+	}
+	q.mu.Lock()
+	low := append([]Task(nil), q.low...)
+	q.mu.Unlock()
+	count := map[Task]int{}
+	for _, item := range low {
+		count[item]++
+	}
+	if count[Task{Key: TaskPrefetchCover, ID: "rel-1"}] != 1 {
+		t.Errorf("prefetch cover rel-1 queued %d times, want 1 (dedup)",
+			count[Task{Key: TaskPrefetchCover, ID: "rel-1"}])
+	}
+	if count[Task{Key: TaskPrefetchArtistCover, ID: "a1"}] != 1 {
+		t.Errorf("prefetch artist a1 queued %d times, want 1 (dedup)",
+			count[Task{Key: TaskPrefetchArtistCover, ID: "a1"}])
+	}
+	if len(low) != 3 {
+		t.Errorf("low queue = %d tasks, want 3 (rel-1 + a1 + rel-2)", len(low))
+	}
+}

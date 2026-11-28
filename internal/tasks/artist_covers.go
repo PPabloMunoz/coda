@@ -221,11 +221,8 @@ func SaveArtistCover(ctx context.Context, st *store.Store, coverDir, artistID st
 }
 
 // prefetchArtistCover caches one photo for the imported artist. Best-effort:
-// failures only log, so art never blocks or fails an import.
-// prefetchArtistCover fetches the artist photo when missing. Best-effort:
-// failures only log, and gaps backfill lazily on first GET .../cover.
-// The caller derives ctx from the runner with its own bound — the run
-// survives the finished import task but still gives up on shutdown.
+// failures only log, so art never blocks or fails an import. Gaps backfill
+// lazily on first GET .../cover. Runs as a low-priority serial queue task.
 func (r *Runner) prefetchArtistCover(ctx context.Context, artistID, artistName string) {
 	if r.art == nil {
 		return
